@@ -1,0 +1,24 @@
+[app]
+locale = "en"
+
+[video]
+theme = "midnight"
+
+[selection]
+# Empty lists select every calendar year and month. CLI flags override these.
+years = []
+months = []
+activity_types = ["Ride", "Pedalada"]
+# Uncomment either boundary for an inclusive interval.
+# start_date = "2024-02-01"
+# end_date = "2024-12-31"
+
+[paths]
+bulk_dir = "bulk_download"
+catalog_db = "data/catalog/activities.duckdb"
+streams_dir = "data/streams"
+outputs_dir = "outputs"
+
+[privacy]
+# Optional local CSV columns: latitude,longitude,radius_km
+# zones_file = "config/privacy_zones.csv"

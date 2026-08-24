@@ -1,0 +1,47 @@
+# Private activity data and local configuration
+bulk_download/
+rides/
+data/
+outputs/
+config/config.toml
+config/privacy_zones.csv
+*.fit
+*.fit.gz
+*.tcx
+*.tcx.gz
+*.gpx
+*.gpx.gz
+*.sqlite
+*.duckdb
+*.parquet
+*.log
+token*.json
+.env
+.env.*
+
+# Local agent metadata
+AGENTS.md
+.agents/
+.codex/
+
+# Python
+.venv/
+.venvs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Node and renderer caches
+node_modules/
+renderer/out/
+renderer/.remotion/
+
+# Editors and operating systems
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~

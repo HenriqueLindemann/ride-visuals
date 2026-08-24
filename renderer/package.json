@@ -1,0 +1,21 @@
+{
+  "name": "@ride-visuals/renderer",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "node node_modules/@remotion/cli/remotion-cli.js bundle src/index.ts",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.515",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.515",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3"
+  }
+}
