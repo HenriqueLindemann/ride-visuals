@@ -13,6 +13,7 @@ export const telemetryPointSchema = z.object({
   temperatureC: z.number().nullable(),
   gradePct: z.number().nullable(),
   bearingDeg: z.number().nullable(),
+  cumulativeElevationGainM: z.number().nullable().optional(),
 });
 
 export const activityRenderSpecSchema = z.object({
@@ -50,6 +51,7 @@ export const activityRenderSpecSchema = z.object({
     speedWindowSeconds: z.number().positive(),
   }),
   points: z.array(telemetryPointSchema).min(2),
+  show_progress_bar: z.boolean().optional(),
 });
 
 export type TelemetryPoint = z.infer<typeof telemetryPointSchema>;

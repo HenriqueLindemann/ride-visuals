@@ -99,25 +99,30 @@ def _json_number(value: float) -> float | None:
     return None if not math.isfinite(float(value)) else round(float(value), 6)
 
 
-def _records(timeline: TelemetryTimeline, indices: Iterable[int]) -> list[dict[str, Any]]:
+def _records(
+    timeline: TelemetryTimeline,
+    indices: Iterable[int],
+    cumulative_elevation_gain_m: np.ndarray | None = None,
+) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for index in indices:
-        result.append(
-            {
-                "elapsedSeconds": _json_number(timeline.elapsed_s[index]),
-                "lat": _json_number(timeline.lat[index]),
-                "lon": _json_number(timeline.lon[index]),
-                "altitudeM": _json_number(timeline.altitude_m[index]),
-                "distanceKm": _json_number(timeline.distance_km[index]),
-                "speedKmh": _json_number(timeline.speed_kmh[index]),
-                "speed3MinKmh": _json_number(timeline.speed_3min_kmh[index]),
-                "heartRateBpm": _json_number(timeline.heart_rate_bpm[index]),
-                "powerWatts": _json_number(timeline.power_watts[index]),
-                "temperatureC": _json_number(timeline.temperature_c[index]),
-                "gradePct": _json_number(timeline.grade_pct[index]),
-                "bearingDeg": _json_number(timeline.bearing_deg[index]),
-            }
-        )
+        record = {
+            "elapsedSeconds": _json_number(timeline.elapsed_s[index]),
+            "lat": _json_number(timeline.lat[index]),
+            "lon": _json_number(timeline.lon[index]),
+            "altitudeM": _json_number(timeline.altitude_m[index]),
+            "distanceKm": _json_number(timeline.distance_km[index]),
+            "speedKmh": _json_number(timeline.speed_kmh[index]),
+            "speed3MinKmh": _json_number(timeline.speed_3min_kmh[index]),
+            "heartRateBpm": _json_number(timeline.heart_rate_bpm[index]),
+            "powerWatts": _json_number(timeline.power_watts[index]),
+            "temperatureC": _json_number(timeline.temperature_c[index]),
+            "gradePct": _json_number(timeline.grade_pct[index]),
+            "bearingDeg": _json_number(timeline.bearing_deg[index]),
+        }
+        if cumulative_elevation_gain_m is not None:
+            record["cumulativeElevationGainM"] = _json_number(cumulative_elevation_gain_m[index])
+        result.append(record)
     return result
 
 
@@ -141,6 +146,7 @@ class ActivityRenderSpec:
     summary: dict[str, float]
     points: list[dict[str, Any]]
     output_mode: str = "animated"
+    show_progress_bar: bool = True
 
     @classmethod
     def from_parquet(
@@ -157,6 +163,7 @@ class ActivityRenderSpec:
         background_image: Path | None = None,
         background_blur_px: float = 0.0,
         background_dim: float = 0.35,
+        show_progress_bar: bool = True,
     ) -> "ActivityRenderSpec":
         effective_profile = profile or RenderProfile()
         source_frame = pq.read_table(parquet_path).to_pandas()
@@ -176,6 +183,7 @@ class ActivityRenderSpec:
             speed_window_seconds=speed_window_seconds,
         )
         selected = _sample_indices(len(timeline), max_points)
+        cumulative_elevation_gain = timeline.elevation_gain_series_m()
         normalized_locale = normalize_locale(locale)
         normalized_theme = get_theme(theme).name
         return cls(
@@ -206,7 +214,8 @@ class ActivityRenderSpec:
                 "renderPointCount": float(len(selected)),
                 "speedWindowSeconds": float(speed_window_seconds),
             },
-            points=_records(timeline, selected),
+            points=_records(timeline, selected, cumulative_elevation_gain),
+            show_progress_bar=show_progress_bar,
         )
 
     def to_dict(self) -> dict[str, Any]:

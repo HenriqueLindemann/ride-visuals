@@ -45,8 +45,11 @@ def test_render_spec_is_versioned_and_json_safe(tmp_path):
     assert payload["activity"]["id"] == "42"
     assert payload["background"] is None
     assert payload["summary"]["speedWindowSeconds"] >= 30
+    assert payload["show_progress_bar"] is True
     assert len(payload["points"]) == 3
     assert payload["points"][0]["powerWatts"] is None
+    assert "cumulativeElevationGainM" in payload["points"][0]
+
 
 
 def test_render_spec_embeds_portable_background(tmp_path):

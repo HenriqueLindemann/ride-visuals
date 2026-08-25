@@ -17,7 +17,9 @@ export const ActivityOverlay = (props: ActivityRenderSpec) => {
   });
   const progress = linear * linear * (3 - 2 * linear);
   const index = pointAtProgress(props.points, progress, props.summary.sourceDurationSeconds);
-  const point = props.points[index];
+  const readoutStep = 0.2 / props.profile.duration_seconds;
+  const steppedProgress = progress > 1 - readoutStep ? 1 : Math.floor(progress / readoutStep) * readoutStep;
+  const point = props.points[pointAtProgress(props.points, steppedProgress, props.summary.sourceDurationSeconds)];
 
   return (
     <AbsoluteFill

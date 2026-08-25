@@ -44,26 +44,27 @@ export const ActivityClean = (props: ActivityRenderSpec) => {
         }}
       >
         <div style={{minWidth: 0}}>
-          <div style={{fontSize: vertical ? 36 : 39, fontWeight: 650, lineHeight: 1.08, letterSpacing: '-0.035em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
-            {props.activity.title}
-          </div>
-          <div style={{marginTop: 9, color: theme.textSecondary, fontSize: 15, lineHeight: 1.3}}>
+          {props.activity.title ? (
+            <div style={{fontSize: vertical ? 36 : 39, fontWeight: 650, lineHeight: 1.08, letterSpacing: '-0.035em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+              {props.activity.title}
+            </div>
+          ) : null}
+          <div style={{marginTop: props.activity.title ? 9 : 0, color: theme.textSecondary, fontSize: 15, lineHeight: 1.3}}>
             {props.activity.date ? `${date(props.activity.date)} · ` : ''}
             {number(props.summary.distanceKm, 1)} km · +{number(props.summary.elevationGainM)} m
           </div>
         </div>
-        <div style={{color: theme.textMuted, fontSize: 14, fontWeight: 650, fontVariantNumeric: 'tabular-nums'}}>
-          {Math.round(progress * 100)}%
-        </div>
       </div>
-      <div style={{position: 'absolute', left: vertical ? 56 : 64, right: vertical ? 56 : 64, bottom: vertical ? 52 : 44}}>
-        <div style={{display: 'flex', justifyContent: 'space-between', color: theme.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: '0.11em', textTransform: 'uppercase', marginBottom: 10}}>
-          <span>{t('progress')}</span><span>{Math.round(progress * 100)}%</span>
+      {props.show_progress_bar !== false ? (
+        <div style={{position: 'absolute', left: vertical ? 56 : 64, right: vertical ? 56 : 64, bottom: vertical ? 52 : 44}}>
+          <div style={{display: 'flex', justifyContent: 'space-between', color: theme.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: '0.11em', textTransform: 'uppercase', marginBottom: 10}}>
+            <span>{t('progress')}</span><span>{Math.round(progress * 100)}%</span>
+          </div>
+          <div style={{height: 2, background: theme.border}}>
+            <div style={{height: '100%', width: `${progress * 100}%`, background: theme.route}} />
+          </div>
         </div>
-        <div style={{height: 2, background: theme.border}}>
-          <div style={{height: '100%', width: `${progress * 100}%`, background: theme.route}} />
-        </div>
-      </div>
+      ) : null}
     </AbsoluteFill>
   );
 };

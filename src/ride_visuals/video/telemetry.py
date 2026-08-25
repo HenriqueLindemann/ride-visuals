@@ -151,3 +151,15 @@ class TelemetryTimeline:
         smooth = _time_rolling(self.altitude_m, self.timestamps, 15)
         valid = smooth[~np.isnan(smooth)]
         return float(np.maximum(np.diff(valid), 0.0).sum()) if len(valid) > 1 else 0.0
+
+    def elevation_gain_series_m(self) -> np.ndarray:
+        """Cumulative smoothed elevation gain aligned with each timeline index."""
+        count = len(self.altitude_m)
+        series = np.zeros(count, dtype=float)
+        if count < 2 or not self.available(self.altitude_m):
+            return series
+        smooth = _time_rolling(self.altitude_m, self.timestamps, 15)
+        delta = np.diff(smooth)
+        step = np.where(np.isnan(delta), 0.0, np.maximum(delta, 0.0))
+        series[1:] = np.cumsum(step)
+        return series

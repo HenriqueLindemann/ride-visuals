@@ -52,9 +52,13 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
   const speed = staticSummary
     ? numericMean(spec.points.map((telemetryPoint) => telemetryPoint.speedKmh))
     : point.speed3MinKmh ?? point.speedKmh ?? 0;
-  const stableSpeed = Math.round(speed * 2) / 2;
   const heartRate = staticSummary ? numericMean(heartRateSeries) : point.heartRateBpm;
   const altitudeProfile = useMemo(() => spec.points.map((telemetryPoint) => telemetryPoint.altitudeM), [spec.points]);
+  const runningAscentM = point.cumulativeElevationGainM;
+  const ascentValue =
+    !staticSummary && runningAscentM !== null && runningAscentM !== undefined
+      ? Math.round(runningAscentM)
+      : spec.summary.elevationGainM;
   const currentStats = [
       {label: t('distance'), value: number(point.distanceKm ?? 0, 1), unit: 'km'},
       {label: t('altitude'), value: number(point.altitudeM ?? 0), unit: 'm'},
@@ -62,8 +66,8 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
       {label: t('temperature'), value: number(point.temperatureC ?? 0, 1), unit: '°C'},
       point.powerWatts !== null
         ? {label: t('power'), value: number(point.powerWatts), unit: 'W'}
-        : {label: t('ascent'), value: number(spec.summary.elevationGainM), unit: 'm'},
-      {label: t('totalTime'), value: elapsed(point.elapsedSeconds), unit: ''},
+        : {label: t('ascent'), value: number(ascentValue), unit: 'm'},
+      {label: t('totalTime'), value: elapsed(point.elapsedSeconds), unit: 'h'},
     ];
   const summaryStats = [
       {label: t('distance'), value: number(spec.summary.distanceKm, 1), unit: 'km'},
@@ -73,19 +77,20 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
       spec.points.some((telemetryPoint) => telemetryPoint.powerWatts !== null)
         ? {label: t('averagePower'), value: number(numericMean(spec.points.map((telemetryPoint) => telemetryPoint.powerWatts))), unit: 'W'}
         : {label: t('ascent'), value: number(spec.summary.elevationGainM), unit: 'm'},
-      {label: t('totalTime'), value: elapsed(spec.summary.sourceDurationSeconds), unit: ''},
+      {label: t('totalTime'), value: elapsed(spec.summary.sourceDurationSeconds), unit: 'h'},
     ];
   const stats = staticSummary ? summaryStats : currentStats;
 
   const header = (
     <div style={{display: 'flex', justifyContent: 'space-between', gap: 20, paddingBottom: vertical ? 18 : 26}}>
       <div style={{minWidth: 0}}>
-        <div style={{fontSize: vertical ? 31 : 34, fontWeight: 650, lineHeight: 1.08, letterSpacing: '-0.035em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{spec.activity.title}</div>
-        <div style={{fontSize: 15, color: theme.textSecondary, marginTop: 8, lineHeight: 1.3}}>
+        {spec.activity.title ? (
+          <div style={{fontSize: vertical ? 31 : 34, fontWeight: 650, lineHeight: 1.08, letterSpacing: '-0.035em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{spec.activity.title}</div>
+        ) : null}
+        <div style={{fontSize: 15, color: theme.textSecondary, marginTop: spec.activity.title ? 8 : 0, lineHeight: 1.3}}>
           {spec.activity.date ? `${date(spec.activity.date)} · ` : ''}{number(spec.summary.distanceKm, 1)} km · +{number(spec.summary.elevationGainM)} m
         </div>
       </div>
-      <div style={{fontSize: 14, fontWeight: 650, color: theme.textMuted, fontVariantNumeric: 'tabular-nums'}}>{Math.round(progress * 100)}%</div>
     </div>
   );
 
@@ -94,7 +99,7 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
       <Label theme={theme}>{staticSummary ? t('averageSpeed') : t('speed')}</Label>
       <div style={{display: 'grid', gridTemplateColumns: vertical ? '0.9fr 1.1fr' : '0.85fr 1.15fr', gap: 18, alignItems: 'end', marginTop: 10}}>
         <div style={{fontSize: vertical ? 48 : 54, fontWeight: 590, lineHeight: 1, letterSpacing: '-0.045em', fontVariantNumeric: 'tabular-nums'}}>
-          {number(stableSpeed, 1)}<span style={{fontSize: 15, color: theme.textMuted, marginLeft: 9, letterSpacing: 0}}>km/h</span>
+          {number(speed, 1)}<span style={{fontSize: 15, color: theme.textMuted, marginLeft: 9, letterSpacing: 0}}>km/h</span>
         </div>
         <ProgressAxisChart
           values={speedSeries}
@@ -162,10 +167,14 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
         />
       </div>
       <div style={{paddingTop: 18}}>
-        <div style={{display: 'flex', justifyContent: 'space-between', color: theme.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: '0.11em', textTransform: 'uppercase', marginBottom: 10}}>
-          <span>{t('progress')}</span><span>{Math.round(progress * 100)}%</span>
-        </div>
-        <div style={{height: 2, background: theme.border}}><div style={{height: '100%', width: `${progress * 100}%`, background: theme.route}} /></div>
+        {spec.show_progress_bar !== false ? (
+          <>
+            <div style={{display: 'flex', justifyContent: 'space-between', color: theme.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: '0.11em', textTransform: 'uppercase', marginBottom: 10}}>
+              <span>{t('progress')}</span><span>{Math.round(progress * 100)}%</span>
+            </div>
+            <div style={{height: 2, background: theme.border}}><div style={{height: '100%', width: `${progress * 100}%`, background: theme.route}} /></div>
+          </>
+        ) : null}
       </div>
     </div>
   );

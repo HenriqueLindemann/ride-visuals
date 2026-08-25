@@ -7,6 +7,9 @@ name = "ride-visuals"
 version = "0.1.0"
 description = "Turn cycling activity archives into maps, telemetry graphics, and video"
 readme = "README.md"
+authors = [
+    { name = "Henrique Lindemann" }
+]
 requires-python = ">=3.11"
 license = "AGPL-3.0-only"
 dependencies = [

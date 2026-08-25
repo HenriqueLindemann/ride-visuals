@@ -6,7 +6,9 @@ who wants to see their rides differently. Everything runs locally.
 
 ## A collection over time
 
-![Animated cycling activity collection](showcase/ride-collection.gif)
+<p align="center">
+  <img src="showcase/ride-collection.gif" alt="Animated cycling activity collection">
+</p>
 
 Routes accumulate chronologically while the map, heart-rate coverage, and
 season totals evolve together.
@@ -17,7 +19,9 @@ make preview-collection SCOPE="--start-date 2026-02-06"
 
 ## One ride in detail
 
-![Animated telemetry for a 138.7 km ride](showcase/ride-telemetry.png)
+<p align="center">
+  <img src="showcase/ride-telemetry.png" alt="Animated telemetry for a 138.7 km ride">
+</p>
 
 The activity view follows route progress alongside speed, heart rate,
 elevation, grade, temperature, and distance.
@@ -28,14 +32,31 @@ make preview-activity ACTIVITY_ID=<activity-id> TELEMETRY_BASEMAP=satellite
 
 ## A reusable overlay
 
-![A transparent overlay for a 115.8 km ride to Eberbach](showcase/ride-overlay.png)
+<p align="center">
+  <img src="showcase/ride-overlay.png" alt="A transparent overlay for a 115.8 km ride to Eberbach">
+</p>
 
-The same route and summary can be exported as a transparent PNG for another
-layout or editing workflow.
+The same route and summary can be exported as a transparent PNG, alpha WebM,
+or ProRes 4444 MOV for another layout or editing workflow.
 
 ```bash
 ride-visuals video overlay <activity-id> --overlay-format png --aspect 16:9 \
   --config config/config.toml
+```
+
+### Overlay in motion
+
+<p align="center">
+  <img src="showcase/ride-overlay-motion.gif" alt="Moving telemetry overlay drawn over a ride photo">
+</p>
+
+The overlay can also move. The route draws itself while speed, heart rate, and
+the other numbers update on screen. Render it over a photo or fully
+transparent, in vertical or landscape.
+
+```bash
+ride-visuals video telemetry <activity-id> --background-image photo.jpg \
+  --aspect 9:16 --title "" --no-progress-bar --config config/config.toml
 ```
 
 ## Shape the collection
@@ -100,7 +121,15 @@ make check
 
 ## License
 
+Copyright (C) 2026 Henrique Lindemann
+
 Ride Visuals is licensed under `AGPL-3.0-only`. The renderer has a narrow
 compatibility exception for Remotion; see [LICENSE_EXCEPTION](LICENSE_EXCEPTION).
 Remotion remains under its own license. Other credits and terms are listed in
 [THIRD_PARTY.md](THIRD_PARTY.md).
+
+---
+
+> *“For all its material advantages, the sedentary life has left us edgy, unfulfilled. Even after 400 generations in villages and cities, we haven’t forgotten. The open road still softly calls, like a nearly forgotten song of childhood. We invest far-off places with a certain romance. This appeal, I suspect, has been meticulously crafted by natural selection as an essential element in our survival.”*
+>
+> — Carl Sagan

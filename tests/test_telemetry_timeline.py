@@ -38,3 +38,12 @@ def test_adaptive_speed_window_responds_to_render_compression():
     final_window = adaptive_speed_window_seconds(18_000, 13.0, fps=30)
     assert preview_window > final_window
     assert 30 <= final_window <= 1200
+
+
+def test_elevation_gain_series_m_tracks_cumulative_ascent():
+    timeline = TelemetryTimeline.from_frame(_frame())
+    gain_series = timeline.elevation_gain_series_m()
+    assert len(gain_series) == 3
+    assert gain_series[0] == 0.0
+    assert gain_series[-1] >= 0.0
+

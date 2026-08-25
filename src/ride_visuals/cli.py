@@ -373,9 +373,9 @@ def cmd_video(args):
                 [act_id],
             ).fetchone()
         title_override = getattr(args, "title", None)
-        activity_name = sanitize_display_text(
-            title_override or (activity_row[0] if activity_row else f"Activity {act_id}")
-        )
+        if title_override is None:
+            title_override = activity_row[0] if activity_row else f"Activity {act_id}"
+        activity_name = sanitize_display_text(title_override)
         activity_date = str(activity_row[1]) if activity_row and activity_row[1] else None
         background_image = (
             Path(args.background_image)
@@ -403,6 +403,7 @@ def cmd_video(args):
             background_image=background_image,
             background_blur_px=float(getattr(args, "background_blur", 0.0)),
             background_dim=float(getattr(args, "background_dim", 0.35)),
+            show_progress_bar=not getattr(args, "no_progress_bar", False),
         )
         if activity_basemap != "plain":
             background_file = (
@@ -650,10 +651,11 @@ def main():
     p_vid.add_argument("--engine", choices=["auto", "remotion"], default="auto", help="Motor visual para atividades e overlays")
     p_vid.add_argument("--locale", choices=["en", "pt-BR"], help="Idioma do conteúdo visual")
     p_vid.add_argument("--theme", choices=["midnight", "frost"], help="Tema visual compartilhado")
-    p_vid.add_argument("--title", help="Override the title of an individual activity")
+    p_vid.add_argument("--title", help="Override the title of an individual activity (an empty string hides the title)")
     p_vid.add_argument("--background-image", type=str, help="Imagem JPEG/PNG/WebP usada atrás da atividade (incompatível com --basemap)")
     p_vid.add_argument("--background-blur", type=float, default=0.0, help="Desfoque do fundo em pixels (0–100)")
     p_vid.add_argument("--background-dim", type=float, default=0.35, help="Escurecimento do fundo (0–1)")
+    p_vid.add_argument("--no-progress-bar", action="store_true", help="Hide the route progress bar at the bottom of activity videos")
     p_vid.add_argument("--overlay-format", choices=["png", "webm", "mov"], default="png", help="PNG estático, WebM alpha ou ProRes 4444 MOV")
     p_vid.add_argument("--config", type=str, help="Caminho para config/config.toml")
     add_selection_arguments(p_vid)
