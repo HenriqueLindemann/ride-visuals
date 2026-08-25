@@ -20,7 +20,7 @@ make preview-collection SCOPE="--start-date 2026-02-06"
 ## One ride in detail
 
 <p align="center">
-  <img src="showcase/ride-telemetry.png" alt="Animated telemetry for a 138.7 km ride">
+  <img src="showcase/ride-telemetry.png" alt="Cycling activity telemetry for a 138.7 km ride">
 </p>
 
 The activity view follows route progress alongside speed, heart rate,
@@ -44,7 +44,7 @@ ride-visuals video overlay <activity-id> --overlay-format png --aspect 16:9 \
   --config config/config.toml
 ```
 
-### Overlay in motion
+### Telemetry over media
 
 <p align="center">
   <img src="showcase/ride-overlay-motion.gif" alt="Moving telemetry overlay drawn over a ride photo">
