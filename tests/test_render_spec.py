@@ -45,10 +45,32 @@ def test_render_spec_is_versioned_and_json_safe(tmp_path):
     assert payload["activity"]["id"] == "42"
     assert payload["background"] is None
     assert payload["summary"]["speedWindowSeconds"] >= 30
-    assert payload["show_progress_bar"] is True
+    assert payload["show_progress_bar"] is False
     assert len(payload["points"]) == 3
     assert payload["points"][0]["powerWatts"] is None
     assert "cumulativeElevationGainM" in payload["points"][0]
+
+
+def test_render_spec_can_enable_progress_bar(tmp_path):
+    frame = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2024-08-23T08:00:00Z", periods=2, freq="1s"),
+            "lat": [10.0, 10.001],
+            "lon": [20.0, 20.001],
+            "distance_m": [0.0, 100.0],
+        }
+    )
+    parquet = tmp_path / "activity.parquet"
+    pq.write_table(pa.Table.from_pandas(frame), parquet)
+
+    spec = ActivityRenderSpec.from_parquet(
+        parquet,
+        activity_id=42,
+        title="Morning Ride",
+        show_progress_bar=True,
+    )
+
+    assert spec.show_progress_bar is True
 
 
 

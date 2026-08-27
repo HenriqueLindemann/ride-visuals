@@ -55,7 +55,7 @@ export const ActivityClean = (props: ActivityRenderSpec) => {
           </div>
         </div>
       </div>
-      {props.show_progress_bar !== false ? (
+      {props.show_progress_bar === true ? (
         <div style={{position: 'absolute', left: vertical ? 56 : 64, right: vertical ? 56 : 64, bottom: vertical ? 52 : 44}}>
           <div style={{display: 'flex', justifyContent: 'space-between', color: theme.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: '0.11em', textTransform: 'uppercase', marginBottom: 10}}>
             <span>{t('progress')}</span><span>{Math.round(progress * 100)}%</span>

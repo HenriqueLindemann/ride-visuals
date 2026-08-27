@@ -55,7 +55,7 @@ export const ActivityOverlay = (props: ActivityRenderSpec) => {
             borderRight: `1px solid ${theme.border}`,
             borderBottom: `1px solid ${theme.border}`,
             borderTop: vertical ? 'none' : `1px solid ${theme.border}`,
-            background: 'rgba(5, 5, 5, 0.30)',
+            background: 'rgba(5, 5, 5, 0.80)',
           }}
         >
           <TelemetryPanel spec={props} point={point} progress={progress} theme={theme} vertical={vertical} />

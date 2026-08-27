@@ -6,6 +6,7 @@ export const defaultActivitySpec: ActivityRenderSpec = {
   outputMode: 'animated',
   locale: 'en',
   theme: 'midnight',
+  show_progress_bar: false,
   profile: {width: 1920, height: 1080, fps: 30, duration_seconds: 5, hold_seconds: 1},
   activity: {id: 'preview', title: 'Morning Ride', date: '2024-08-23T08:00:00Z'},
   background: null,

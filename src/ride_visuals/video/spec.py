@@ -146,7 +146,7 @@ class ActivityRenderSpec:
     summary: dict[str, float]
     points: list[dict[str, Any]]
     output_mode: str = "animated"
-    show_progress_bar: bool = True
+    show_progress_bar: bool = False
 
     @classmethod
     def from_parquet(
@@ -163,7 +163,7 @@ class ActivityRenderSpec:
         background_image: Path | None = None,
         background_blur_px: float = 0.0,
         background_dim: float = 0.35,
-        show_progress_bar: bool = True,
+        show_progress_bar: bool = False,
     ) -> "ActivityRenderSpec":
         effective_profile = profile or RenderProfile()
         source_frame = pq.read_table(parquet_path).to_pandas()

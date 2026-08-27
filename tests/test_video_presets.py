@@ -5,7 +5,7 @@ from ride_visuals.video.presets import get_video_preset
 
 def test_activity_portrait_preset_is_partitioned_and_deterministic():
     preset = get_video_preset("activity", "9:16", preview=True)
-    assert (preset.canvas.width, preset.canvas.height) == (1080, 1920)
+    assert (preset.canvas.width, preset.canvas.height) == (540, 960)
     assert preset.canvas.layout == "9:16"
     assert preset.duration_seconds == 4.0
     assert preset.fps == 30
@@ -17,11 +17,21 @@ def test_clean_collection_uses_full_map_layout():
     assert preset.hold_seconds == 3.0
 
 
-def test_4k_preset_uses_landscape_partition_at_native_uhd():
+def test_4k_preview_uses_landscape_partition_at_half_resolution():
     preset = get_video_preset("collection", "4k", preview=True)
-    assert (preset.canvas.width, preset.canvas.height) == (3840, 2160)
+    assert (preset.canvas.width, preset.canvas.height) == (1920, 1080)
     assert preset.canvas.layout == "16:9"
     assert preset.duration_seconds + preset.hold_seconds <= 10.0
+
+
+def test_final_presets_keep_native_resolution():
+    landscape = get_video_preset("activity", "16:9")
+    portrait = get_video_preset("activity", "9:16")
+    uhd = get_video_preset("collection", "4k")
+
+    assert (landscape.canvas.width, landscape.canvas.height) == (1920, 1080)
+    assert (portrait.canvas.width, portrait.canvas.height) == (1080, 1920)
+    assert (uhd.canvas.width, uhd.canvas.height) == (3840, 2160)
 
 
 def test_progress_preview_stays_below_ten_seconds():

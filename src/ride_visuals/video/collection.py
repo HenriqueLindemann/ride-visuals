@@ -409,7 +409,7 @@ class CollectionVideoRenderer:
         """Pick the map corner with least route occupancy and greatest clearance."""
         padding = 28 * scale
         legend_w = min((760 if wide else 480) * scale, layout.map_rect.w - 2 * padding)
-        legend_h = (74 if wide else 94) * scale
+        legend_h = (62 if wide else 82) * scale
         candidates = [
             ("top_left", layout.map_rect.x0 + padding, layout.map_rect.y0 + padding),
             ("top_right", layout.map_rect.x1 - padding - legend_w, layout.map_rect.y0 + padding),
@@ -551,7 +551,8 @@ class CollectionVideoRenderer:
                           keyframes_dir: Optional[Path] = None,
                           ssaa_scale: int = 2,
                           basemap: str = "plain",
-                          map_detail: str = "standard") -> Tuple[Path, List[Path]]:
+                          map_detail: str = "standard",
+                          show_progress_bar: bool = False) -> Tuple[Path, List[Path]]:
         output_mp4_path = Path(output_mp4_path)
         output_mp4_path.parent.mkdir(parents=True, exist_ok=True)
         if keyframes_dir:
@@ -968,10 +969,11 @@ class CollectionVideoRenderer:
                 )
                 ty = grid_top + 3 * card_h
 
-                DashboardPainter.draw_progress_bar(
-                    draw, tx, ty + 10 * ui, card_w, 10 * ui, pct=progress_pct, scale=ui,
-                )
-                chart_top = ty + 42 * ui
+                if show_progress_bar:
+                    DashboardPainter.draw_progress_bar(
+                        draw, tx, ty + 10 * ui, card_w, 10 * ui, pct=progress_pct, scale=ui,
+                    )
+                chart_top = ty + (42 if show_progress_bar else 16) * ui
                 f_chart_label = FontManager.get_font(12 * ui, bold=True)
                 f_chart_value = FontManager.get_font(27 * ui, bold=True)
                 if motion == "elapsed":
@@ -1041,8 +1043,11 @@ class CollectionVideoRenderer:
                         label=row[1][0], value=row[1][1], is_mobile=True, scale=ui,
                     )
                 ty = grid_top + 3 * card_h + 12 * ui
-                DashboardPainter.draw_progress_bar(draw, tx, ty, pw, 12 * ui, pct=progress_pct, scale=ui)
-                chart_top = ty + 28 * ui
+                if show_progress_bar:
+                    DashboardPainter.draw_progress_bar(
+                        draw, tx, ty, pw, 12 * ui, pct=progress_pct, scale=ui,
+                    )
+                chart_top = ty + (28 if show_progress_bar else 0) * ui
                 chart_h = max(70 * ui, tr.y1 - chart_top - 26 * ui)
                 if motion == "elapsed":
                     self._draw_finish_distribution(

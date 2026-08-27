@@ -166,16 +166,14 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
           height={vertical ? 210 : 135}
         />
       </div>
-      <div style={{paddingTop: 18}}>
-        {spec.show_progress_bar !== false ? (
-          <>
-            <div style={{display: 'flex', justifyContent: 'space-between', color: theme.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: '0.11em', textTransform: 'uppercase', marginBottom: 10}}>
-              <span>{t('progress')}</span><span>{Math.round(progress * 100)}%</span>
-            </div>
-            <div style={{height: 2, background: theme.border}}><div style={{height: '100%', width: `${progress * 100}%`, background: theme.route}} /></div>
-          </>
-        ) : null}
-      </div>
+      {spec.show_progress_bar === true ? (
+        <div style={{paddingTop: 18}}>
+          <div style={{display: 'flex', justifyContent: 'space-between', color: theme.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: '0.11em', textTransform: 'uppercase', marginBottom: 10}}>
+            <span>{t('progress')}</span><span>{Math.round(progress * 100)}%</span>
+          </div>
+          <div style={{height: 2, background: theme.border}}><div style={{height: '100%', width: `${progress * 100}%`, background: theme.route}} /></div>
+        </div>
+      ) : null}
     </div>
   );
 };

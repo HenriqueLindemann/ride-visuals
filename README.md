@@ -56,7 +56,7 @@ transparent, in vertical or landscape.
 
 ```bash
 ride-visuals video telemetry <activity-id> --background-image photo.jpg \
-  --aspect 9:16 --title "" --no-progress-bar --config config/config.toml
+  --aspect 9:16 --title "" --config config/config.toml
 ```
 
 ## Shape the collection

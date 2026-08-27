@@ -307,6 +307,7 @@ def cmd_video(args):
             ssaa_scale=1 if aspect == "4k" else 2,
             basemap=collection_basemap,
             map_detail=map_detail,
+            show_progress_bar=getattr(args, "show_progress_bar", False),
         )
         print(f"[Vídeo] Coleção gerada com sucesso em: {out_path}")
         if keyframes_dir:
@@ -403,7 +404,7 @@ def cmd_video(args):
             background_image=background_image,
             background_blur_px=float(getattr(args, "background_blur", 0.0)),
             background_dim=float(getattr(args, "background_dim", 0.35)),
-            show_progress_bar=not getattr(args, "no_progress_bar", False),
+            show_progress_bar=getattr(args, "show_progress_bar", False),
         )
         if activity_basemap != "plain":
             background_file = (
@@ -655,7 +656,13 @@ def main():
     p_vid.add_argument("--background-image", type=str, help="Imagem JPEG/PNG/WebP usada atrás da atividade (incompatível com --basemap)")
     p_vid.add_argument("--background-blur", type=float, default=0.0, help="Desfoque do fundo em pixels (0–100)")
     p_vid.add_argument("--background-dim", type=float, default=0.35, help="Escurecimento do fundo (0–1)")
-    p_vid.add_argument("--no-progress-bar", action="store_true", help="Hide the route progress bar at the bottom of activity videos")
+    p_vid.add_argument(
+        "--progress-bar",
+        action=argparse.BooleanOptionalAction,
+        dest="show_progress_bar",
+        default=False,
+        help="Show the optional progress percentage and bar in activity and collection videos",
+    )
     p_vid.add_argument("--overlay-format", choices=["png", "webm", "mov"], default="png", help="PNG estático, WebM alpha ou ProRes 4444 MOV")
     p_vid.add_argument("--config", type=str, help="Caminho para config/config.toml")
     add_selection_arguments(p_vid)

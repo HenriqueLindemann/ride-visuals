@@ -51,7 +51,7 @@ export const activityRenderSpecSchema = z.object({
     speedWindowSeconds: z.number().positive(),
   }),
   points: z.array(telemetryPointSchema).min(2),
-  show_progress_bar: z.boolean().optional(),
+  show_progress_bar: z.boolean().default(false),
 });
 
 export type TelemetryPoint = z.infer<typeof telemetryPointSchema>;

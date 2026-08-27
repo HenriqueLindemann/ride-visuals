@@ -27,6 +27,12 @@ CANVASES = {
     "4k": CanvasPreset("4k", 3840, 2160, "16:9"),
 }
 
+PREVIEW_CANVASES = {
+    "16:9": CanvasPreset("16:9", 960, 540, "16:9"),
+    "9:16": CanvasPreset("9:16", 540, 960, "9:16"),
+    "4k": CanvasPreset("4k", 1920, 1080, "16:9"),
+}
+
 _DURATIONS = {
     "activity": {"preview": (4.0, 1.0), "final": (13.0, 2.0)},
     "collection": {"preview": (4.0, 1.0), "final": (12.0, 3.0)},
@@ -39,7 +45,7 @@ _DURATIONS = {
 def get_video_preset(kind: str, aspect: str, *, preview: bool = False, clean: bool = False) -> VideoPreset:
     """Resolve a named output to deterministic dimensions and timing."""
     try:
-        canvas = CANVASES[aspect]
+        canvas = (PREVIEW_CANVASES if preview else CANVASES)[aspect]
     except KeyError as exc:
         raise ValueError(f"Unsupported aspect {aspect!r}. Choose one of: {', '.join(CANVASES)}") from exc
     try:
