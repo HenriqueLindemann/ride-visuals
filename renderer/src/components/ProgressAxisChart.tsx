@@ -1,5 +1,4 @@
 import {useId, useMemo} from 'react';
-import {useElementSize} from '../lib/use-element-size';
 
 type Props = {
   values: Array<number | null>;
@@ -22,7 +21,8 @@ type Props = {
 const DEFAULT_PAD_X = 6;
 const DEFAULT_PAD_Y = 6;
 const DEFAULT_SMOOTHING_SAMPLES = 7;
-const MIN_BOX_PX = 16;
+const VIEW_WIDTH = 1000;
+const VIEW_HEIGHT = 1000;
 
 type Coordinate = {x: number; y: number};
 
@@ -78,16 +78,8 @@ export const ProgressAxisChart = ({
   padY = DEFAULT_PAD_Y,
 }: Props) => {
   const gradientId = useId();
-  const [boxRef, box] = useElementSize<HTMLDivElement>();
-
-  // Render at exactly 1 SVG unit per CSS pixel: the drawing always fills the
-  // box the layout gives it — no uniform viewBox scaling, no distortion.
-  const width = Math.round(box.width);
-  const boxHeight = Math.round(height ?? box.height);
-  const ready = width >= MIN_BOX_PX && boxHeight >= MIN_BOX_PX;
 
   const geometry = useMemo(() => {
-    if (!ready) return null;
     const stride = Math.max(1, Math.floor(values.length / 240));
     const sampled = values
       .map((value, index) => ({value, index}))
@@ -106,8 +98,8 @@ export const ProgressAxisChart = ({
     const coordinates = smoothed.map((value, sampledIndex): Coordinate | null => {
       if (value === null || !Number.isFinite(value)) return null;
       return {
-        x: padX + (sampled[sampledIndex].index / Math.max(values.length - 1, 1)) * (width - padX * 2),
-        y: boxHeight - padY - ((value - min) / range) * (boxHeight - padY * 2),
+        x: (sampled[sampledIndex].index / Math.max(values.length - 1, 1)) * VIEW_WIDTH,
+        y: VIEW_HEIGHT - ((value - min) / range) * VIEW_HEIGHT,
       };
     });
     const segments = splitSegments(coordinates).filter((segment) => segment.length >= 2);
@@ -115,9 +107,9 @@ export const ProgressAxisChart = ({
     if (coords.length < 2) return null;
 
     return {coords, segments};
-  }, [boxHeight, padX, padY, ready, smoothingSamples, values, width]);
+  }, [smoothingSamples, values]);
 
-  const cursorX = padX + Math.min(1, Math.max(0, progress)) * (width - padX * 2);
+  const cursorX = Math.min(1, Math.max(0, progress)) * VIEW_WIDTH;
   const completedSegments = geometry
     ? geometry.segments.map((segment) => segment.filter(({x}) => x <= cursorX)).filter((segment) => segment.length >= 2)
     : [];
@@ -130,17 +122,24 @@ export const ProgressAxisChart = ({
 
   return (
     <div
-      ref={boxRef}
       style={{
         width: '100%',
         height: height !== undefined ? height : undefined,
         flex: height !== undefined ? '0 0 auto' : '1 1 0',
         minWidth: 0,
         minHeight: 0,
+        padding: `${padY}px ${padX}px`,
+        boxSizing: 'border-box',
       }}
     >
       {geometry && current ? (
-        <svg width={width} height={boxHeight} viewBox={`0 0 ${width} ${boxHeight}`} style={{display: 'block'}}>
+        <svg
+          width="100%"
+          height="100%"
+          viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
+          preserveAspectRatio="none"
+          style={{display: 'block', overflow: 'visible'}}
+        >
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={completed} stopOpacity="0.28" />
@@ -149,31 +148,31 @@ export const ProgressAxisChart = ({
           </defs>
 
           {/* Subtle baseline and midline grid */}
-          <line x1={padX} y1={boxHeight - padY} x2={width - padX} y2={boxHeight - padY} stroke={muted} strokeWidth="1" opacity="0.35" />
-          <line x1={padX} y1={boxHeight / 2} x2={width - padX} y2={boxHeight / 2} stroke={muted} strokeWidth="1" strokeDasharray="3 4" opacity="0.15" />
+          <line x1={0} y1={VIEW_HEIGHT} x2={VIEW_WIDTH} y2={VIEW_HEIGHT} stroke={muted} strokeWidth="1" opacity="0.35" vectorEffect="non-scaling-stroke" />
+          <line x1={0} y1={VIEW_HEIGHT / 2} x2={VIEW_WIDTH} y2={VIEW_HEIGHT / 2} stroke={muted} strokeWidth="1" strokeDasharray="3 4" opacity="0.15" vectorEffect="non-scaling-stroke" />
 
           {/* Full track background */}
           {geometry.segments.map((segment, index) => (
-            <path key={`track-${index}`} d={pathFor(segment)} fill="none" stroke={stroke} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3" />
+            <path key={`track-${index}`} d={pathFor(segment)} fill="none" stroke={stroke} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3" vectorEffect="non-scaling-stroke" />
           ))}
 
           {/* Completed filled area */}
           {showArea
             ? completedSegments.map((segment, index) => {
                 const path = pathFor(segment);
-                const areaPath = `${path} L ${segment[segment.length - 1].x.toFixed(2)} ${boxHeight - padY} L ${segment[0].x.toFixed(2)} ${boxHeight - padY} Z`;
+                const areaPath = `${path} L ${segment[segment.length - 1].x.toFixed(2)} ${VIEW_HEIGHT} L ${segment[0].x.toFixed(2)} ${VIEW_HEIGHT} Z`;
                 return <path key={`area-${index}`} d={areaPath} fill={`url(#${gradientId})`} />;
               })
             : null}
 
           {/* Completed active line */}
           {completedSegments.map((segment, index) => (
-            <path key={`completed-${index}`} d={pathFor(segment)} fill="none" stroke={completed} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+            <path key={`completed-${index}`} d={pathFor(segment)} fill="none" stroke={completed} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
           ))}
 
           {/* Current position indicator */}
-          <line x1={cursorX} y1={current.y} x2={cursorX} y2={boxHeight - padY} stroke={highlight} strokeWidth="1.2" opacity="0.75" />
-          <circle cx={cursorX} cy={current.y} r="3.5" fill={highlight} />
+          <line x1={cursorX} y1={current.y} x2={cursorX} y2={VIEW_HEIGHT} stroke={highlight} strokeWidth="1.2" opacity="0.75" vectorEffect="non-scaling-stroke" />
+          <path d={`M ${cursorX} ${current.y} L ${cursorX} ${current.y}`} fill="none" stroke={highlight} strokeWidth="7" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
         </svg>
       ) : null}
     </div>

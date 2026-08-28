@@ -45,6 +45,7 @@ const Stat = ({
   unit,
   theme,
   leftBorder = false,
+  alignLeftEdge = false,
   s = 1,
   labelSize = 11,
   portrait = false,
@@ -54,6 +55,7 @@ const Stat = ({
   unit?: string;
   theme: Theme;
   leftBorder?: boolean;
+  alignLeftEdge?: boolean;
   s?: number;
   labelSize?: number;
   portrait?: boolean;
@@ -62,7 +64,7 @@ const Stat = ({
     style={{
       borderTop: `1px solid ${theme.border}`,
       borderLeft: leftBorder ? `1px solid ${theme.border}` : undefined,
-      padding: `${Math.round(10 * s)}px ${Math.round(12 * s)}px ${Math.round(8 * s)}px`,
+      padding: `${Math.round(10 * s)}px ${Math.round(12 * s)}px ${Math.round(8 * s)}px ${alignLeftEdge ? 0 : Math.round(12 * s)}px`,
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'center',
@@ -342,6 +344,7 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
             {...stat}
             theme={theme}
             leftBorder={statIndex % 3 !== 0}
+            alignLeftEdge={statIndex % 3 === 0}
             labelSize={labelSize}
             portrait={vertical}
             s={s}

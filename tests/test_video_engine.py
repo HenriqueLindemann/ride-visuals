@@ -37,3 +37,13 @@ def test_overlay_png_requires_actual_transparent_pixels(tmp_path):
 
     assert not MediaValidator.validate_transparent_still(opaque)["valid"]
     assert MediaValidator.validate_transparent_still(transparent)["valid"]
+
+
+def test_frame_critical_svgs_do_not_depend_on_async_dom_measurement():
+    """A measured-on-mount SVG can be captured empty by a Remotion worker."""
+    renderer = Path("renderer/src/components")
+    for filename in ("RouteMap.tsx", "ProgressAxisChart.tsx"):
+        source = (renderer / filename).read_text(encoding="utf-8")
+        assert "new ResizeObserver" not in source
+        assert "useElementSize<" not in source
+        assert "preserveAspectRatio" in source
