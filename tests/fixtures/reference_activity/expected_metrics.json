@@ -1,0 +1,52 @@
+{
+  "total_rides": 1,
+  "total_km": 138.7,
+  "total_elev_m": 561,
+  "total_hours": 5.5,
+  "rides_with_hr": 1,
+  "sample_counts": {
+    "total": 19579,
+    "speed": 19579,
+    "heart_rate": 19579,
+    "temperature": 19579
+  },
+  "activity_avg_speeds_kmh": [25.347600000000003],
+  "speed_stats": {"median": 26.8, "p90": 31.7, "p99": 37.1, "peak": 49.0},
+  "speed_histogram": {
+    "counts": [149, 486, 1197, 1721, 3294, 8265, 3861, 538, 34, 20, 14, 0, 0, 0],
+    "edges": [0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0]
+  },
+  "heart_rate_stats": {"median": 142, "p90": 157, "peak": 171},
+  "temperature_stats": {"p10": 12, "p90": 31, "min": 11, "max": 33},
+  "monthly": [
+    {"month": "2026-08", "rides": 1, "km": 138.71412, "elev": 561.0, "hours": 5.472222222222222, "avg_hr": 141.0}
+  ],
+  "weekly": [
+    {"week_start": "2026-08-03", "rides": 1, "km": 138.71412, "rolling_km": 138.71412}
+  ],
+  "monthly_trimp": {"2026-08": 400.4},
+  "zones_pct": {
+    "Z1": 25.756964069438837,
+    "Z2": 43.67682680662091,
+    "Z3": 29.28946306015341,
+    "Z4": 1.2767460637868389,
+    "Z5": 0.0
+  },
+  "avg_drift_pct": 6.58,
+  "top_climbs_count": 0,
+  "avg_climb_vam": 0.0,
+  "records": {
+    "longest_km": 138.7,
+    "longest_name": "Kaiserslautern → Koblenz",
+    "highest_elev_m": 561,
+    "highest_elev_name": "Kaiserslautern → Koblenz",
+    "max_speed_kmh": 49.0,
+    "max_speed_name": "Kaiserslautern → Koblenz",
+    "fastest_sustained_kmh": 25.3,
+    "fastest_sustained_name": "Kaiserslautern → Koblenz",
+    "highest_effort": 195,
+    "highest_effort_name": "Kaiserslautern → Koblenz",
+    "peak_hr": 171,
+    "peak_hr_name": "Kaiserslautern → Koblenz"
+  }
+}

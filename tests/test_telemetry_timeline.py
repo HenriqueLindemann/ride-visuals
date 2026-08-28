@@ -47,3 +47,19 @@ def test_elevation_gain_series_m_tracks_cumulative_ascent():
     assert gain_series[0] == 0.0
     assert gain_series[-1] >= 0.0
 
+
+def test_max_grade_ignores_one_isolated_sensor_spike():
+    point_count = 5_000
+    frame = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2024-01-01T00:00:00Z", periods=point_count, freq="1s"),
+            "lat": np.linspace(10.0, 10.1, point_count),
+            "lon": np.linspace(20.0, 20.1, point_count),
+            "grade_pct": np.full(point_count, 8.0),
+        }
+    )
+    frame.loc[2_500, "grade_pct"] = 40.0
+
+    timeline = TelemetryTimeline.from_frame(frame)
+
+    assert timeline.maximum_grade_pct == 8.0

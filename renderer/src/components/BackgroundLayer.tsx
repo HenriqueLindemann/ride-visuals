@@ -30,7 +30,7 @@ export const BackgroundLayer = ({background}: {background: Background}) => {
           style={{
             position: 'absolute',
             left: 8,
-            bottom: 6,
+            bottom: background.attribution_bottom_px,
             maxWidth: 'calc(100% - 16px)',
             padding: '2px 5px',
             color: 'rgba(255, 255, 255, 0.82)',

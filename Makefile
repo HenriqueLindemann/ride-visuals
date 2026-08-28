@@ -8,7 +8,7 @@ MAP_BASEMAP ?= dark
 VIDEO_BASEMAP ?= dark
 TELEMETRY_BASEMAP ?= plain
 MOTION ?= chronological
-STYLE ?= heart_rate
+STYLE ?= density
 
 .PHONY: help install check ingest audit preview-collection preview-activity \
 	final final-assets final-reports final-maps final-videos final-activity validate

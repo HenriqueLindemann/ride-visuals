@@ -2,24 +2,19 @@
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 from typing import Mapping, Sequence
 
 from ride_visuals.maps.tiles import TILE_PROVIDERS, TileManager
+from ride_visuals.maps.projection import project_mercator, unproject_mercator
 
 
 def _mercator(lon: float, lat: float) -> tuple[float, float]:
-    safe_lat = max(-85.0, min(85.0, lat))
-    x = math.radians(lon)
-    y = math.log(math.tan(math.pi / 4.0 + math.radians(safe_lat) / 2.0))
-    return x, y
+    return project_mercator(lon, lat, radius=1.0, max_latitude=85.0)
 
 
 def _inverse_mercator(x: float, y: float) -> tuple[float, float]:
-    lon = math.degrees(x)
-    lat = math.degrees(2.0 * math.atan(math.exp(y)) - math.pi / 2.0)
-    return lon, lat
+    return unproject_mercator(x, y, radius=1.0)
 
 
 def route_basemap_bounds(points: Sequence[Mapping[str, object]]) -> tuple[float, float, float, float]:
@@ -63,33 +58,61 @@ def canvas_basemap_bounds(
     width: int,
     height: int,
     layout: str,
+    show_progress_bar: bool = False,
 ) -> tuple[float, float, float, float]:
-    """Extend the route viewport extent to the edges of the video canvas."""
+    """Extend the route viewport extent to the edges of its map partition,
 
-    min_lon, min_lat, max_lon, max_lat = route_basemap_bounds(points)
-    view_min_x, view_min_y = _mercator(min_lon, min_lat)
-    view_max_x, view_max_y = _mercator(max_lon, max_lat)
-    view_span = view_max_x - view_min_x
+    matching the exact container padding and projection of RouteMap.tsx.
+    """
+    projected = [
+        _mercator(float(point["lon"]), float(point["lat"]))
+        for point in points
+        if point.get("lon") is not None and point.get("lat") is not None
+    ]
+    if len(projected) < 2:
+        raise ValueError("At least two geographic points are required for an activity basemap")
 
+    xs = [x for x, _ in projected]
+    ys = [y for _, y in projected]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    data_w = max(max_x - min_x, 1e-9)
+    data_h = max(max_y - min_y, 1e-9)
+
+    vertical = height > width
+    scale_factor = height / (1920.0 if vertical else 1080.0)
     if layout == "telemetry":
-        map_w = width if height > width else width * 0.70
-        map_h = height * 0.60 if height > width else height
+        view_w = width if vertical else int(round(width * 0.70))
+        view_h = int(round(height * 0.54)) if vertical else height
+        top_pad = int(round((56 if vertical else 64) * scale_factor))
+        bottom_pad = int(round((56 if vertical else 64) * scale_factor))
+        side_pad = int(round((56 if vertical else 64) * scale_factor))
     elif layout == "clean":
-        map_w = width
-        map_h = height
+        view_w = width
+        view_h = height
+        top_pad = int(round((150 if vertical else 140) * scale_factor))
+        bottom_pad = int(round((75 if show_progress_bar else 48) * scale_factor))
+        side_pad = int(round((48 if vertical else 64) * scale_factor))
     else:
         raise ValueError("Activity basemap layout must be 'telemetry' or 'clean'")
 
-    svg_w = map_w * 0.90
-    svg_h = map_h * 0.90
-    side = min(svg_w, svg_h)
-    square_x = map_w * 0.05 + (svg_w - side) / 2.0
-    square_y = map_h * 0.05 + (svg_h - side) / 2.0
+    usable_w = max(view_w - 2 * side_pad, 10)
+    usable_h = max(view_h - top_pad - bottom_pad, 10)
+    scale = min(usable_w / data_w, usable_h / data_h)
 
-    canvas_min_x = view_min_x - square_x / side * view_span
-    canvas_max_x = view_max_x + (width - square_x - side) / side * view_span
-    canvas_min_y = view_min_y - (height - square_y - side) / side * view_span
-    canvas_max_y = view_max_y + square_y / side * view_span
+    rendered_w = data_w * scale
+    rendered_h = data_h * scale
+
+    offset_x = side_pad + (usable_w - rendered_w) / 2.0
+    offset_y = top_pad + (usable_h - rendered_h) / 2.0
+
+    # Extend the same georeferenced plane beneath the telemetry panel. Route
+    # coordinates still use the map partition's fit and remain registered.
+    canvas_min_x = min_x + (0.0 - offset_x) / scale
+    canvas_max_x = min_x + (float(width) - offset_x) / scale
+    canvas_max_y = max_y - (0.0 - offset_y) / scale
+    canvas_min_y = max_y - (float(height) - offset_y) / scale
+
     canvas_min_lon, canvas_min_lat = _inverse_mercator(canvas_min_x, canvas_min_y)
     canvas_max_lon, canvas_max_lat = _inverse_mercator(canvas_max_x, canvas_max_y)
     return canvas_min_lon, canvas_min_lat, canvas_max_lon, canvas_max_lat
@@ -104,9 +127,10 @@ def render_activity_basemap(
     height: int,
     layout: str,
     map_detail: str = "standard",
+    show_progress_bar: bool = False,
     tile_manager: TileManager | None = None,
 ) -> Path:
-    """Render a full-canvas tile image aligned with ``RouteMap``."""
+    """Render a full-canvas tile image aligned to the route partition."""
 
     if provider not in TILE_PROVIDERS:
         raise ValueError(f"Unsupported activity basemap provider: {provider}")
@@ -120,6 +144,7 @@ def render_activity_basemap(
         width=width,
         height=height,
         layout=layout,
+        show_progress_bar=show_progress_bar,
     )
     manager = tile_manager or TileManager()
     image = manager.render_basemap_layer(
@@ -133,6 +158,7 @@ def render_activity_basemap(
         dim_pct=0.0,
         detail_scale=2 if map_detail == "high" else 1,
     )
+
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     image.save(destination)

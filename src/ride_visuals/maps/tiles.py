@@ -2,45 +2,52 @@
 
 import io
 import math
-import os
 import urllib.request
 from pathlib import Path
 from typing import Optional, Tuple
-from urllib.parse import quote
 from PIL import Image, ImageEnhance
+
+from ride_visuals.maps.projection import WEB_MERCATOR_MAX_LATITUDE
 
 
 TILE_PROVIDERS = {
     "satellite": {
         "url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         "ext": "jpg",
-        "subdomains": [],
-        "attribution": "Sources: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+        "cache_key": "esri-world-imagery-v1",
+        "attribution": "Esri, Maxar, Earthstar Geographics, and the GIS User Community",
     },
     "topo": {
         "url": "https://tile.opentopomap.org/{z}/{x}/{y}.png",
         "ext": "png",
-        "subdomains": ["a", "b", "c"],
-        "attribution": "Map data: © OpenStreetMap contributors, SRTM · Map style: © OpenTopoMap (CC-BY-SA)",
+        "cache_key": "opentopomap-v1",
+        "attribution": "Map data: © OpenStreetMap contributors · DEM: SRTM, Sonny · Map style: © OpenTopoMap (CC-BY-SA)",
     },
     "osm": {
         "url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
         "ext": "png",
-        "subdomains": ["a", "b", "c"],
+        "cache_key": "openstreetmap-standard-v1",
         "attribution": "© OpenStreetMap contributors",
     },
     "dark": {
-        "url": "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "url": "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
         "ext": "png",
-        "subdomains": ["a", "b", "c", "d"],
-        "attribution": "© OpenStreetMap contributors · © CARTO",
+        "cache_key": "esri-world-dark-gray-v1",
+        "attribution": "Esri, HERE, Garmin, © OpenStreetMap contributors, and the GIS User Community",
+    },
+    "light": {
+        "url": "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        "ext": "png",
+        "cache_key": "esri-world-light-gray-v1",
+        "attribution": "Esri, HERE, Garmin, © OpenStreetMap contributors, and the GIS User Community",
     },
 }
 
 
 def deg2num(lat_deg: float, lon_deg: float, zoom: int) -> Tuple[float, float]:
     """Converte coordenadas geográficas para coordenadas de tile fracionárias."""
-    lat_rad = math.radians(lat_deg)
+    safe_latitude = max(-WEB_MERCATOR_MAX_LATITUDE, min(WEB_MERCATOR_MAX_LATITUDE, lat_deg))
+    lat_rad = math.radians(safe_latitude)
     n = 2.0 ** zoom
     xtile = (lon_deg + 180.0) / 360.0 * n
     ytile = (1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n
@@ -62,13 +69,9 @@ class TileManager:
     def __init__(self, cache_dir: Path = Path("data/cache/tiles")):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.carto_api_key = os.environ.get("CARTO_API_KEY", "").strip()
 
     def _tile_url(self, provider: str, z: int, x: int, y: int) -> str:
-        url = TILE_PROVIDERS[provider]["url"].format(z=z, x=x, y=y)
-        if provider == "dark" and self.carto_api_key:
-            return f"{url}?key={quote(self.carto_api_key, safe='')}"
-        return url
+        return TILE_PROVIDERS[provider]["url"].format(z=z, x=x, y=y)
 
     def fetch_tile(self, provider: str, z: int, x: int, y: int) -> Optional[Image.Image]:
         """Recupera tile do cache ou faz download via HTTP com headers padrão."""
@@ -77,11 +80,9 @@ class TileManager:
 
         p_info = TILE_PROVIDERS[provider]
         ext = p_info["ext"]
-        cache_provider = (
-            "dark-authenticated"
-            if provider == "dark" and self.carto_api_key
-            else provider
-        )
+        # The namespace identifies the real upstream and style. A provider
+        # change must never silently reuse visually incompatible old tiles.
+        cache_provider = p_info["cache_key"]
         cached_file = self.cache_dir / cache_provider / str(z) / f"{x}_{y}.{ext}"
 
         if cached_file.exists():
@@ -96,7 +97,12 @@ class TileManager:
         try:
             req = urllib.request.Request(
                 url,
-                headers={"User-Agent": "RideVisuals/2.0 (Lossless Cycling Cartography)"}
+                headers={
+                    "User-Agent": (
+                        "RideVisuals/0.1 "
+                        "(+https://github.com/HenriqueLindemann/ride-visuals)"
+                    )
+                },
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = resp.read()
@@ -170,13 +176,17 @@ class TileManager:
                     py = (ty - t_y0) * 256
                     stitched.paste(t_img, (px, py))
 
-        # High-detail output must never masquerade as a valid empty basemap.
-        # If the extra zoom level is unavailable offline, fall back atomically
-        # to the standard cached layer rather than mixing imagery with holes.
+        # Never emit a partly empty image labelled as a real provider map.
+        # High detail can fall back atomically to a complete standard layer.
         if detail_scale == 2 and fetched_tiles < expected_tiles:
             return self.render_basemap_layer(
                 min_lon, min_lat, max_lon, max_lat, target_w, target_h,
                 provider=provider, dim_pct=dim_pct, detail_scale=1,
+            )
+        if fetched_tiles < expected_tiles:
+            raise RuntimeError(
+                f"Could not load a complete {provider!r} basemap "
+                f"({fetched_tiles}/{expected_tiles} tiles available)"
             )
 
         # 4. Recortar exatamente os limites geográficos

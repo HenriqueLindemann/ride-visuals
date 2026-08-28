@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 from PIL import Image, ImageColor, ImageDraw
+from types import SimpleNamespace
 
 from ride_visuals.design import get_theme
 from ride_visuals.maps.tiles import TILE_PROVIDERS, TileManager
@@ -41,10 +42,10 @@ def test_completed_route_without_sensor_data_is_drawn_in_neutral_color():
     renderer = CollectionVideoRenderer.__new__(CollectionVideoRenderer)
     renderer.theme = get_theme("midnight")
     image = Image.new("RGB", (30, 20), renderer.theme.canvas)
-    track = {
-        "pixel_points": [(5, 10), (15, 10), (25, 10)],
-        "point_hrs": [np.nan, np.nan, np.nan],
-    }
+    track = SimpleNamespace(
+        pixel_points=[(5, 10), (15, 10), (25, 10)],
+        point_hrs=[np.nan, np.nan, np.nan],
+    )
 
     renderer._draw_route(
         ImageDraw.Draw(image), track, "heart_rate", 3,
@@ -58,10 +59,10 @@ def test_route_with_sensor_data_remains_continuous_across_sample_gaps():
     renderer = CollectionVideoRenderer.__new__(CollectionVideoRenderer)
     renderer.theme = get_theme("midnight")
     image = Image.new("RGB", (30, 20), renderer.theme.canvas)
-    track = {
-        "pixel_points": [(5, 10), (15, 10), (25, 10)],
-        "point_hrs": [140.0, np.nan, 140.0],
-    }
+    track = SimpleNamespace(
+        pixel_points=[(5, 10), (15, 10), (25, 10)],
+        point_hrs=[140.0, np.nan, 140.0],
+    )
 
     renderer._draw_route(
         ImageDraw.Draw(image), track, "heart_rate", 3,
@@ -78,13 +79,11 @@ def test_high_detail_requests_exactly_one_additional_tile_zoom():
     assert high == standard + 1
 
 
-def test_dark_tiles_accept_carto_key_from_environment(tmp_path, monkeypatch):
-    monkeypatch.setenv("CARTO_API_KEY", "key/with spaces")
+def test_dark_tiles_have_a_stable_upstream_and_cache_namespace(tmp_path):
     manager = TileManager(tmp_path / "tiles")
 
-    assert manager._tile_url("dark", 8, 10, 20).endswith(
-        "/8/10/20.png?key=key%2Fwith%20spaces"
-    )
+    assert "World_Dark_Gray_Base" in manager._tile_url("dark", 8, 10, 20)
+    assert TILE_PROVIDERS["dark"]["cache_key"] == "esri-world-dark-gray-v1"
 
 
 def test_map_detail_rejects_unbounded_oversampling():
@@ -113,8 +112,21 @@ def test_high_detail_falls_back_atomically_when_extra_zoom_is_unavailable(tmp_pa
     assert image.getpixel((160, 90)) == (64, 80, 96)
 
 
+def test_incomplete_standard_basemap_is_rejected(tmp_path):
+    manager = TileManager(tmp_path / "tiles")
+    manager.fetch_tile = lambda *args: None  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="complete 'dark' basemap"):
+        manager.render_basemap_layer(
+            20.0, 10.0, 21.0, 11.0, 320, 180,
+            provider="dark", dim_pct=0.0,
+        )
+
+
 def test_every_external_tile_provider_has_visible_credit_text():
-    assert set(TILE_PROVIDERS) == {"satellite", "topo", "osm", "dark"}
+    assert set(TILE_PROVIDERS) == {"satellite", "topo", "osm", "dark", "light"}
     assert all(provider["attribution"].strip() for provider in TILE_PROVIDERS.values())
+    assert len({provider["cache_key"] for provider in TILE_PROVIDERS.values()}) == len(TILE_PROVIDERS)
     assert "OpenStreetMap contributors" in TILE_PROVIDERS["topo"]["attribution"]
     assert "OpenTopoMap" in TILE_PROVIDERS["topo"]["attribution"]
+    assert "HERE" in TILE_PROVIDERS["dark"]["attribution"]

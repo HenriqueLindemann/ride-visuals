@@ -18,7 +18,3 @@ bulk_dir = "bulk_download"
 catalog_db = "data/catalog/activities.duckdb"
 streams_dir = "data/streams"
 outputs_dir = "outputs"
-
-[privacy]
-# Optional local CSV columns: latitude,longitude,radius_km
-# zones_file = "config/privacy_zones.csv"

@@ -104,3 +104,4 @@ def test_render_spec_embeds_portable_background(tmp_path):
     assert spec.background.blur_px == 12
     assert spec.background.dim == 0.45
     assert spec.background.attribution is None
+    assert spec.background.attribution_bottom_px == 6.0

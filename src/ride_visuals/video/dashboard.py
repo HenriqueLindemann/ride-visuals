@@ -3,7 +3,7 @@
 from typing import Optional, Sequence
 import numpy as np
 from PIL import ImageDraw
-from ride_visuals.design import MIDNIGHT
+from ride_visuals.design import MIDNIGHT, VisualTheme
 from ride_visuals.video.fonts import FontManager
 
 
@@ -17,7 +17,8 @@ class DashboardPainter:
                     eyebrow: str = "",
                     badge: Optional[str] = None,
                     is_mobile: bool = False,
-                    scale: int = 1) -> int:
+                    scale: int = 1,
+                    theme: VisualTheme = MIDNIGHT) -> int:
         """Cabeçalho sóbrio, limpo e sem redundâncias visuais."""
         tag = badge or eyebrow
         if is_mobile:
@@ -33,18 +34,18 @@ class DashboardPainter:
 
         cur_y = y
         if tag:
-            draw.text((x, cur_y), tag.upper(), fill=MIDNIGHT.text_muted, font=f_eyebrow)
+            draw.text((x, cur_y), tag.upper(), fill=theme.text_muted, font=f_eyebrow)
             cur_y += (25 if is_mobile else 21) * scale
 
         title = DashboardPainter._fit_text(title, f_title, w)
-        draw.text((x, cur_y), title, fill=MIDNIGHT.text_primary, font=f_title)
+        draw.text((x, cur_y), title, fill=theme.text_primary, font=f_title)
         cur_y += step_y
 
         subtitle = DashboardPainter._fit_text(subtitle, f_sub, w)
-        draw.text((x, cur_y), subtitle, fill=MIDNIGHT.text_secondary, font=f_sub)
+        draw.text((x, cur_y), subtitle, fill=theme.text_secondary, font=f_sub)
         cur_y += (31 if is_mobile else 25) * scale
 
-        draw.line([(x, cur_y), (x + w, cur_y)], fill=MIDNIGHT.border, width=scale)
+        draw.line([(x, cur_y), (x + w, cur_y)], fill=theme.border, width=scale)
         return cur_y + (23 if is_mobile else 19) * scale
 
     @staticmethod
@@ -62,13 +63,14 @@ class DashboardPainter:
     def draw_sparkline(draw: ImageDraw.Draw,
                        sx: int, sy: int, sw: int, sh: int,
                        recent_values: np.ndarray,
-                       line_color: str = MIDNIGHT.text_secondary,
+                       line_color: str | None = None,
                        min_val: Optional[float] = None,
                        max_val: Optional[float] = None,
-                       scale: int = 1):
+                       scale: int = 1,
+                       theme: VisualTheme = MIDNIGHT):
         """Desenha o rastro com escala fixa e amortecimento suave (sem oscilação ou flicker)."""
         valid_vals = recent_values[~np.isnan(recent_values)]
-        draw.line([(sx, sy), (sx, sy + sh), (sx + sw, sy + sh)], fill=MIDNIGHT.border, width=scale)
+        draw.line([(sx, sy), (sx, sy + sh), (sx + sw, sy + sh)], fill=theme.border, width=scale)
         if len(valid_vals) == 0:
             return
 
@@ -89,27 +91,28 @@ class DashboardPainter:
             pts.append((int(round(px)), int(round(py))))
 
         if len(pts) >= 2:
-            draw.line(pts, fill=line_color, width=2 * scale)
+            draw.line(pts, fill=line_color or theme.text_secondary, width=2 * scale)
         if pts:
             lx, ly = pts[-1]
             marker = 3 * scale
-            draw.line([(lx, ly), (lx, sy + sh)], fill=MIDNIGHT.route_primary, width=scale)
-            draw.rectangle((lx - marker, ly - marker, lx + marker, ly + marker), fill=MIDNIGHT.route_primary)
+            draw.line([(lx, ly), (lx, sy + sh)], fill=theme.route_primary, width=scale)
+            draw.rectangle((lx - marker, ly - marker, lx + marker, ly + marker), fill=theme.route_primary)
 
     @staticmethod
     def draw_card(draw: ImageDraw.Draw,
                   x: int, y: int, w: int, h: int,
                   label: str, value: str, unit: str = "",
-                  color: str = MIDNIGHT.text_primary,
+                  color: str | None = None,
                   recent_trail: Optional[np.ndarray] = None,
-                  trail_color: str = MIDNIGHT.text_secondary,
+                  trail_color: str | None = None,
                   min_val: Optional[float] = None,
                   max_val: Optional[float] = None,
                   accent_color: Optional[str] = None,
                   is_mobile: bool = False,
-                  scale: int = 1):
+                  scale: int = 1,
+                  theme: VisualTheme = MIDNIGHT):
         """Flat metric row with a typographic value and optional axis chart."""
-        draw.line([(x, y), (x + w, y)], fill=MIDNIGHT.border, width=scale)
+        draw.line([(x, y), (x + w, y)], fill=theme.border, width=scale)
 
         if is_mobile:
             f_label = FontManager.get_font(15 * scale, bold=True)
@@ -129,16 +132,16 @@ class DashboardPainter:
             spark_w = int(w * 0.42)
 
         # Rótulo
-        draw.text((x + pad_x, lbl_y), label.upper(), fill=MIDNIGHT.text_muted, font=f_label)
+        draw.text((x + pad_x, lbl_y), label.upper(), fill=theme.text_muted, font=f_label)
 
         # Valor
-        draw.text((x + pad_x, val_y), value, fill=MIDNIGHT.text_primary, font=f_val)
+        draw.text((x + pad_x, val_y), value, fill=color or theme.text_primary, font=f_val)
 
         # Unidade
         if unit:
             val_w = int(round(f_val.getlength(value)))
             draw.text((x + pad_x + val_w + 8 * scale, val_y + (10 if is_mobile else 8) * scale),
-                      unit, fill=MIDNIGHT.text_muted, font=f_unit)
+                      unit, fill=theme.text_muted, font=f_unit)
 
         # Sparkline trail se fornecido
         if recent_trail is not None and len(recent_trail) > 1:
@@ -147,7 +150,8 @@ class DashboardPainter:
             spark_h = h - 28 * scale
             DashboardPainter.draw_sparkline(draw, spark_x, spark_y, spark_w, spark_h,
                                             recent_trail, line_color=trail_color,
-                                            min_val=min_val, max_val=max_val, scale=scale)
+                                            min_val=min_val, max_val=max_val, scale=scale,
+                                            theme=theme)
 
     draw_metric_card = draw_card
 
@@ -158,7 +162,8 @@ class DashboardPainter:
                             current_index: float,
                             scale: int = 1,
                             x_values: Optional[np.ndarray] = None,
-                            x_ticks: Optional[Sequence[tuple[float, str]]] = None) -> None:
+                            x_ticks: Optional[Sequence[tuple[float, str]]] = None,
+                            theme: VisualTheme = MIDNIGHT) -> None:
         """Draw a full-series axis chart with completed progress highlighted."""
         valid = np.asarray(values, dtype=float)
         if len(valid) < 2 or not np.any(np.isfinite(valid)):
@@ -185,11 +190,11 @@ class DashboardPainter:
             for tick_value, tick_label in x_ticks:
                 tick_x = x + int(round((float(tick_value) - h_min) / h_span * w))
                 if x <= tick_x <= x + w:
-                    draw.line([(tick_x, y), (tick_x, y + h)], fill=MIDNIGHT.grid, width=scale)
+                    draw.line([(tick_x, y), (tick_x, y + h)], fill=theme.grid, width=scale)
                     draw.text((tick_x + 4 * scale, y + h + 7 * scale), tick_label,
-                              fill=MIDNIGHT.text_muted, font=tick_font)
-        draw.line([(x, y), (x, y + h), (x + w, y + h)], fill=MIDNIGHT.border, width=scale)
-        draw.line(points, fill=MIDNIGHT.text_muted, width=scale)
+                              fill=theme.text_muted, font=tick_font)
+        draw.line([(x, y), (x, y + h), (x + w, y + h)], fill=theme.border, width=scale)
+        draw.line(points, fill=theme.text_muted, width=scale)
         position = min(max(float(current_index), 0.0), len(points) - 1)
         completed_index = int(np.floor(position))
         fraction = position - completed_index
@@ -201,19 +206,20 @@ class DashboardPainter:
             cy = int(round(cy + (ny - cy) * fraction))
             completed_points = [*completed_points, (cx, cy)]
         if len(completed_points) >= 2:
-            draw.line(completed_points, fill=MIDNIGHT.text_secondary, width=2 * scale)
+            draw.line(completed_points, fill=theme.text_secondary, width=2 * scale)
         marker = 3 * scale
-        draw.line([(cx, cy), (cx, y + h)], fill=MIDNIGHT.route_primary, width=scale)
-        draw.rectangle((cx - marker, cy - marker, cx + marker, cy + marker), fill=MIDNIGHT.route_primary)
+        draw.line([(cx, cy), (cx, y + h)], fill=theme.route_primary, width=scale)
+        draw.rectangle((cx - marker, cy - marker, cx + marker, cy + marker), fill=theme.route_primary)
 
     @staticmethod
     def draw_progress_bar(draw: ImageDraw.Draw,
                           x: int, y: int, w: int, h: int,
                           pct: float,
-                          color: str = MIDNIGHT.route_primary,
-                          scale: int = 1):
+                          color: str | None = None,
+                          scale: int = 1,
+                          theme: VisualTheme = MIDNIGHT):
         """Barra de progresso fina e elegante."""
         line_y = y + max(0, h // 2 - scale)
-        draw.rectangle((x, line_y, x + w, line_y + 2 * scale), fill=MIDNIGHT.border)
+        draw.rectangle((x, line_y, x + w, line_y + 2 * scale), fill=theme.border)
         fill_w = max(int(w * min(max(pct, 0.0), 1.0)), 2 * scale)
-        draw.rectangle((x, line_y, x + fill_w, line_y + 2 * scale), fill=color)
+        draw.rectangle((x, line_y, x + fill_w, line_y + 2 * scale), fill=color or theme.route_primary)

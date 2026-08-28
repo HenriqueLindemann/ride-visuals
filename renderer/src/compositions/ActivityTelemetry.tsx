@@ -11,6 +11,7 @@ export const ActivityTelemetry = (props: ActivityRenderSpec) => {
   const {fps, width, height} = useVideoConfig();
   const theme = themes[props.theme];
   const vertical = height > width;
+  const layoutScale = vertical ? height / 1920 : height / 1080;
   const animationFrames = Math.round(props.profile.duration_seconds * fps);
   const linear = interpolate(frame, [0, animationFrames], [0, 1], {
     extrapolateLeft: 'clamp',
@@ -36,15 +37,30 @@ export const ActivityTelemetry = (props: ActivityRenderSpec) => {
         style={{
           display: 'grid',
           gridTemplateColumns: vertical ? '1fr' : '70% 30%',
-          gridTemplateRows: vertical ? '60% 40%' : '1fr',
+          gridTemplateRows: vertical ? '54% 46%' : '1fr',
           background: 'transparent',
         }}
       >
-        <RouteMap points={props.points} currentIndex={index} theme={theme} transparent={hasBackground} />
+        <div style={{position: 'relative', overflow: 'hidden', width: '100%', height: '100%'}}>
+          <RouteMap
+            points={props.points}
+            currentIndex={index}
+            theme={theme}
+            containerWidth={vertical ? width : Math.round(width * 0.70)}
+            containerHeight={vertical ? Math.round(height * 0.54) : height}
+            topPadding={Math.round((vertical ? 56 : 64) * layoutScale)}
+            bottomPadding={Math.round((vertical ? 56 : 64) * layoutScale)}
+            sidePadding={Math.round((vertical ? 56 : 64) * layoutScale)}
+            transparent={hasBackground}
+            showBackgroundRoute={props.show_background_route}
+            visualScale={layoutScale}
+          />
+        </div>
+
         <div
           style={{
             minHeight: 0,
-            background: hasBackground ? 'rgba(5, 5, 5, 0.80)' : theme.panel,
+            background: hasBackground ? theme.surface : theme.panel,
             borderLeft: vertical ? 'none' : `1px solid ${theme.border}`,
             borderTop: vertical ? `1px solid ${theme.border}` : 'none',
           }}

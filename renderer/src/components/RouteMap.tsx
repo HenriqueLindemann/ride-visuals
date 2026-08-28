@@ -1,4 +1,5 @@
 import {useMemo} from 'react';
+import {useVideoConfig} from 'remotion';
 import type {TelemetryPoint} from '../schema';
 import type {Theme} from '../design/tokens';
 
@@ -6,8 +7,15 @@ type Props = {
   points: TelemetryPoint[];
   currentIndex: number;
   theme: Theme;
+  containerWidth?: number;
+  containerHeight?: number;
+  topPadding?: number;
+  bottomPadding?: number;
+  sidePadding?: number;
   transparent?: boolean;
   showGrid?: boolean;
+  showBackgroundRoute?: boolean;
+  visualScale?: number;
 };
 
 const mercator = (lon: number, lat: number): [number, number] => {
@@ -17,7 +25,14 @@ const mercator = (lon: number, lat: number): [number, number] => {
   return [x, y];
 };
 
-const routeGeometry = (points: TelemetryPoint[]) => {
+const routeGeometry = (
+  points: TelemetryPoint[],
+  viewW: number,
+  viewH: number,
+  topPad: number,
+  bottomPad: number,
+  sidePad: number,
+) => {
   const projected = points.map((point) => mercator(point.lon, point.lat));
   const xs = projected.map(([x]) => x);
   const ys = projected.map(([, y]) => y);
@@ -27,22 +42,51 @@ const routeGeometry = (points: TelemetryPoint[]) => {
   const maxY = Math.max(...ys);
   const dataW = Math.max(maxX - minX, 1e-9);
   const dataH = Math.max(maxY - minY, 1e-9);
-  const scale = Math.min(880 / dataW, 880 / dataH);
-  const offsetX = (1000 - dataW * scale) / 2;
-  const offsetY = (1000 - dataH * scale) / 2;
+
+  const usableW = Math.max(viewW - 2 * sidePad, 10);
+  const usableH = Math.max(viewH - topPad - bottomPad, 10);
+  const scale = Math.min(usableW / dataW, usableH / dataH);
+
+  const renderedW = dataW * scale;
+  const renderedH = dataH * scale;
+
+  const offsetX = sidePad + (usableW - renderedW) / 2;
+  const offsetY = topPad + (usableH - renderedH) / 2;
+
   const coords = projected.map(([x, y]) => {
     const px = offsetX + (x - minX) * scale;
-    const py = 1000 - (offsetY + (y - minY) * scale);
+    const py = offsetY + (maxY - y) * scale;
     return {x: px, y: py};
   });
   const path = coords
     .map(({x, y}, index) => `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`)
     .join(' ');
-  return {coords, path};
+  return {coords, path, viewW, viewH};
 };
 
-export const RouteMap = ({points, currentIndex, theme, transparent = false, showGrid = true}: Props) => {
-  const geometry = useMemo(() => routeGeometry(points), [points]);
+export const RouteMap = ({
+  points,
+  currentIndex,
+  theme,
+  containerWidth,
+  containerHeight,
+  topPadding = 48,
+  bottomPadding = 48,
+  sidePadding = 48,
+  transparent = false,
+  showGrid = true,
+  showBackgroundRoute = true,
+  visualScale = 1,
+}: Props) => {
+  const {width, height} = useVideoConfig();
+  const viewW = containerWidth ?? width;
+  const viewH = containerHeight ?? height;
+
+  const geometry = useMemo(
+    () => routeGeometry(points, viewW, viewH, topPadding, bottomPadding, sidePadding),
+    [points, viewW, viewH, topPadding, bottomPadding, sidePadding],
+  );
+
   const safeIndex = Math.min(
     geometry.coords.length - 1,
     Math.max(0, currentIndex),
@@ -52,6 +96,7 @@ export const RouteMap = ({points, currentIndex, theme, transparent = false, show
     .slice(0, safeIndex + 1)
     .map(({x, y}, index) => `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`)
     .join(' ');
+
   return (
     <div
       style={{
@@ -63,20 +108,46 @@ export const RouteMap = ({points, currentIndex, theme, transparent = false, show
         backgroundImage: showGrid
           ? `linear-gradient(${theme.grid} 1px, transparent 1px), linear-gradient(90deg, ${theme.grid} 1px, transparent 1px)`
           : 'none',
-        backgroundSize: showGrid ? '64px 64px, 64px 64px' : undefined,
+        backgroundSize: showGrid
+          ? `${Math.round(64 * visualScale)}px ${Math.round(64 * visualScale)}px, ${Math.round(64 * visualScale)}px ${Math.round(64 * visualScale)}px`
+          : undefined,
       }}
     >
-      <svg viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet" style={{position: 'absolute', inset: '5%', width: '90%', height: '90%'}}>
-        <path d={geometry.path} fill="none" stroke={theme.routeInactive} strokeWidth="4" strokeLinecap="square" strokeLinejoin="miter" />
+      <svg
+        viewBox={`0 0 ${viewW} ${viewH}`}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+        }}
+      >
+        {showBackgroundRoute && (
+          <path
+            d={geometry.path}
+            fill="none"
+            stroke={theme.routeInactive}
+            strokeWidth={4 * visualScale}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
         <path
           d={completedPath}
           fill="none"
           stroke={theme.route}
-          strokeWidth="4.2"
-          strokeLinecap="square"
-          strokeLinejoin="miter"
+          strokeWidth={4.5 * visualScale}
+          strokeLinecap="round"
+          strokeLinejoin="round"
         />
-        {current ? <rect x={current.x - 5} y={current.y - 5} width="10" height="10" fill={theme.routeHighlight} /> : null}
+        {current ? (
+          <circle
+            cx={current.x}
+            cy={current.y}
+            r={6 * visualScale}
+            fill={theme.routeHighlight}
+          />
+        ) : null}
       </svg>
     </div>
   );

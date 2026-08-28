@@ -181,8 +181,6 @@ def cmd_map(args):
     catalog_db = Path(args.catalog_db or config.get("paths", {}).get("catalog_db", "data/catalog/activities.duckdb"))
     streams_dir = Path(args.streams_dir or config.get("paths", {}).get("streams_dir", "data/streams"))
     outputs_dir = Path(args.outputs_dir or config.get("paths", {}).get("outputs_dir", "outputs")) / "maps"
-    zones_value = config.get("privacy", {}).get("zones_file")
-    privacy_zones = Path(zones_value) if zones_value else None
     locale = getattr(args, "locale", None) or config.get("app", {}).get("locale", "pt-BR")
     theme = getattr(args, "theme", None) or config.get("video", {}).get("theme", "midnight")
     selection = activity_selection(args, config)
@@ -190,7 +188,6 @@ def cmd_map(args):
         catalog_db_path=catalog_db,
         streams_dir=streams_dir,
         outputs_dir=outputs_dir,
-        privacy_zones_path=privacy_zones,
         locale=locale,
         theme=theme,
         selection=selection,
@@ -220,129 +217,121 @@ from ride_visuals.analytics.dashboard import AnalyticsDashboardGenerator
 from ride_visuals.analytics.season_timeline import SeasonTimelineGenerator
 
 
-def cmd_video(args):
-    """Renderiza vídeos com ou sem telemetria, filme de progresso e coleções completas."""
-    config = load_config(Path(args.config) if args.config else None)
-    streams_dir = Path(config.get("paths", {}).get("streams_dir", "data/streams"))
-    catalog_db = Path(config.get("paths", {}).get("catalog_db", "data/catalog/activities.duckdb"))
-    outputs_dir = Path(config.get("paths", {}).get("outputs_dir", "outputs")) / "videos"
-    zones_value = config.get("privacy", {}).get("zones_file")
-    privacy_zones = Path(zones_value) if zones_value else None
-    locale = getattr(args, "locale", None) or config.get("app", {}).get("locale", "pt-BR")
-    theme = getattr(args, "theme", None) or config.get("video", {}).get("theme", "midnight")
-    selection = activity_selection(args, config)
-    selection_tag = selection.slug()
-    write_keyframes = not getattr(args, "no_keyframes", False)
-    if args.video_type == "timeline":
-        timeline_dir = outputs_dir / "timeline"
-        aspect = getattr(args, "aspect", "16:9")
-        is_preview = getattr(args, "preview", False)
-        preset = get_video_preset("timeline", aspect, preview=is_preview)
-        preview_tag = "_preview" if is_preview else ""
-        output = timeline_dir / f"timeline_{selection_tag}_{aspect.replace(':', '_')}{preview_tag}.mp4"
-        keyframes = (
-            outputs_dir / "keyframes" / f"timeline_{aspect.replace(':', '_')}_{locale.lower().replace('-', '_')}"
-            if write_keyframes else None
-        )
-        renderer = SeasonTimelineVideoRenderer(
-            catalog_db, timeline_dir, locale=locale, theme=theme, selection=selection
-        )
-        renderer.render(
-            output,
-            width=preset.canvas.width,
-            height=preset.canvas.height,
-            fps=preset.fps,
-            duration_s=preset.duration_seconds,
-            hold_s=preset.hold_seconds,
-            keyframes_dir=keyframes,
-        )
-        print(f"[Vídeo] Timeline unificada gerada: {output}")
-        if keyframes:
-            print(f"[Keyframes] Frames 0/50/100 em: {keyframes}")
-        return
+def _render_timeline(args, catalog_db: Path, outputs_dir: Path, locale: str, theme: str,
+                     selection: ActivitySelection, selection_tag: str, write_keyframes: bool):
+    timeline_dir = outputs_dir / "timeline"
+    aspect = getattr(args, "aspect", "16:9")
+    is_preview = getattr(args, "preview", False)
+    preset = get_video_preset("timeline", aspect, preview=is_preview)
+    preview_tag = "_preview" if is_preview else ""
+    output = timeline_dir / f"timeline_{selection_tag}_{aspect.replace(':', '_')}{preview_tag}.mp4"
+    keyframes = (
+        outputs_dir / "keyframes" / f"timeline_{aspect.replace(':', '_')}_{locale.lower().replace('-', '_')}"
+        if write_keyframes else None
+    )
+    renderer = SeasonTimelineVideoRenderer(
+        catalog_db, timeline_dir, locale=locale, theme=theme, selection=selection
+    )
+    renderer.render(
+        output,
+        width=preset.canvas.width,
+        height=preset.canvas.height,
+        fps=preset.fps,
+        duration_s=preset.duration_seconds,
+        hold_s=preset.hold_seconds,
+        keyframes_dir=keyframes,
+    )
+    print(f"[Vídeo] Timeline unificada gerada: {output}")
+    if keyframes:
+        print(f"[Keyframes] Frames 0/50/100 em: {keyframes}")
 
-    if args.video_type == "collection":
-        coll_dir = outputs_dir / "collection"
-        collection_basemap = getattr(args, "basemap", "plain")
-        map_detail = getattr(args, "map_detail", "standard")
-        style = getattr(args, "style", "orange")
-        detail_tag = "_map-high" if map_detail == "high" else ""
-        keyframes_dir = (
-            outputs_dir / "keyframes" / f"collection_{args.motion}_{style}_{collection_basemap}{detail_tag}_{args.aspect.replace(':', '_')}"
-            if write_keyframes else None
-        )
-        print(f"[Vídeo] Coleção {selection.describe()} (motion: {args.motion}, basemap: {collection_basemap})...")
-        renderer = CollectionVideoRenderer(
-            catalog_db,
-            streams_dir,
-            coll_dir,
-            privacy_zones_path=privacy_zones,
-            locale=locale,
-            theme=theme,
-            selection=selection,
-        )
-        aspect = getattr(args, "aspect", "16:9")
-        preset = get_video_preset(
-            "collection", aspect,
-            preview=getattr(args, "preview", False),
-            clean=getattr(args, "clean", False),
-        )
-        mode = preset.canvas.layout
-        w, h = preset.canvas.width, preset.canvas.height
-        dur, hold = preset.duration_seconds, preset.hold_seconds
-        clean_tag = "_clean" if getattr(args, "clean", False) else ""
-        basemap_tag = "" if collection_basemap == "plain" else f"_{collection_basemap}"
-        out_file = coll_dir / f"collection_{selection_tag}_{args.motion}_{style}{basemap_tag}{detail_tag}_{aspect.replace(':', '_')}{clean_tag}{'_preview' if args.preview else ''}.mp4"
-        out_path, keyframes = renderer.render_collection(
-            output_mp4_path=out_file,
-            motion=args.motion,
-            style=style,
-            mode=mode,
-            width=w,
-            height=h,
-            fps=preset.fps,
-            duration_s=dur,
-            hold_s=hold,
-            keyframes_dir=keyframes_dir,
-            ssaa_scale=1 if aspect == "4k" else 2,
-            basemap=collection_basemap,
-            map_detail=map_detail,
-            show_progress_bar=getattr(args, "show_progress_bar", False),
-        )
-        print(f"[Vídeo] Coleção gerada com sucesso em: {out_path}")
-        if keyframes_dir:
-            print(f"[Keyframes] {len(keyframes)} frames-chave salvos em: {keyframes_dir}")
-        return
 
-    if args.video_type == "progress":
-        prog_dir = outputs_dir / "progress"
-        print(f"[Vídeo] Progresso: {selection.describe()}")
-        renderer = ProgressMovieRenderer(
-            catalog_db, streams_dir, prog_dir, locale=locale, theme=theme, selection=selection
-        )
-        aspect = getattr(args, "aspect", "16:9")
-        preset = get_video_preset("progress", aspect, preview=getattr(args, "preview", False))
-        w, h = preset.canvas.width, preset.canvas.height
-        dur = preset.duration_seconds
-        preview_tag = "_preview" if getattr(args, "preview", False) else ""
-        out_file = prog_dir / f"progress_{selection_tag}_{aspect.replace(':', '_')}{preview_tag}.mp4"
-        progress_keyframes = (
-            outputs_dir / "keyframes" / f"progress_{aspect.replace(':', '_')}_{locale.lower().replace('-', '_')}"
-            if write_keyframes else None
-        )
-        renderer.render_movie(
-            output_mp4_path=out_file,
-            width=w,
-            height=h,
-            fps=preset.fps,
-            chapter_duration_s=dur,
-            keyframes_dir=progress_keyframes,
-        )
-        print(f"[Vídeo] Filme de progresso gerado com sucesso: {out_file}")
-        if progress_keyframes:
-            print(f"[Keyframes] Frames 0/50/100 em: {progress_keyframes}")
-        return
+def _render_collection(args, catalog_db: Path, streams_dir: Path, outputs_dir: Path, locale: str, theme: str,
+                       selection: ActivitySelection, selection_tag: str, write_keyframes: bool):
+    coll_dir = outputs_dir / "collection"
+    collection_basemap = getattr(args, "basemap", "plain")
+    map_detail = getattr(args, "map_detail", "standard")
+    style = getattr(args, "style", "orange")
+    detail_tag = "_map-high" if map_detail == "high" else ""
+    keyframes_dir = (
+        outputs_dir / "keyframes" / f"collection_{args.motion}_{style}_{collection_basemap}{detail_tag}_{args.aspect.replace(':', '_')}"
+        if write_keyframes else None
+    )
+    print(f"[Vídeo] Coleção {selection.describe()} (motion: {args.motion}, basemap: {collection_basemap})...")
+    renderer = CollectionVideoRenderer(
+        catalog_db,
+        streams_dir,
+        coll_dir,
+        locale=locale,
+        theme=theme,
+        selection=selection,
+    )
+    aspect = getattr(args, "aspect", "16:9")
+    preset = get_video_preset(
+        "collection", aspect,
+        preview=getattr(args, "preview", False),
+        clean=getattr(args, "clean", False),
+    )
+    mode = preset.canvas.layout
+    w, h = preset.canvas.width, preset.canvas.height
+    dur, hold = preset.duration_seconds, preset.hold_seconds
+    clean_tag = "_clean" if getattr(args, "clean", False) else ""
+    basemap_tag = "" if collection_basemap == "plain" else f"_{collection_basemap}"
+    out_file = coll_dir / f"collection_{selection_tag}_{args.motion}_{style}{basemap_tag}{detail_tag}_{aspect.replace(':', '_')}{clean_tag}{'_preview' if args.preview else ''}.mp4"
+    out_path, keyframes = renderer.render_collection(
+        output_mp4_path=out_file,
+        motion=args.motion,
+        style=style,
+        mode=mode,
+        width=w,
+        height=h,
+        fps=preset.fps,
+        duration_s=dur,
+        hold_s=hold,
+        keyframes_dir=keyframes_dir,
+        ssaa_scale=1 if aspect == "4k" else 2,
+        basemap=collection_basemap,
+        map_detail=map_detail,
+        show_progress_bar=getattr(args, "show_progress_bar", False),
+        show_background_tracks=getattr(args, "background_tracks", None),
+    )
+    print(f"[Vídeo] Coleção gerada com sucesso em: {out_path}")
+    if keyframes_dir:
+        print(f"[Keyframes] {len(keyframes)} frames-chave salvos em: {keyframes_dir}")
 
+
+def _render_progress(args, catalog_db: Path, streams_dir: Path, outputs_dir: Path, locale: str, theme: str,
+                     selection: ActivitySelection, selection_tag: str, write_keyframes: bool):
+    prog_dir = outputs_dir / "progress"
+    print(f"[Vídeo] Progresso: {selection.describe()}")
+    renderer = ProgressMovieRenderer(
+        catalog_db, streams_dir, prog_dir, locale=locale, theme=theme, selection=selection
+    )
+    aspect = getattr(args, "aspect", "16:9")
+    preset = get_video_preset("progress", aspect, preview=getattr(args, "preview", False))
+    w, h = preset.canvas.width, preset.canvas.height
+    dur = preset.duration_seconds
+    preview_tag = "_preview" if getattr(args, "preview", False) else ""
+    out_file = prog_dir / f"progress_{selection_tag}_{aspect.replace(':', '_')}{preview_tag}.mp4"
+    progress_keyframes = (
+        outputs_dir / "keyframes" / f"progress_{aspect.replace(':', '_')}_{locale.lower().replace('-', '_')}"
+        if write_keyframes else None
+    )
+    renderer.render_movie(
+        output_mp4_path=out_file,
+        width=w,
+        height=h,
+        fps=preset.fps,
+        chapter_duration_s=dur,
+        keyframes_dir=progress_keyframes,
+    )
+    print(f"[Vídeo] Filme de progresso gerado com sucesso: {out_file}")
+    if progress_keyframes:
+        print(f"[Keyframes] Frames 0/50/100 em: {progress_keyframes}")
+
+
+def _render_activity(args, catalog_db: Path, streams_dir: Path, outputs_dir: Path, locale: str, theme: str,
+                     write_keyframes: bool):
     act_id = args.activity_id
     engine_name = getattr(args, "engine", "auto")
     if engine_name == "auto":
@@ -367,100 +356,131 @@ def cmd_video(args):
     basemap_tag = "" if activity_basemap == "plain" else f"_{activity_basemap}"
     output_file = sub_dir / f"activity_{act_id}_{args.video_type}_{theme}_{locale_tag}{basemap_tag}_{aspect.replace(':', '_')}{'_preview' if is_preview else ''}.{output_extension}"
 
-    if engine_name == "remotion":
-        with duckdb.connect(str(catalog_db), read_only=True) as con:
-            activity_row = con.execute(
-                "SELECT name, CAST(start_date AS VARCHAR) FROM activities WHERE id = ?",
-                [act_id],
-            ).fetchone()
-        title_override = getattr(args, "title", None)
-        if title_override is None:
-            title_override = activity_row[0] if activity_row else f"Activity {act_id}"
-        activity_name = sanitize_display_text(title_override)
-        activity_date = str(activity_row[1]) if activity_row and activity_row[1] else None
-        background_image = (
-            Path(args.background_image)
-            if args.video_type in {"clean", "telemetry"} and getattr(args, "background_image", None)
-            else None
-        )
-        if background_image is not None and activity_basemap != "plain":
-            raise ValueError("Use either --background-image or --basemap for an activity render, not both")
+    if engine_name != "remotion":
+        raise ValueError(f"Engine de atividade não suportado: {engine_name}")
 
-        spec = ActivityRenderSpec.from_parquet(
-            parquet_path,
-            activity_id=act_id,
-            title=activity_name,
-            activity_date=activity_date,
-            locale=locale,
-            theme=theme,
-            profile=RenderProfile(
-                width=w,
-                height=h,
-                fps=preset.fps,
-                duration_seconds=dur,
-                hold_seconds=hold,
-            ),
-            max_points=6000 if is_preview else None,
-            background_image=background_image,
-            background_blur_px=float(getattr(args, "background_blur", 0.0)),
-            background_dim=float(getattr(args, "background_dim", 0.35)),
+    with duckdb.connect(str(catalog_db), read_only=True) as con:
+        activity_row = con.execute(
+            "SELECT name, CAST(start_date AS VARCHAR) FROM activities WHERE id = ?",
+            [act_id],
+        ).fetchone()
+    title_override = getattr(args, "title", None)
+    if title_override is None:
+        title_override = activity_row[0] if activity_row else f"Activity {act_id}"
+    activity_name = sanitize_display_text(title_override)
+    activity_date = str(activity_row[1]) if activity_row and activity_row[1] else None
+    background_image = (
+        Path(args.background_image)
+        if args.video_type in {"clean", "telemetry"} and getattr(args, "background_image", None)
+        else None
+    )
+    if background_image is not None and activity_basemap != "plain":
+        raise ValueError("Use either --background-image or --basemap for an activity render, not both")
+    background_blur = float(getattr(args, "background_blur", 0.0))
+    if activity_basemap != "plain" and background_blur > 0.0:
+        raise ValueError("A georeferenced basemap cannot be blurred because scaling it would misalign the route")
+
+    spec = ActivityRenderSpec.from_parquet(
+        parquet_path,
+        activity_id=act_id,
+        title=activity_name,
+        activity_date=activity_date,
+        locale=locale,
+        theme=theme,
+        profile=RenderProfile(
+            width=w,
+            height=h,
+            fps=preset.fps,
+            duration_seconds=dur,
+            hold_seconds=hold,
+        ),
+        max_points=6000 if is_preview else None,
+        background_image=background_image,
+        background_blur_px=background_blur,
+        background_dim=float(getattr(args, "background_dim", 0.35)),
+        show_progress_bar=getattr(args, "show_progress_bar", False),
+        show_background_route=True if getattr(args, "background_tracks", None) is None else getattr(args, "background_tracks", None),
+    )
+    if activity_basemap != "plain":
+        background_file = (
+            outputs_dir.parent
+            / "backgrounds"
+            / f"activity_{act_id}_{activity_basemap}_{aspect.replace(':', '_')}.png"
+        )
+        print(f"[Basemap] Gerando fundo {activity_basemap} georreferenciado...")
+        render_activity_basemap(
+            spec.points,
+            background_file,
+            provider=activity_basemap,
+            width=w,
+            height=h,
+            layout="clean" if args.video_type == "clean" else "telemetry",
+            map_detail=getattr(args, "map_detail", "standard"),
             show_progress_bar=getattr(args, "show_progress_bar", False),
         )
-        if activity_basemap != "plain":
-            background_file = (
-                outputs_dir.parent
-                / "backgrounds"
-                / f"activity_{act_id}_{activity_basemap}_{aspect.replace(':', '_')}.png"
-            )
-            print(f"[Basemap] Gerando fundo {activity_basemap} georreferenciado...")
-            render_activity_basemap(
-                spec.points,
-                background_file,
-                provider=activity_basemap,
-                width=w,
-                height=h,
-                layout="clean" if args.video_type == "clean" else "telemetry",
-                map_detail=getattr(args, "map_detail", "standard"),
-            )
-            spec = replace(
-                spec,
-                background=BackgroundSpec.from_image(
-                    background_file,
-                    blur_px=float(getattr(args, "background_blur", 0.0)),
-                    dim=float(getattr(args, "background_dim", 0.35)),
-                    attribution=TILE_PROVIDERS[activity_basemap]["attribution"],
-                ),
-            )
-        spec_path = outputs_dir.parent / "render-specs" / f"activity_{act_id}_{args.video_type}_{theme}_{locale_tag}{basemap_tag}_{aspect.replace(':', '_')}.json"
-        keyframe_kind = "_clean" if args.video_type == "clean" else ""
-        keyframes_dir = (
-            outputs_dir / "keyframes" / f"activity_{act_id}{keyframe_kind}_{theme}_{locale_tag}{basemap_tag}_{aspect.replace(':', '_')}"
-            if write_keyframes else None
-        )
-        engine = RemotionVideoEngine()
-        if args.video_type == "overlay":
-            print(f"[Overlay] Renderizando {output_extension.upper()} transparente (locale: {locale}, theme: {theme})...")
-            if output_extension == "png":
-                output = engine.render_overlay_still(spec, output_file, spec_path=spec_path)
-            else:
-                output = engine.render_overlay_video(spec, output_file, spec_path=spec_path)
-            print(f"[Overlay] Saída transparente gerada: {output}")
-            return
-
-        print(f"[Vídeo] Renderizando com engine visual (locale: {locale}, theme: {theme}, preview: {is_preview})...")
-        output, keyframes = engine.render_activity(
+        spec = replace(
             spec,
-            output_file,
-            spec_path=spec_path,
-            keyframes_dir=keyframes_dir,
-            composition="ActivityClean" if args.video_type == "clean" else "ActivityTelemetry",
+            background=BackgroundSpec.from_image(
+                background_file,
+                blur_px=0.0,
+                dim=float(getattr(args, "background_dim", 0.35)),
+                attribution=TILE_PROVIDERS[activity_basemap]["attribution"],
+                attribution_bottom_px=(
+                    h - int(round(h * 0.54)) + 6
+                    if args.video_type == "telemetry" and h > w
+                    else 6
+                ),
+            ),
         )
-        print(f"[Vídeo] Gerado: {output}")
-        if keyframes_dir:
-            print(f"[Keyframes] {len(keyframes)} frames em: {keyframes_dir}")
+    spec_path = outputs_dir.parent / "render-specs" / f"activity_{act_id}_{args.video_type}_{theme}_{locale_tag}{basemap_tag}_{aspect.replace(':', '_')}.json"
+    keyframe_kind = "_clean" if args.video_type == "clean" else ""
+    keyframes_dir = (
+        outputs_dir / "keyframes" / f"activity_{act_id}{keyframe_kind}_{theme}_{locale_tag}{basemap_tag}_{aspect.replace(':', '_')}"
+        if write_keyframes else None
+    )
+    engine = RemotionVideoEngine()
+    if args.video_type == "overlay":
+        print(f"[Overlay] Renderizando {output_extension.upper()} transparente (locale: {locale}, theme: {theme})...")
+        if output_extension == "png":
+            output = engine.render_overlay_still(spec, output_file, spec_path=spec_path)
+        else:
+            output = engine.render_overlay_video(spec, output_file, spec_path=spec_path)
+        print(f"[Overlay] Saída transparente gerada: {output}")
         return
 
-    raise ValueError(f"Engine de atividade não suportado: {engine_name}")
+    print(f"[Vídeo] Renderizando com engine visual (locale: {locale}, theme: {theme}, preview: {is_preview})...")
+    output, keyframes = engine.render_activity(
+        spec,
+        output_file,
+        spec_path=spec_path,
+        keyframes_dir=keyframes_dir,
+        composition="ActivityClean" if args.video_type == "clean" else "ActivityTelemetry",
+    )
+    print(f"[Vídeo] Gerado: {output}")
+    if keyframes_dir:
+        print(f"[Keyframes] {len(keyframes)} frames em: {keyframes_dir}")
+
+
+def cmd_video(args):
+    """Renderiza vídeos com ou sem telemetria, filme de progresso e coleções completas."""
+    config = load_config(Path(args.config) if args.config else None)
+    streams_dir = Path(config.get("paths", {}).get("streams_dir", "data/streams"))
+    catalog_db = Path(config.get("paths", {}).get("catalog_db", "data/catalog/activities.duckdb"))
+    outputs_dir = Path(config.get("paths", {}).get("outputs_dir", "outputs")) / "videos"
+    locale = getattr(args, "locale", None) or config.get("app", {}).get("locale", "pt-BR")
+    theme = getattr(args, "theme", None) or config.get("video", {}).get("theme", "midnight")
+    selection = activity_selection(args, config)
+    selection_tag = selection.slug()
+    write_keyframes = not getattr(args, "no_keyframes", False)
+
+    if args.video_type == "timeline":
+        return _render_timeline(args, catalog_db, outputs_dir, locale, theme, selection, selection_tag, write_keyframes)
+    if args.video_type == "collection":
+        return _render_collection(args, catalog_db, streams_dir, outputs_dir, locale, theme, selection, selection_tag, write_keyframes)
+    if args.video_type == "progress":
+        return _render_progress(args, catalog_db, streams_dir, outputs_dir, locale, theme, selection, selection_tag, write_keyframes)
+    return _render_activity(args, catalog_db, streams_dir, outputs_dir, locale, theme, write_keyframes)
+
 
 
 def cmd_report(args):
@@ -625,7 +645,7 @@ def main():
     p_map = subparsers.add_parser("map", help="Gera mapas cartográficos e heatmaps")
     p_map.add_argument("map_type", choices=["overview", "heatmap", "effort"], help="Tipo de mapa")
     add_selection_arguments(p_map)
-    p_map.add_argument("--basemap", choices=["dark", "satellite", "topo", "osm"], default="dark", help="Provedor de mapa base")
+    p_map.add_argument("--basemap", choices=["plain", *TILE_PROVIDERS], default="dark", help="Provedor de mapa base")
     p_map.add_argument("--dpi", type=int, default=300, help="Resolução DPI da imagem")
     p_map.add_argument("--map-detail", choices=["standard", "high"], default="standard", help="Tiles padrão ou uma camada extra de resolução antes do downsample")
     p_map.add_argument("--route-style", choices=["orange", "monochrome", "monthly"], default="orange", help="Paleta aplicada somente aos traçados")
@@ -642,8 +662,8 @@ def main():
     p_vid.add_argument("video_type", choices=["clean", "telemetry", "overlay", "progress", "collection", "timeline"], help="Tipo de vídeo ou overlay")
     p_vid.add_argument("activity_id", type=int, nargs="?", default=0, help="ID da atividade (para clean/telemetry/overlay)")
     p_vid.add_argument("--motion", choices=["simultaneous", "elapsed", "chronological", "comet"], default="chronological", help="Cinemática da coleção; elapsed alinha as largadas e preserva a duração real de cada rota")
-    p_vid.add_argument("--style", choices=["orange", "monochrome", "monthly", "heart_rate", "temperature", "altitude", "speed", "grade"], default="orange", help="Paleta aplicada somente aos traçados")
-    p_vid.add_argument("--basemap", choices=["plain", "dark", "satellite", "topo", "osm"], default="plain", help="Fundo georreferenciado para vídeos de coleção ou atividade")
+    p_vid.add_argument("--style", choices=["orange", "density", "monochrome", "monthly", "heart_rate", "temperature", "altitude", "speed", "grade"], default="orange", help="Paleta aplicada somente aos traçados")
+    p_vid.add_argument("--basemap", choices=["plain", *TILE_PROVIDERS], default="plain", help="Fundo georreferenciado para vídeos de coleção ou atividade")
     p_vid.add_argument("--map-detail", choices=["standard", "high"], default="standard", help="Tiles padrão ou uma camada extra de resolução antes do downsample")
     p_vid.add_argument("--preview", action="store_true", help="Renderiza versão curta/preview rápido")
     p_vid.add_argument("--no-keyframes", action="store_true", help="Não extrai frames de inspeção 0/50/100")
@@ -662,6 +682,13 @@ def main():
         dest="show_progress_bar",
         default=False,
         help="Show the optional progress percentage and bar in activity and collection videos",
+    )
+    p_vid.add_argument(
+        "--background-tracks",
+        action=argparse.BooleanOptionalAction,
+        dest="background_tracks",
+        default=None,
+        help="Show faint background/inactive routes before they are ridden",
     )
     p_vid.add_argument("--overlay-format", choices=["png", "webm", "mov"], default="png", help="PNG estático, WebM alpha ou ProRes 4444 MOV")
     p_vid.add_argument("--config", type=str, help="Caminho para config/config.toml")
@@ -683,8 +710,8 @@ def main():
     p_val.add_argument("--config", type=str, help="Caminho para config/config.toml")
     p_val.add_argument("--final-set", action="store_true", help="Valida somente as seis saídas canônicas do recorte")
     p_val.add_argument("--motion", choices=["simultaneous", "elapsed", "chronological", "comet"], default="chronological")
-    p_val.add_argument("--style", choices=["orange", "monochrome", "monthly", "heart_rate", "temperature", "altitude", "speed", "grade"], default="heart_rate")
-    p_val.add_argument("--basemap", choices=["plain", "dark", "satellite", "topo", "osm"], default="dark")
+    p_val.add_argument("--style", choices=["orange", "density", "monochrome", "monthly", "heart_rate", "temperature", "altitude", "speed", "grade"], default="heart_rate")
+    p_val.add_argument("--basemap", choices=["plain", *TILE_PROVIDERS], default="dark")
     add_selection_arguments(p_val)
     p_val.set_defaults(func=cmd_validate)
 

@@ -10,11 +10,12 @@ who wants to see their rides differently. Everything runs locally.
   <img src="showcase/ride-collection.gif" alt="Animated cycling activity collection">
 </p>
 
-Routes accumulate chronologically while the map, heart-rate coverage, and
-season totals evolve together.
+Routes accumulate chronologically while repeated streets become brighter and
+the season totals evolve alongside the map.
 
 ```bash
-make preview-collection SCOPE="--start-date 2026-02-06"
+make preview-collection STYLE=density VIDEO_BASEMAP=plain \
+  SCOPE="--start-date 2026-02-06"
 ```
 
 ## One ride in detail
@@ -24,7 +25,8 @@ make preview-collection SCOPE="--start-date 2026-02-06"
 </p>
 
 The activity view follows route progress alongside speed, heart rate,
-elevation, grade, temperature, and distance.
+elevation, grade, temperature, and distance. The georeferenced map continues
+behind the translucent telemetry column.
 
 ```bash
 make preview-activity ACTIVITY_ID=<activity-id> TELEMETRY_BASEMAP=satellite
@@ -47,7 +49,7 @@ ride-visuals video overlay <activity-id> --overlay-format png --aspect 16:9 \
 ### Telemetry over media
 
 <p align="center">
-  <img src="showcase/ride-overlay-motion.gif" alt="Moving telemetry overlay drawn over a ride photo">
+  <img src="showcase/ride-overlay-motion.gif" alt="Moving telemetry for a 71.7 km climbing ride over its finish photo">
 </p>
 
 The overlay can also move. The route draws itself while speed, heart rate, and
@@ -56,7 +58,8 @@ transparent, in vertical or landscape.
 
 ```bash
 ride-visuals video telemetry <activity-id> --background-image photo.jpg \
-  --aspect 9:16 --title "" --config config/config.toml
+  --background-blur 0 --background-dim 0.18 --aspect 9:16 \
+  --title "" --config config/config.toml
 ```
 
 ## Shape the collection
@@ -64,7 +67,8 @@ ride-visuals video telemetry <activity-id> --background-image photo.jpg \
 Collection videos support chronological, simultaneous, elapsed-time, and comet
 motion. Routes can be colored by heart rate, temperature, altitude, speed,
 grade, month, or a fixed palette, over plain, dark, satellite, topographic, or
-OpenStreetMap backgrounds.
+OpenStreetMap backgrounds. A quiet light-grey basemap is also available for the
+Frost theme.
 
 ```bash
 ride-visuals video collection --motion elapsed --style altitude --basemap topo \

@@ -4,7 +4,6 @@ rides/
 data/
 outputs/
 config/config.toml
-config/privacy_zones.csv
 *.fit
 *.fit.gz
 *.tcx
@@ -14,6 +13,8 @@ config/privacy_zones.csv
 *.sqlite
 *.duckdb
 *.parquet
+!tests/fixtures/reference_activity/activity.fit.gz
+!tests/fixtures/reference_activity/activity.parquet
 *.log
 token*.json
 .env
@@ -30,6 +31,8 @@ AGENTS.md
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.coverage
+.coverage.*
 *.egg-info/
 dist/
 build/

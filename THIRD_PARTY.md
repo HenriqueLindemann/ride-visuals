@@ -22,9 +22,13 @@ from the operating system and is not bundled.
 
 ## Map tiles
 
-Optional raster maps use services operated by OpenStreetMap, OpenTopoMap, CARTO,
-and Esri. Provider attribution is embedded in outputs; provider copyright,
-database, and service terms apply separately.
+Optional raster maps use services operated by
+[OpenStreetMap](https://operations.osmfoundation.org/policies/tiles/),
+[OpenTopoMap](https://opentopomap.org/about), and
+[Esri](https://doc.arcgis.com/en/data-appliance/2022/maps/world-dark-gray-base.htm).
+Provider attribution is embedded in each output and names the contributors of
+the selected composite map. Provider copyright, database, and service terms
+apply separately.
 
 This source repository does not include third-party packages, FFmpeg, fonts,
 map tiles, or generated media.

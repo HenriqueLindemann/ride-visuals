@@ -10,6 +10,9 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 
+MAX_GRADE_PERCENTILE = 99.5
+
+
 def _numeric(frame: pd.DataFrame, column: str, scale: float = 1.0) -> np.ndarray:
     if column not in frame:
         return np.full(len(frame), np.nan, dtype=float)
@@ -163,3 +166,17 @@ class TelemetryTimeline:
         step = np.where(np.isnan(delta), 0.0, np.maximum(delta, 0.0))
         series[1:] = np.cumsum(step)
         return series
+
+    @property
+    def maximum_grade_pct(self) -> float:
+        """Return a filtered maximum grade without exposing sensor spikes.
+
+        Grade is already shown as a short rolling signal in the animation. The
+        upper half-percent is discarded only for the summary value, where a
+        stopped GPS point or one barometric jump would otherwise become the
+        ride's headline maximum.
+        """
+        if not self.available(self.grade_pct):
+            return 0.0
+        valid = self.grade_pct[np.isfinite(self.grade_pct)]
+        return max(float(np.percentile(valid, MAX_GRADE_PERCENTILE)), 0.0) if len(valid) else 0.0

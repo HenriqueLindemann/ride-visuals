@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
 import tempfile
-import threading
 from pathlib import Path
 from typing import Optional
 
@@ -18,6 +16,7 @@ from ride_visuals.i18n import Translator, sanitize_display_text
 from ride_visuals.selection import ActivitySelection
 from ride_visuals.validate.media_validator import MediaValidator
 from ride_visuals.video.fonts import FontManager
+from ride_visuals.video.encoding import RawVideoEncoder
 
 
 class SeasonTimelineVideoRenderer:
@@ -70,11 +69,13 @@ class SeasonTimelineVideoRenderer:
             x_max = float((end + pd.Timedelta(days=3)).value)
 
             portrait = height > width
+            base_height = 1920 if portrait else 1080
+            dpi = max(30, int(round(120.0 * (height / base_height))))
             plot_left = int(round((0.12 if portrait else 0.095) * width))
             plot_right = int(round((0.92 if portrait else 0.95) * width))
-            plot_top = int(round((1.0 - (0.695 if portrait else 0.745)) * height))
-            plot_bottom = int(round((1.0 - 0.085) * height))
-            footer_y = int(round((1.0 - 0.055) * height))
+            plot_top = int(round((1.0 - (0.690 if portrait else 0.730)) * height))
+            plot_bottom = int(round((1.0 - 0.095) * height))
+            footer_y = int(round((1.0 - 0.045) * height))
             summary_left = int(round((0.12 if portrait else 0.095) * width))
             summary_right = int(round((0.92 if portrait else 0.95) * width))
             summary_columns = 2 if portrait else 4
@@ -83,129 +84,111 @@ class SeasonTimelineVideoRenderer:
             route_rgb = ImageColor.getrgb(self.theme.route_primary)
             muted_rgb = ImageColor.getrgb(self.theme.text_muted)
             border_rgb = ImageColor.getrgb(self.theme.border)
-            font = FontManager.get_font(max(14, int(round(width / 130))), bold=True)
-            summary_font = FontManager.get_font(max(24, int(round(width / 64))), bold=True)
+            footer_font_size = max(8, int(round(9.5 * (dpi / 72.0))))
+            summary_font_size = max(10, int(round(18.0 * (dpi / 72.0))))
+            font = FontManager.get_font(footer_font_size, bold=True)
+            summary_font = FontManager.get_font(summary_font_size, bold=True)
 
             animation_frames = max(1, int(round(duration_s * fps)))
             hold_frames = max(0, int(round(hold_s * fps)))
             total_frames = animation_frames + hold_frames
             keyframe_indices = {0: "00", total_frames // 2: "50", total_frames - 1: "100"}
 
-            command = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                "-f", "rawvideo", "-vcodec", "rawvideo",
-                "-s", f"{width}x{height}", "-pix_fmt", "rgb24", "-r", str(fps), "-i", "-",
-                "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-shortest", "-movflags", "+faststart", str(output),
-            ]
-            process = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-            # Drain stderr concurrently so ffmpeg output can never fill the pipe
-            # buffer and dead-lock the frame writer below.
-            stderr_sink = []
-            assert process.stderr is not None
-            threading.Thread(
-                target=lambda: stderr_sink.append(process.stderr.read()), daemon=True
-            ).start()
-            assert process.stdin is not None
+            with RawVideoEncoder(
+                output,
+                width=width,
+                height=height,
+                fps=fps,
+                operation="timeline video",
+            ) as encoder:
+                for frame_index in range(total_frames):
+                    if frame_index < animation_frames:
+                        linear = frame_index / max(animation_frames - 1, 1)
+                        progress = linear * linear * (3.0 - 2.0 * linear)
+                    else:
+                        progress = 1.0
+                    current_value = start_value + (end_value - start_value) * progress
+                    cursor_x = plot_left + int(round((current_value - x_min) / (x_max - x_min) * (plot_right - plot_left)))
+                    cursor_x = min(max(cursor_x, plot_left), plot_right)
+                    completed = int(np.searchsorted(date_values, current_value, side="left"))
+                    if progress >= 1.0:
+                        completed = len(frame)
+                    current_km = float(frame["distance_km"].iloc[:completed].sum())
+                    current_samples = int(frame["point_count"].iloc[:completed].fillna(0).sum())
+                    current_hr_rides = int(frame["has_hr_stream"].iloc[:completed].fillna(False).sum())
+                    current_date = pd.Timestamp(int(round(current_value)))
 
-            for frame_index in range(total_frames):
-                if frame_index < animation_frames:
-                    linear = frame_index / max(animation_frames - 1, 1)
-                    progress = linear * linear * (3.0 - 2.0 * linear)
-                else:
-                    progress = 1.0
-                current_value = start_value + (end_value - start_value) * progress
-                cursor_x = plot_left + int(round((current_value - x_min) / (x_max - x_min) * (plot_right - plot_left)))
-                cursor_x = min(max(cursor_x, plot_left), plot_right)
-                completed = int(np.searchsorted(date_values, current_value, side="left"))
-                if progress >= 1.0:
-                    completed = len(frame)
-                current_km = float(frame["distance_km"].iloc[:completed].sum())
-                current_samples = int(frame["point_count"].iloc[:completed].fillna(0).sum())
-                current_hr_rides = int(frame["has_hr_stream"].iloc[:completed].fillna(False).sum())
-                current_date = pd.Timestamp(int(round(current_value)))
+                    image = base.copy()
+                    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+                    overlay_draw = ImageDraw.Draw(overlay)
+                    if cursor_x < plot_right:
+                        overlay_draw.rectangle(
+                            (cursor_x, plot_top, plot_right, plot_bottom),
+                            fill=(*canvas_rgb, 178),
+                        )
+                    image = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+                    draw = ImageDraw.Draw(image)
 
-                image = base.copy()
-                overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-                overlay_draw = ImageDraw.Draw(overlay)
-                if cursor_x < plot_right:
-                    overlay_draw.rectangle(
-                        (cursor_x, plot_top, plot_right, plot_bottom),
-                        fill=(*canvas_rgb, 178),
-                    )
-                image = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
-                draw = ImageDraw.Draw(image)
-
-                # Summary values are accumulated at the cursor. Labels stay fixed,
-                # making the changing quantities readable without layout movement.
-                summary_values = [
-                    self.i18n.number(completed),
-                    f"{self.i18n.number(current_km, 1)} km",
-                    self.i18n.number(current_samples),
-                    f"{current_hr_rides} / {completed}",
-                ]
-                for summary_index, value in enumerate(summary_values):
-                    row = summary_index // summary_columns
-                    column = summary_index % summary_columns
-                    value_left = int(round(summary_left + column * summary_width)) + int(round(0.008 * width))
-                    value_figure_y = (0.824 - row * 0.064) if portrait else 0.828
-                    summary_value_top = int(round((1.0 - value_figure_y) * height))
-                    draw.text(
-                        (value_left, summary_value_top + 5),
-                        value,
-                        fill=ImageColor.getrgb(self.theme.text_primary),
-                        font=summary_font,
-                    )
-
-                draw.line((cursor_x, plot_top, cursor_x, plot_bottom), fill=route_rgb, width=2)
-                marker = max(3, width // 480)
-                draw.rectangle((cursor_x - marker, plot_top - marker, cursor_x + marker, plot_top + marker),
-                               fill=route_rgb)
-
-                # Top counters own cumulative season state. The footer instead
-                # identifies the latest completed ride at the calendar cursor.
-                if completed > 0:
-                    latest = frame.iloc[completed - 1]
-                    ride_name = sanitize_display_text(latest.get("name") or "")
-                    if len(ride_name) > 34:
-                        ride_name = f"{ride_name[:31].rstrip()}…"
-                    ride_label = self.i18n.text("timeline.ride_number", number=completed)
-                    ride_speed = float(latest["average_speed_kmh"])
-                    footer_parts = [
-                        self.i18n.date(pd.Timestamp(latest["start_date"])),
-                        ride_label,
+                    # Summary values are accumulated at the cursor. Labels stay fixed,
+                    # making the changing quantities readable without layout movement.
+                    summary_values = [
+                        self.i18n.number(completed),
+                        f"{self.i18n.number(current_km, 1)} km",
+                        self.i18n.number(current_samples),
+                        f"{current_hr_rides} / {completed}",
                     ]
-                    if ride_name:
-                        footer_parts.append(ride_name)
-                    footer_parts.extend([
-                        f"{self.i18n.number(float(latest['distance_km']), 1)} km",
-                        f"+{self.i18n.number(float(latest['elevation_gain_m']))} m",
-                        f"{self.i18n.number(ride_speed, 1)} km/h",
-                    ])
-                    footer_text = "  ·  ".join(footer_parts)
-                else:
-                    footer_text = (
-                        f"{self.i18n.date(current_date)}  ·  "
-                        f"{self.i18n.text('timeline.waiting_first_ride')}"
-                    )
-                footer_width = int(round(font.getlength(footer_text)))
-                draw.rectangle((plot_right - footer_width - 18, footer_y + 5, plot_right + 2, height),
-                               fill=canvas_rgb)
-                draw.text((plot_right - footer_width, footer_y + 12), footer_text, fill=muted_rgb, font=font)
-                draw.line((plot_left, footer_y, plot_right, footer_y), fill=border_rgb, width=2)
-                progress_x = plot_left + int(round((plot_right - plot_left) * progress))
-                draw.line((plot_left, footer_y, progress_x, footer_y), fill=route_rgb, width=3)
+                    for summary_index, value in enumerate(summary_values):
+                        row = summary_index // summary_columns
+                        column = summary_index % summary_columns
+                        value_left = int(round(summary_left + column * summary_width)) + int(round(0.008 * width))
+                        value_figure_y = (0.810 - row * 0.080) if portrait else 0.800
+                        summary_value_top = int(round((1.0 - value_figure_y) * height))
+                        draw.text(
+                            (value_left, summary_value_top),
+                            value,
+                            fill=ImageColor.getrgb(self.theme.text_primary),
+                            font=summary_font,
+                        )
 
-                if keyframes and frame_index in keyframe_indices:
-                    image.save(keyframes / f"keyframe_{keyframe_indices[frame_index]}pct.png")
-                process.stdin.write(image.tobytes())
+                    draw.line([(cursor_x, plot_top), (cursor_x, plot_bottom)], fill=route_rgb, width=2)
+                    marker = max(3, width // 480)
+                    draw.rectangle((cursor_x - marker, plot_top - marker, cursor_x + marker, plot_top + marker),
+                                   fill=route_rgb)
 
-            process.stdin.close()
-            process.wait()
-            if process.returncode != 0:
-                error = b"".join(stderr_sink).decode("utf-8", errors="replace")
-                raise RuntimeError(f"FFmpeg timeline video error: {error}")
+                    # Top counters own cumulative season state. The footer instead
+                    # identifies the latest completed ride at the calendar cursor.
+                    if completed > 0:
+                        latest = frame.iloc[completed - 1]
+                        ride_name = sanitize_display_text(latest.get("name") or "")
+                        if len(ride_name) > 34:
+                            ride_name = f"{ride_name[:31].rstrip()}…"
+                        ride_label = self.i18n.text("timeline.ride_number", number=completed)
+                        ride_speed = float(latest["average_speed_kmh"])
+                        footer_parts = [
+                            self.i18n.date(pd.Timestamp(latest["start_date"])),
+                            ride_label,
+                        ]
+                        if ride_name:
+                            footer_parts.append(ride_name)
+                        footer_parts.extend([
+                            f"{self.i18n.number(float(latest['distance_km']), 1)} km",
+                            f"+{self.i18n.number(float(latest['elevation_gain_m']))} m",
+                            f"{self.i18n.number(ride_speed, 1)} km/h",
+                        ])
+                        footer_text = "  ·  ".join(footer_parts)
+                    else:
+                        footer_text = (
+                            f"{self.i18n.date(current_date)}  ·  "
+                            f"{self.i18n.text('timeline.waiting_first_ride')}"
+                        )
+                    footer_width = int(round(font.getlength(footer_text)))
+                    draw.rectangle((plot_left, footer_y - 2, plot_right, height),
+                                   fill=canvas_rgb)
+                    draw.text((plot_right - footer_width, footer_y), footer_text, fill=muted_rgb, font=font)
+
+                    if keyframes and frame_index in keyframe_indices:
+                        image.save(keyframes / f"keyframe_{keyframe_indices[frame_index]}pct.png")
+                    encoder.write(image)
 
         validation = MediaValidator.validate_video(output)
         if not validation.get("valid") or validation.get("has_faststart") is not True:

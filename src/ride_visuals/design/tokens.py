@@ -117,11 +117,11 @@ def get_theme(name: str | VisualTheme = "midnight") -> VisualTheme:
 
 
 def route_color(style: str, when: date | datetime | None = None, *, theme: VisualTheme = MIDNIGHT) -> str:
-    if style == "orange":
+    if style in ("orange", "density"):
         return theme.route_primary
     if style == "monochrome":
         return theme.text_secondary
     if style == "monthly":
         month = when.month if when is not None else 1
         return MONTH_ROUTE_COLORS.get(month, theme.text_secondary)
-    raise ValueError("Route style must be orange, monochrome or monthly")
+    raise ValueError("Route style must be orange, density, monochrome or monthly")

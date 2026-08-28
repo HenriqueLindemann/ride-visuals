@@ -26,6 +26,9 @@ class TCXReader:
         raw_bytes = file_path.read_bytes()
         if file_path.name.endswith(".gz") or raw_bytes[:2] == b"\x1f\x8b":
             raw_bytes = gzip.decompress(raw_bytes)
+        # Some Strava exports prefix otherwise valid XML with whitespace. XML
+        # declarations must be the first token, so normalize only that prefix.
+        raw_bytes = raw_bytes.lstrip()
 
         points: List[TrackPoint] = []
         metadata: Dict[str, Any] = {

@@ -64,12 +64,15 @@ class BackgroundSpec:
     blur_px: float = 0.0
     dim: float = 0.35
     attribution: str | None = None
+    attribution_bottom_px: float = 6.0
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.blur_px <= 100.0:
             raise ValueError("Background blur must be between 0 and 100 px")
         if not 0.0 <= self.dim <= 1.0:
             raise ValueError("Background dim must be between 0 and 1")
+        if self.attribution_bottom_px < 0.0:
+            raise ValueError("Attribution position cannot be negative")
 
     @classmethod
     def from_image(
@@ -79,6 +82,7 @@ class BackgroundSpec:
         blur_px: float = 0.0,
         dim: float = 0.35,
         attribution: str | None = None,
+        attribution_bottom_px: float = 6.0,
     ) -> "BackgroundSpec":
         source = Path(path)
         if not source.is_file():
@@ -92,6 +96,7 @@ class BackgroundSpec:
             blur_px=blur_px,
             dim=dim,
             attribution=attribution,
+            attribution_bottom_px=attribution_bottom_px,
         )
 
 
@@ -147,6 +152,7 @@ class ActivityRenderSpec:
     points: list[dict[str, Any]]
     output_mode: str = "animated"
     show_progress_bar: bool = False
+    show_background_route: bool = True
 
     @classmethod
     def from_parquet(
@@ -164,6 +170,7 @@ class ActivityRenderSpec:
         background_blur_px: float = 0.0,
         background_dim: float = 0.35,
         show_progress_bar: bool = False,
+        show_background_route: bool = True,
     ) -> "ActivityRenderSpec":
         effective_profile = profile or RenderProfile()
         source_frame = pq.read_table(parquet_path).to_pandas()
@@ -213,9 +220,11 @@ class ActivityRenderSpec:
                 "sourcePointCount": float(len(timeline)),
                 "renderPointCount": float(len(selected)),
                 "speedWindowSeconds": float(speed_window_seconds),
+                "maximumGradePct": round(timeline.maximum_grade_pct, 1),
             },
             points=_records(timeline, selected, cumulative_elevation_gain),
             show_progress_bar=show_progress_bar,
+            show_background_route=show_background_route,
         )
 
     def to_dict(self) -> dict[str, Any]:

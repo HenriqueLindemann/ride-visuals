@@ -40,6 +40,7 @@ export const activityRenderSpecSchema = z.object({
       blur_px: z.number().min(0).max(100),
       dim: z.number().min(0).max(1),
       attribution: z.string().nullable().default(null),
+      attribution_bottom_px: z.number().nonnegative().default(6),
     })
     .nullable(),
   summary: z.object({
@@ -49,9 +50,11 @@ export const activityRenderSpecSchema = z.object({
     sourcePointCount: z.number().nonnegative(),
     renderPointCount: z.number().nonnegative(),
     speedWindowSeconds: z.number().positive(),
+    maximumGradePct: z.number().default(0),
   }),
   points: z.array(telemetryPointSchema).min(2),
   show_progress_bar: z.boolean().default(false),
+  show_background_route: z.boolean().default(true),
 });
 
 export type TelemetryPoint = z.infer<typeof telemetryPointSchema>;

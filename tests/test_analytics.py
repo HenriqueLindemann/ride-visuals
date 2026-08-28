@@ -2,6 +2,10 @@
 
 import unittest
 import numpy as np
+import duckdb
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from ride_visuals.analytics.zones import HRZoneProfile
 from ride_visuals.analytics.trimp import TRIMPAnalyzer
@@ -21,6 +25,16 @@ class TestAnalytics(unittest.TestCase):
         self.assertEqual(dist["z1_recovery_s"], 0.0)
         self.assertAlmostEqual(dist["z2_pct"], 50.0)
         self.assertAlmostEqual(dist["z4_pct"], 50.0)
+
+    def test_hr_zones_use_real_sample_durations(self):
+        profile = HRZoneProfile()
+        hrs = np.array([140.0, 170.0])
+        durations = np.array([9.0, 1.0])
+
+        dist = profile.calculate_time_in_zones(hrs, dt_seconds=durations)
+
+        self.assertAlmostEqual(dist["z2_pct"], 90.0)
+        self.assertAlmostEqual(dist["z4_pct"], 10.0)
 
     def test_trimp_calculation(self):
         analyzer = TRIMPAnalyzer(resting_hr=50, max_hr=190, gender="male")
@@ -50,6 +64,52 @@ class TestAnalytics(unittest.TestCase):
         self.assertEqual(len(climbs), 1)
         self.assertAlmostEqual(climbs[0]["vam_mh"], 600.0, delta=15.0)
 
-
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_empty_sensor_streams_are_reported_as_unavailable(tmp_path):
+    from ride_visuals.analytics.progress import SeasonAnalytics
+
+    database = tmp_path / "activities.duckdb"
+    streams = tmp_path / "streams"
+    streams.mkdir()
+    with duckdb.connect(str(database)) as connection:
+        connection.execute(
+            """
+            CREATE TABLE activities AS SELECT
+                1::BIGINT AS id, 'Sensorless ride'::VARCHAR AS name,
+                TIMESTAMPTZ '2024-05-01 08:00:00+00' AS start_date,
+                'Ride'::VARCHAR AS activity_type, 10000.0::DOUBLE AS distance_m,
+                100.0::DOUBLE AS elevation_gain_m, 1800::BIGINT AS moving_time_s,
+                1900::BIGINT AS elapsed_time_s, 5.0::DOUBLE AS avg_speed_mps,
+                NULL::DOUBLE AS max_speed_mps, NULL::DOUBLE AS avg_heart_rate,
+                NULL::DOUBLE AS max_heart_rate, NULL::DOUBLE AS relative_effort,
+                NULL::DOUBLE AS estimated_watts_avg, NULL::DOUBLE AS estimated_watts_max,
+                NULL::DOUBLE AS temperature_avg, NULL::DOUBLE AS temperature_max,
+                NULL::VARCHAR AS gear, ''::VARCHAR AS source_filename,
+                'gpx'::VARCHAR AS source_format, ''::VARCHAR AS file_sha256,
+                3::BIGINT AS point_count, false AS has_hr_stream,
+                false AS has_speed_stream, false AS has_temp_stream,
+                false AS has_watts_stream
+            """
+        )
+    stream = pd.DataFrame({
+        "timestamp": pd.date_range("2024-05-01T08:00:00Z", periods=3, freq="1s"),
+        "heart_rate_bpm": [np.nan, np.nan, np.nan],
+        "speed_mps": [np.nan, np.nan, np.nan],
+        "temperature_c": [np.nan, np.nan, np.nan],
+        "altitude": [100.0, 101.0, 102.0],
+        "quality_flags": ["ok", "ok", "ok"],
+    })
+    pq.write_table(pa.Table.from_pandas(stream), streams / "1.parquet")
+
+    result = SeasonAnalytics(database, streams).extract()
+
+    assert result["sample_counts"]["temperature"] == 0
+    assert result["temperature_stats"] == {
+        "p10": None, "p90": None, "min": None, "max": None,
+    }
+    assert result["records"]["highest_effort"] is None
+    assert result["records"]["peak_hr"] is None
+    assert result["zones_pct"] == {f"Z{index}": 0.0 for index in range(1, 6)}

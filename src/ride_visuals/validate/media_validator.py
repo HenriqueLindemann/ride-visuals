@@ -65,8 +65,11 @@ class MediaValidator:
         if pixel_format != "yuv420p":
             violations.append("pixel format must be yuv420p")
         supported_canvases = {(1920, 1080), (1080, 1920), (3840, 2160)}
+        if "_preview" in file_path.stem:
+            supported_canvases = supported_canvases | {(960, 540), (540, 960)}
         if (width, height) not in supported_canvases:
             violations.append("canvas must use a canonical project preset")
+
         if duration <= 0.5:
             violations.append("duration is empty")
         elif "_preview" not in file_path.stem and abs(duration - 15.0) > 0.15:
@@ -106,9 +109,10 @@ class MediaValidator:
                 width, height = image.size
         except Exception as exc:
             return {"valid": False, "error": f"Falha ao abrir PNG: {exc}"}
-        valid = has_alpha and has_transparency and (width, height) in {
-            (1920, 1080), (1080, 1920), (3840, 2160)
-        }
+        supported_dimensions = {(1920, 1080), (1080, 1920), (3840, 2160)}
+        if "_preview" in file_path.stem:
+            supported_dimensions = supported_dimensions | {(960, 540), (540, 960)}
+        valid = has_alpha and has_transparency and (width, height) in supported_dimensions
         return {
             "valid": valid,
             "filename": file_path.name,
@@ -144,13 +148,17 @@ class MediaValidator:
         duration = float(info.get("format", {}).get("duration", 0.0))
         expected_codec = "vp9" if file_path.suffix.lower() == ".webm" else "prores"
         dimensions = (int(stream.get("width", 0)), int(stream.get("height", 0)))
+        supported_dimensions = {(1920, 1080), (1080, 1920), (3840, 2160)}
+        if "_preview" in file_path.stem:
+            supported_dimensions = supported_dimensions | {(960, 540), (540, 960)}
         violations = []
         if codec != expected_codec:
             violations.append(f"codec must be {expected_codec}")
         if not has_alpha:
             violations.append("alpha channel is missing")
-        if dimensions not in {(1920, 1080), (1080, 1920), (3840, 2160)}:
+        if dimensions not in supported_dimensions:
             violations.append("canvas must use a canonical project preset")
+
         if duration <= 0.5:
             violations.append("duration is empty")
         elif "_preview" in file_path.stem and duration > 10.15:

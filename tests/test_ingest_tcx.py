@@ -89,6 +89,16 @@ class TestTCXIngest(unittest.TestCase):
             self.assertEqual(p1.speed_mps, 5.8)
             self.assertEqual(p1.power_watts, 185)
 
+    def test_tcx_accepts_whitespace_before_xml_declaration(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = Path(tmpdir) / "strava-export.tcx.gz"
+            with gzip.open(file_path, "wt", encoding="utf-8") as f:
+                f.write(" \n\t" + TCX_SAMPLE)
+
+            points, _ = TCXReader.read_tcx(file_path)
+
+            self.assertEqual(len(points), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

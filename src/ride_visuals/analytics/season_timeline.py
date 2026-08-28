@@ -83,21 +83,22 @@ class SeasonTimelineGenerator:
         dates = pd.to_datetime(frame["start_date"], utc=True).dt.tz_convert(None)
         start, end = dates.iloc[0], dates.iloc[-1]
         portrait = height > width
-        dpi = 120
+        base_height = 1920 if portrait else 1080
+        dpi = max(30, int(round(120.0 * (height / base_height))))
         figure = plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi, facecolor=self.theme.canvas)
 
         left, right = (0.12, 0.92) if portrait else (0.095, 0.95)
-        figure.text(left, 0.94, self.i18n.text("timeline.title"),
-                    color=self.theme.text_primary, fontsize=30 if not portrait else 28,
+        figure.text(left, 0.938, self.i18n.text("timeline.title"),
+                    color=self.theme.text_primary, fontsize=24 if not portrait else 22,
                     fontweight="bold")
         figure.text(
             left,
-            0.905,
+            0.898,
             f"{self.i18n.date(start)} — {self.i18n.date(end)}",
             color=self.theme.text_muted,
-            fontsize=13,
+            fontsize=11,
         )
-        figure.lines.append(plt.Line2D([left, right], [0.875, 0.875], transform=figure.transFigure,
+        figure.lines.append(plt.Line2D([left, right], [0.870, 0.870], transform=figure.transFigure,
                                        color=self.theme.border, linewidth=0.8))
 
         summary = [
@@ -112,30 +113,30 @@ class SeasonTimelineGenerator:
             row = index // summary_columns
             column = index % summary_columns
             x = left + column * summary_width
-            label_y = (0.842 - row * 0.064) if portrait else 0.842
-            value_y = (0.812 - row * 0.064) if portrait else 0.802
+            label_y = (0.848 - row * 0.080) if portrait else 0.840
+            value_y = (0.810 - row * 0.080) if portrait else 0.800
             figure.text(x + 0.008, label_y, label.upper(), color=self.theme.text_muted,
-                        fontsize=10, fontweight="bold")
+                        fontsize=9, fontweight="bold")
             if not animation_base:
                 figure.text(x + 0.008, value_y, value, color=self.theme.text_primary,
-                            fontsize=20, fontweight="bold")
+                            fontsize=18, fontweight="bold")
         if portrait:
             midpoint = left + summary_width
-            figure.lines.append(plt.Line2D([midpoint, midpoint], [0.735, 0.855], transform=figure.transFigure,
+            figure.lines.append(plt.Line2D([midpoint, midpoint], [0.715, 0.860], transform=figure.transFigure,
                                            color=self.theme.border, linewidth=0.7))
-            figure.lines.append(plt.Line2D([left, right], [0.797, 0.797], transform=figure.transFigure,
+            figure.lines.append(plt.Line2D([left, right], [0.785, 0.785], transform=figure.transFigure,
                                            color=self.theme.border, linewidth=0.7))
         else:
             for index in range(1, len(summary)):
                 x = left + index * summary_width
-                figure.lines.append(plt.Line2D([x, x], [0.79, 0.855], transform=figure.transFigure,
+                figure.lines.append(plt.Line2D([x, x], [0.785, 0.855], transform=figure.transFigure,
                                                color=self.theme.border, linewidth=0.7))
 
         grid = figure.add_gridspec(
             6, 1,
-            left=left, right=right, top=0.695 if portrait else 0.745, bottom=0.085,
+            left=left, right=right, top=0.670 if portrait else 0.730, bottom=0.095,
             height_ratios=[1.65, 1, 1, 1, 1, 1],
-            hspace=0.16,
+            hspace=0.18,
         )
         axes = [figure.add_subplot(grid[index, 0]) for index in range(6)]
         labels = [
@@ -146,11 +147,39 @@ class SeasonTimelineGenerator:
             self.i18n.text("timeline.average_hr"),
             self.i18n.text("timeline.temperature"),
         ]
+        total_months = max(1, (end.year - start.year) * 12 + (end.month - start.month) + 1)
+        if total_months <= 14:
+            freq = "MS"
+            month_ticks = pd.date_range(start.normalize().replace(day=1), end, freq=freq)
+            month_ticks = pd.DatetimeIndex([max(month, start) for month in month_ticks])
+            tick_labels = [self.i18n.month_short(month) for month in month_ticks]
+        elif total_months <= 30:
+            freq = "3MS"
+            month_ticks = pd.date_range(start.normalize().replace(day=1), end, freq=freq)
+            month_ticks = pd.DatetimeIndex([max(month, start) for month in month_ticks])
+            tick_labels = [
+                f"{self.i18n.month_short(month)} '{str(month.year)[2:]}" if month.month == 1 else self.i18n.month_short(month)
+                for month in month_ticks
+            ]
+        elif total_months <= 60:
+            freq = "6MS"
+            month_ticks = pd.date_range(start.normalize().replace(day=1), end, freq=freq)
+            month_ticks = pd.DatetimeIndex([max(month, start) for month in month_ticks])
+            tick_labels = [
+                f"{self.i18n.month_short(month)} '{str(month.year)[2:]}"
+                for month in month_ticks
+            ]
+        else:
+            freq = "YS"
+            month_ticks = pd.date_range(start.normalize().replace(month=1, day=1), end, freq=freq)
+            month_ticks = pd.DatetimeIndex([max(month, start) for month in month_ticks])
+            tick_labels = [str(month.year) for month in month_ticks]
+
         for index, (axis, label) in enumerate(zip(axes, labels)):
             self._style_axis(axis, label, show_x=index == len(axes) - 1)
             axis.set_xlim(start - pd.Timedelta(days=3), end + pd.Timedelta(days=3))
-            for month in pd.date_range(start.normalize().replace(day=1), end, freq="MS"):
-                axis.axvline(month, color=self.theme.grid, linewidth=0.65, zorder=0)
+            for tick in month_ticks:
+                axis.axvline(tick, color=self.theme.grid, linewidth=0.65, zorder=0)
 
         # Full-season line first; square markers call out the current/latest state.
         axes[0].plot(dates, frame["cumulative_km"], color=self.theme.text_secondary, linewidth=1.8)
@@ -175,11 +204,8 @@ class SeasonTimelineGenerator:
                 axis.scatter([dates.iloc[maximum]], [values.iloc[maximum]], marker="s",
                              s=26, color=highlight, zorder=5)
 
-        month_ticks = pd.date_range(start.normalize().replace(day=1), end, freq="MS")
-        month_ticks = pd.DatetimeIndex([max(month, start) for month in month_ticks])
         axes[-1].set_xticks(month_ticks)
-        axes[-1].set_xticklabels([self.i18n.month_short(month) for month in month_ticks],
-                                 color=self.theme.text_muted, fontsize=10)
+        axes[-1].set_xticklabels(tick_labels, color=self.theme.text_muted, fontsize=10)
 
         if not animation_base:
             for axis in axes:

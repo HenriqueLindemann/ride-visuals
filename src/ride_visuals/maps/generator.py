@@ -1,6 +1,5 @@
 """High-resolution route maps, density maps, and raster basemaps."""
 
-import math
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
@@ -11,44 +10,38 @@ import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 from PIL import Image
 
-from ride_visuals.ingest.metrics import haversine_distance
 from ride_visuals.design import EFFORT_COLORS, MONTH_ROUTE_COLORS, get_theme, route_color
 from ride_visuals.i18n import Translator
+from ride_visuals.maps.projection import (
+    compute_map_viewport,
+    expand_viewport_to_canvas,
+    project_mercator,
+    unproject_mercator,
+)
 from ride_visuals.maps.tiles import TILE_PROVIDERS, TileManager
-from ride_visuals.privacy import load_privacy_zones
 from ride_visuals.selection import ActivitySelection
 
-
-def project_mercator(lon: float, lat: float) -> Tuple[float, float]:
-    """Projeção EPSG:3857 (Spherical Mercator)."""
-    r_major = 6378137.0
-    x = r_major * math.radians(lon)
-    lat_rad = math.radians(max(min(lat, 89.5), -89.5))
-    y = 3189068.5 * math.log((1.0 + math.sin(lat_rad)) / (1.0 - math.sin(lat_rad)))
-    return x, y
-
-
-def unproject_mercator(x: float, y: float) -> Tuple[float, float]:
-    """Inverte coordenadas Mercator para (lon, lat)."""
-    r_major = 6378137.0
-    lon = math.degrees(x / r_major)
-    lat = math.degrees(2.0 * math.atan(math.exp(y / r_major)) - math.pi / 2.0)
-    return lon, lat
 
 
 class MapGenerator:
     """Gera visualizações cartográficas de rotas, densidade e gradientes de esforço com basemaps."""
 
+    OVERVIEW_CONTENT_RECT = (0.08, 0.06, 0.84, 0.78)
+    DENSITY_CONTENT_RECT = (0.08, 0.04, 0.84, 0.80)
+    EFFORT_CONTENT_RECT = (0.08, 0.11, 0.84, 0.73)
+    DEFAULT_ATTRIBUTION_Y = 0.012
+    EFFORT_ATTRIBUTION_Y = 0.095
+
     def __init__(self,
                  catalog_db_path: Path,
                  streams_dir: Path,
                  outputs_dir: Path,
-                 privacy_zones_path: Optional[Path] = None,
                  locale: str = "pt-BR",
                  theme: str = "midnight",
                  selection: Optional[ActivitySelection] = None):
@@ -56,7 +49,6 @@ class MapGenerator:
         self.streams_dir = Path(streams_dir)
         self.outputs_dir = Path(outputs_dir)
         self.outputs_dir.mkdir(parents=True, exist_ok=True)
-        self.privacy_zones = load_privacy_zones(privacy_zones_path)
         self.tile_mgr = TileManager()
         self.i18n = Translator(locale)
         self.theme = get_theme(theme)
@@ -76,13 +68,36 @@ class MapGenerator:
         return min(4096, max(1800, int(round(12.0 * 0.84 * dpi))))
 
     def _add_header(self, fig, title: str, subtitle: str) -> None:
-        """Add the shared flat editorial header used by every map output."""
-        fig.text(0.08, 0.925, title, color=self.theme.text_primary, fontsize=27,
-                 fontweight="bold", family="sans-serif", ha="left")
-        fig.text(0.08, 0.885, subtitle, color=self.theme.text_muted, fontsize=14,
-                 family="sans-serif", ha="left")
+        """Add a translucent editorial layer over the full-bleed map."""
+        fig.add_artist(Rectangle(
+            (0.0, 0.855), 1.0, 0.145,
+            transform=fig.transFigure,
+            facecolor=self.theme.panel_background,
+            edgecolor="none",
+            alpha=0.58,
+            zorder=2,
+        ))
+        fig.text(0.08, 0.946, title, color=self.theme.text_primary, fontsize=27,
+                 fontweight="bold", family="sans-serif", ha="left", va="center", zorder=3)
+        fig.text(0.08, 0.898, subtitle, color=self.theme.text_muted, fontsize=14,
+                 family="sans-serif", ha="left", va="center", zorder=3)
         fig.add_artist(Line2D([0.08, 0.92], [0.855, 0.855], transform=fig.transFigure,
-                              color=self.theme.border, linewidth=0.8))
+                              color=self.theme.border, linewidth=0.8, zorder=3))
+
+    @staticmethod
+    def _full_bleed_viewport(
+        xs: np.ndarray,
+        ys: np.ndarray,
+        content_rect: tuple[float, float, float, float],
+    ) -> tuple[float, float, float, float]:
+        safe_bounds = compute_map_viewport(
+            xs,
+            ys,
+            axes_width=content_rect[2],
+            axes_height=content_rect[3],
+            margin_pct=0.04,
+        )
+        return expand_viewport_to_canvas(safe_bounds, content_rect=content_rect)
 
     def _add_month_legend(self, fig, tracks: List[Dict[str, Any]]) -> None:
         months = sorted({track["date"].month for track in tracks})
@@ -95,28 +110,32 @@ class MapGenerator:
             fig.text(x + min(0.034, step * 0.42), 0.029, label, color=self.theme.text_muted,
                      fontsize=10, fontweight="bold", family="sans-serif", ha="left")
 
-    def _add_attribution(self, fig, basemap: str) -> None:
+    def _add_attribution(
+        self,
+        fig,
+        basemap: str,
+        *,
+        bottom: float = DEFAULT_ATTRIBUTION_Y,
+    ) -> None:
         """Keep provider credits visible in every raster-basemap export."""
-        # Static ``dark`` is a local canvas; only these modes fetch tiles.
-        if basemap not in {"satellite", "topo", "osm"}:
+        if basemap not in TILE_PROVIDERS:
             return
         fig.text(
-            0.91,
-            0.068,
+            0.985,
+            bottom,
             TILE_PROVIDERS[basemap]["attribution"],
-            color=self.theme.text_primary,
-            fontsize=9,
+            color=self.theme.text_secondary,
+            fontsize=8,
             family="sans-serif",
             ha="right",
             va="bottom",
-            bbox={"facecolor": self.theme.panel_background, "edgecolor": "none", "pad": 2.5},
+            bbox={
+                "facecolor": self.theme.panel_background,
+                "edgecolor": "none",
+                "alpha": 0.72,
+                "pad": 2.0,
+            },
         )
-
-    def _is_masked(self, lat: float, lon: float) -> bool:
-        for z in self.privacy_zones:
-            if haversine_distance(lat, lon, z["lat"], z["lon"]) <= z["radius_m"]:
-                return True
-        return False
 
     def load_all_tracks(self, month_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """Carrega todas as trajetórias do catálogo."""
@@ -138,28 +157,30 @@ class MapGenerator:
             if not p_file.exists():
                 continue
 
-            stream_df = pq.read_table(p_file, columns=["lat", "lon", "altitude", "heart_rate_bpm", "speed_mps"]).to_pandas()
+            columns = ["lat", "lon", "altitude", "heart_rate_bpm", "speed_mps"]
+            available_columns = set(pq.ParquetFile(p_file).schema_arrow.names)
+            if "quality_flags" in available_columns:
+                columns.append("quality_flags")
+            stream_df = pq.read_table(p_file, columns=columns).to_pandas()
             if stream_df.empty:
                 continue
 
-            lats = stream_df["lat"].values
-            lons = stream_df["lon"].values
+            lats = stream_df["lat"].to_numpy(dtype=float).copy()
+            lons = stream_df["lon"].to_numpy(dtype=float).copy()
+            if "quality_flags" in stream_df:
+                gps_glitches = stream_df["quality_flags"].fillna("ok").eq("gps_glitch").to_numpy()
+                lats[gps_glitches] = np.nan
+                lons[gps_glitches] = np.nan
             hrs = stream_df["heart_rate_bpm"].values if "heart_rate_bpm" in stream_df else np.full(len(lats), np.nan)
             speeds = stream_df["speed_mps"].values if "speed_mps" in stream_df else np.full(len(lats), np.nan)
 
             x_pts, y_pts, valid_hrs, valid_spds = [], [], [], []
             for lat, lon, hr, spd in zip(lats, lons, hrs, speeds):
-                if not self._is_masked(lat, lon):
-                    mx, my = project_mercator(lon, lat)
-                    x_pts.append(mx)
-                    y_pts.append(my)
-                    valid_hrs.append(hr)
-                    valid_spds.append(spd)
-                else:
-                    x_pts.append(np.nan)
-                    y_pts.append(np.nan)
-                    valid_hrs.append(np.nan)
-                    valid_spds.append(np.nan)
+                mx, my = project_mercator(lon, lat)
+                x_pts.append(mx)
+                y_pts.append(my)
+                valid_hrs.append(hr)
+                valid_spds.append(spd)
 
             tracks.append({
                 "id": act_id,
@@ -192,31 +213,25 @@ class MapGenerator:
         all_xs = np.concatenate([t["xs"][~np.isnan(t["xs"])] for t in tracks if len(t["xs"]) > 0])
         all_ys = np.concatenate([t["ys"][~np.isnan(t["ys"])] for t in tracks if len(t["ys"]) > 0])
 
-        x_min, x_max = np.min(all_xs), np.max(all_xs)
-        y_min, y_max = np.min(all_ys), np.max(all_ys)
-
-        dx = x_max - x_min
-        dy = y_max - y_min
-        max_span = max(dx, dy) * 1.15
-        x_center = (x_min + x_max) / 2.0
-        y_center = (y_min + y_max) / 2.0
+        x_min_v, x_max_v, y_min_v, y_max_v = self._full_bleed_viewport(
+            all_xs, all_ys, self.OVERVIEW_CONTENT_RECT
+        )
 
         bg_color = "#000000" if basemap == "satellite" else self.theme.canvas
         fig = plt.figure(figsize=(12, 12), facecolor=bg_color)
-        ax = fig.add_axes([0.08, 0.06, 0.84, 0.76], facecolor=bg_color)
+        ax = fig.add_axes([0.0, 0.0, 1.0, 1.0], facecolor=bg_color)
 
         # Inserir basemap raster se solicitado
-        if basemap in ["satellite", "topo", "osm"]:
-            min_lon, min_lat = unproject_mercator(x_center - max_span / 2.0, y_center - max_span / 2.0)
-            max_lon, max_lat = unproject_mercator(x_center + max_span / 2.0, y_center + max_span / 2.0)
+        if basemap in TILE_PROVIDERS:
+            min_lon, min_lat = unproject_mercator(x_min_v, y_min_v)
+            max_lon, max_lat = unproject_mercator(x_max_v, y_max_v)
             basemap_px = self._basemap_target_px(dpi)
             bg_img = self.tile_mgr.render_basemap_layer(
                 min_lon, min_lat, max_lon, max_lat, basemap_px, basemap_px,
                 provider=basemap, dim_pct=0.25 if basemap == "satellite" else 0.15,
                 detail_scale=detail_scale,
             )
-            ax.imshow(bg_img, extent=[x_center - max_span / 2.0, x_center + max_span / 2.0,
-                                      y_center - max_span / 2.0, y_center + max_span / 2.0],
+            ax.imshow(bg_img, extent=[x_min_v, x_max_v, y_min_v, y_max_v],
                       zorder=0, aspect="equal")
 
         for t in tracks:
@@ -227,10 +242,11 @@ class MapGenerator:
                 color = route_color(route_style, t["date"], theme=self.theme)
                 ax.plot(xs[valid], ys[valid], color=color, alpha=0.62, linewidth=1.25, zorder=2)
 
-        ax.set_xlim(x_center - max_span / 2.0, x_center + max_span / 2.0)
-        ax.set_ylim(y_center - max_span / 2.0, y_center + max_span / 2.0)
+        ax.set_xlim(x_min_v, x_max_v)
+        ax.set_ylim(y_min_v, y_max_v)
         ax.set_aspect("equal", adjustable="box")
         ax.axis("off")
+
 
         tot_km = sum(t["dist_km"] for t in tracks)
         tot_elev = sum(t["elev_m"] for t in tracks)
@@ -272,28 +288,24 @@ class MapGenerator:
         all_xs = np.concatenate([t["xs"][~np.isnan(t["xs"])] for t in tracks if len(t["xs"]) > 0])
         all_ys = np.concatenate([t["ys"][~np.isnan(t["ys"])] for t in tracks if len(t["ys"]) > 0])
 
-        x_min, x_max = np.min(all_xs), np.max(all_xs)
-        y_min, y_max = np.min(all_ys), np.max(all_ys)
-        
-        max_span = max(x_max - x_min, y_max - y_min) * 1.35
-        x_center = (x_min + x_max) / 2.0
-        y_center = (y_min + y_max) / 2.0 - (max_span * 0.08)
+        x_min_v, x_max_v, y_min_v, y_max_v = self._full_bleed_viewport(
+            all_xs, all_ys, self.DENSITY_CONTENT_RECT
+        )
 
         bg_color = "#000000" if basemap == "satellite" else self.theme.canvas
         fig = plt.figure(figsize=(12, 12), facecolor=bg_color)
-        ax = fig.add_axes([0.08, 0.06, 0.84, 0.76], facecolor=bg_color)
+        ax = fig.add_axes([0.0, 0.0, 1.0, 1.0], facecolor=bg_color)
 
-        if basemap in ["satellite", "topo", "osm"]:
-            min_lon, min_lat = unproject_mercator(x_center - max_span / 2.0, y_center - max_span / 2.0)
-            max_lon, max_lat = unproject_mercator(x_center + max_span / 2.0, y_center + max_span / 2.0)
+        if basemap in TILE_PROVIDERS:
+            min_lon, min_lat = unproject_mercator(x_min_v, y_min_v)
+            max_lon, max_lat = unproject_mercator(x_max_v, y_max_v)
             basemap_px = self._basemap_target_px(dpi)
             bg_img = self.tile_mgr.render_basemap_layer(
                 min_lon, min_lat, max_lon, max_lat, basemap_px, basemap_px,
                 provider=basemap, dim_pct=0.35 if basemap == "satellite" else 0.20,
                 detail_scale=detail_scale,
             )
-            ax.imshow(bg_img, extent=[x_center - max_span / 2.0, x_center + max_span / 2.0,
-                                      y_center - max_span / 2.0, y_center + max_span / 2.0],
+            ax.imshow(bg_img, extent=[x_min_v, x_max_v, y_min_v, y_max_v],
                       zorder=0, aspect="equal")
 
         for t in tracks:
@@ -306,10 +318,11 @@ class MapGenerator:
                 # become brighter without glow, blur or a second stroke.
                 ax.plot(xs[valid], ys[valid], color=color, alpha=0.20, linewidth=1.45, zorder=2)
 
-        ax.set_xlim(x_center - max_span / 2.0, x_center + max_span / 2.0)
-        ax.set_ylim(y_center - max_span / 2.0, y_center + max_span / 2.0)
+        ax.set_xlim(x_min_v, x_max_v)
+        ax.set_ylim(y_min_v, y_max_v)
         ax.set_aspect("equal", adjustable="box")
         ax.axis("off")
+
 
         title = self.i18n.text("map.density.title") + (f" · {month}" if month else "")
         self._add_header(
@@ -338,28 +351,26 @@ class MapGenerator:
         all_xs = np.concatenate([t["xs"][~np.isnan(t["xs"])] for t in tracks if len(t["xs"]) > 0])
         all_ys = np.concatenate([t["ys"][~np.isnan(t["ys"])] for t in tracks if len(t["ys"]) > 0])
 
-        x_min, x_max = np.min(all_xs), np.max(all_xs)
-        y_min, y_max = np.min(all_ys), np.max(all_ys)
-        max_span = max(x_max - x_min, y_max - y_min) * 1.30
-        x_center = (x_min + x_max) / 2.0
-        y_center = (y_min + y_max) / 2.0 - (max_span * 0.06)
+        x_min_v, x_max_v, y_min_v, y_max_v = self._full_bleed_viewport(
+            all_xs, all_ys, self.EFFORT_CONTENT_RECT
+        )
 
         bg_color = "#000000" if basemap == "satellite" else self.theme.canvas
         fig = plt.figure(figsize=(12, 12), facecolor=bg_color)
-        ax = fig.add_axes([0.08, 0.10, 0.84, 0.72], facecolor=bg_color)
+        ax = fig.add_axes([0.0, 0.0, 1.0, 1.0], facecolor=bg_color)
 
-        if basemap in ["satellite", "topo", "osm"]:
-            min_lon, min_lat = unproject_mercator(x_center - max_span / 2.0, y_center - max_span / 2.0)
-            max_lon, max_lat = unproject_mercator(x_center + max_span / 2.0, y_center + max_span / 2.0)
+        if basemap in TILE_PROVIDERS:
+            min_lon, min_lat = unproject_mercator(x_min_v, y_min_v)
+            max_lon, max_lat = unproject_mercator(x_max_v, y_max_v)
             basemap_px = self._basemap_target_px(dpi)
             bg_img = self.tile_mgr.render_basemap_layer(
                 min_lon, min_lat, max_lon, max_lat, basemap_px, basemap_px,
                 provider=basemap, dim_pct=0.35 if basemap == "satellite" else 0.20,
                 detail_scale=detail_scale,
             )
-            ax.imshow(bg_img, extent=[x_center - max_span / 2.0, x_center + max_span / 2.0,
-                                      y_center - max_span / 2.0, y_center + max_span / 2.0],
+            ax.imshow(bg_img, extent=[x_min_v, x_max_v, y_min_v, y_max_v],
                       zorder=0, aspect="equal")
+
 
         for t in tracks:
             xs, ys, hrs = t["xs"], t["ys"], t["hrs"]
@@ -427,10 +438,11 @@ class MapGenerator:
             )
             ax.add_collection(lc)
 
-        ax.set_xlim(x_center - max_span / 2.0, x_center + max_span / 2.0)
-        ax.set_ylim(y_center - max_span / 2.0, y_center + max_span / 2.0)
+        ax.set_xlim(x_min_v, x_max_v)
+        ax.set_ylim(y_min_v, y_max_v)
         ax.set_aspect("equal", adjustable="box")
         ax.axis("off")
+
 
         self._add_header(
             fig,
@@ -456,7 +468,7 @@ class MapGenerator:
                               linestyle=(0, (2.5, 2.0))))
         fig.text(0.115, 0.061, self.i18n.text("collection.legend.no_data"),
                  color=self.theme.text_muted, fontsize=10, family="sans-serif", ha="left")
-        self._add_attribution(fig, basemap)
+        self._add_attribution(fig, basemap, bottom=self.EFFORT_ATTRIBUTION_Y)
         cbar.outline.set_edgecolor(self.theme.border)
 
         plt.savefig(out_path, dpi=dpi, facecolor=fig.get_facecolor(), edgecolor="none")

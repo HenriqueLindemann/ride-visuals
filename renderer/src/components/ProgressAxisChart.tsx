@@ -1,4 +1,4 @@
-import {useMemo} from 'react';
+import {useId, useMemo} from 'react';
 
 type Props = {
   values: Array<number | null>;
@@ -8,53 +8,151 @@ type Props = {
   highlight: string;
   muted: string;
   height?: number;
+  showArea?: boolean;
+  smoothingSamples?: number;
 };
 
-const WIDTH = 300;
-const PAD = 5;
+const WIDTH = 400;
+const PAD_X = 6;
+const PAD_Y = 6;
+const DEFAULT_SMOOTHING_SAMPLES = 7;
 
 type Coordinate = {x: number; y: number};
+
+const smoothValues = (
+  raw: Array<number | null>,
+  windowSize: number = DEFAULT_SMOOTHING_SAMPLES,
+): Array<number | null> => {
+  if (raw.length <= windowSize) return raw;
+  const result: Array<number | null> = [];
+  const half = Math.floor(windowSize / 2);
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] === null || !Number.isFinite(raw[i])) {
+      result.push(null);
+      continue;
+    }
+    const start = Math.max(0, i - half);
+    const end = Math.min(raw.length, i + half + 1);
+    const window = raw.slice(start, end).filter((value): value is number => value !== null && Number.isFinite(value));
+    result.push(window.reduce((sum, value) => sum + value, 0) / window.length);
+  }
+  return result;
+};
 
 const pathFor = (coordinates: Coordinate[]) =>
   coordinates.map(({x, y}, index) => `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`).join(' ');
 
-export const ProgressAxisChart = ({values, progress, stroke, completed, highlight, muted, height = 180}: Props) => {
+const splitSegments = (coordinates: Array<Coordinate | null>): Coordinate[][] => {
+  const segments: Coordinate[][] = [];
+  let current: Coordinate[] = [];
+  for (const coordinate of coordinates) {
+    if (coordinate) {
+      current.push(coordinate);
+    } else if (current.length > 0) {
+      segments.push(current);
+      current = [];
+    }
+  }
+  if (current.length > 0) segments.push(current);
+  return segments;
+};
+
+export const ProgressAxisChart = ({
+  values,
+  progress,
+  stroke,
+  completed,
+  highlight,
+  muted,
+  height = 140,
+  showArea = true,
+  smoothingSamples = DEFAULT_SMOOTHING_SAMPLES,
+}: Props) => {
+  const gradientId = useId();
+
   const geometry = useMemo(() => {
-    const stride = Math.max(1, Math.floor(values.length / 360));
-    const sampled = values.filter((_, index) => index % stride === 0 || index === values.length - 1);
-    const valid = sampled.filter((value): value is number => value !== null);
+    const stride = Math.max(1, Math.floor(values.length / 240));
+    const sampled = values
+      .map((value, index) => ({value, index}))
+      .filter(({index}) => index % stride === 0 || index === values.length - 1);
+    const valid = sampled
+      .map(({value}) => value)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
     if (valid.length < 2) return null;
-    const min = Math.min(...valid);
-    const max = Math.max(...valid);
-    const range = Math.max(max - min, 1);
-    const coords = sampled.map((value, index) => {
-      if (value === null) return null;
+
+    const smoothed = smoothValues(sampled.map(({value}) => value), smoothingSamples);
+    const smoothedValid = smoothed.filter((value): value is number => value !== null && Number.isFinite(value));
+    const min = Math.min(...smoothedValid);
+    const max = Math.max(...smoothedValid);
+    const range = Math.max(max - min, 1e-4);
+
+    const coordinates = smoothed.map((value, sampledIndex): Coordinate | null => {
+      if (value === null || !Number.isFinite(value)) return null;
       return {
-        x: PAD + (index / Math.max(sampled.length - 1, 1)) * (WIDTH - PAD * 2),
-        y: height - PAD - ((value - min) / range) * (height - PAD * 2),
+        x: PAD_X + (sampled[sampledIndex].index / Math.max(values.length - 1, 1)) * (WIDTH - PAD_X * 2),
+        y: height - PAD_Y - ((value - min) / range) * (height - PAD_Y * 2),
       };
     });
-    const validCoords = coords.filter((value): value is Coordinate => value !== null);
-    return {validCoords, path: pathFor(validCoords)};
-  }, [height, values]);
+    const segments = splitSegments(coordinates).filter((segment) => segment.length >= 2);
+    const coords = segments.flat();
+    if (coords.length < 2) return null;
+
+    return {coords, segments};
+  }, [height, smoothingSamples, values]);
+
   if (!geometry) return null;
-  const {validCoords, path} = geometry;
-  const cursorX = PAD + Math.min(1, Math.max(0, progress)) * (WIDTH - PAD * 2);
-  const completedCoords = validCoords.filter(({x}) => x <= cursorX);
-  const completedPath = pathFor(completedCoords);
-  const current = validCoords.reduce(
-    (nearest, coordinate) => Math.abs(coordinate.x - cursorX) < Math.abs(nearest.x - cursorX) ? coordinate : nearest,
-    validCoords[0],
+  const {coords, segments} = geometry;
+  const cursorX = PAD_X + Math.min(1, Math.max(0, progress)) * (WIDTH - PAD_X * 2);
+  const completedSegments = segments
+    .map((segment) => segment.filter(({x}) => x <= cursorX))
+    .filter((segment) => segment.length >= 2);
+
+  const current = coords.reduce(
+    (nearest, coordinate) => (Math.abs(coordinate.x - cursorX) < Math.abs(nearest.x - cursorX) ? coordinate : nearest),
+    coords[0],
   );
 
   return (
-    <svg viewBox={`0 0 ${WIDTH} ${height}`} preserveAspectRatio="none" style={{width: '100%', height, overflow: 'visible'}}>
-      <path d={`M ${PAD} ${PAD} V ${height - PAD} H ${WIDTH - PAD}`} fill="none" stroke={muted} strokeWidth="1" opacity="0.55" />
-      <path d={`M ${PAD} ${height / 2} H ${WIDTH - PAD}`} fill="none" stroke={muted} strokeWidth="1" opacity="0.2" strokeDasharray="3 5" />
-      <path d={path} fill="none" stroke={stroke} strokeWidth="1.25" opacity="0.58" />
-      {completedCoords.length > 1 ? <path d={completedPath} fill="none" stroke={completed} strokeWidth="1.9" /> : null}
-      <path d={`M ${cursorX} ${current.y} V ${height - PAD}`} stroke={highlight} strokeWidth="1" opacity="0.6" />
-      <rect x={cursorX - 3} y={current.y - 3} width="6" height="6" fill={highlight} />
+    <svg
+      viewBox={`0 0 ${WIDTH} ${height}`}
+      style={{
+        width: '100%',
+        height,
+        display: 'block',
+        overflow: 'visible',
+      }}
+    >
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={completed} stopOpacity="0.28" />
+          <stop offset="100%" stopColor={completed} stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+
+      {/* Subtle baseline and midline grid */}
+      <line x1={PAD_X} y1={height - PAD_Y} x2={WIDTH - PAD_X} y2={height - PAD_Y} stroke={muted} strokeWidth="1" opacity="0.35" />
+      <line x1={PAD_X} y1={height / 2} x2={WIDTH - PAD_X} y2={height / 2} stroke={muted} strokeWidth="1" strokeDasharray="3 4" opacity="0.15" />
+
+      {/* Full track background */}
+      {segments.map((segment, index) => (
+        <path key={`track-${index}`} d={pathFor(segment)} fill="none" stroke={stroke} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3" />
+      ))}
+
+      {/* Completed filled area */}
+      {showArea ? completedSegments.map((segment, index) => {
+        const path = pathFor(segment);
+        const areaPath = `${path} L ${segment[segment.length - 1].x.toFixed(2)} ${height - PAD_Y} L ${segment[0].x.toFixed(2)} ${height - PAD_Y} Z`;
+        return <path key={`area-${index}`} d={areaPath} fill={`url(#${gradientId})`} />;
+      }) : null}
+
+      {/* Completed active line */}
+      {completedSegments.map((segment, index) => (
+        <path key={`completed-${index}`} d={pathFor(segment)} fill="none" stroke={completed} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+      ))}
+
+      {/* Current position indicator */}
+      <line x1={cursorX} y1={current.y} x2={cursorX} y2={height - PAD_Y} stroke={highlight} strokeWidth="1.2" opacity="0.75" />
+      <circle cx={cursorX} cy={current.y} r="3.5" fill={highlight} />
     </svg>
   );
 };
