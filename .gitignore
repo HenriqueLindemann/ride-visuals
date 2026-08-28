@@ -40,7 +40,10 @@ build/
 # Node and renderer caches
 node_modules/
 renderer/out/
+renderer/build/
 renderer/.remotion/
+/.cache/
+/.remotion/
 
 # Editors and operating systems
 .DS_Store
@@ -48,3 +51,6 @@ renderer/.remotion/
 .idea/
 *.swp
 *~
+
+# Local showcase generator
+showcase/*.local.sh

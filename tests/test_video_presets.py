@@ -5,7 +5,8 @@ from ride_visuals.video.presets import get_video_preset
 
 def test_activity_portrait_preset_is_partitioned_and_deterministic():
     preset = get_video_preset("activity", "9:16", preview=True)
-    assert (preset.canvas.width, preset.canvas.height) == (540, 960)
+    # Previews keep the design canvas so typography and layout stay faithful.
+    assert (preset.canvas.width, preset.canvas.height) == (1080, 1920)
     assert preset.canvas.layout == "9:16"
     assert preset.duration_seconds == 4.0
     assert preset.fps == 30

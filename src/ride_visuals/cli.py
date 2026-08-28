@@ -92,7 +92,9 @@ def cmd_doctor(args):
             print(f"  [ERRO] Python mod -> {mod} NÃO INSTALADO")
             all_ok = False
 
-    for error in RemotionVideoEngine().doctor():
+    config = load_config()
+    renderer_dir = Path(config["paths"]["renderer_dir"]) if config.get("paths", {}).get("renderer_dir") else None
+    for error in RemotionVideoEngine(renderer_dir=renderer_dir).doctor():
         print(f"  [ERRO] Renderer     -> {error}")
         all_ok = False
 
@@ -112,7 +114,8 @@ def cmd_ingest(args):
     bulk_dir = Path(args.bulk_dir or config.get("paths", {}).get("bulk_dir", "bulk_download"))
     catalog_db = Path(args.catalog_db or config.get("paths", {}).get("catalog_db", "data/catalog/activities.duckdb"))
     streams_dir = Path(args.streams_dir or config.get("paths", {}).get("streams_dir", "data/streams"))
-    selection = activity_selection(args, config)
+    selection = ActivitySelection() if getattr(args, "all", False) else activity_selection(args, config)
+    clean = getattr(args, "clean", False)
     activity_types = (
         args.activity_type
         if args.activity_type is not None
@@ -123,6 +126,8 @@ def cmd_ingest(args):
     print(f"  Fonte: {bulk_dir}")
     print(f"  Catálogo DuckDB: {catalog_db}")
     print(f"  Streams Parquet: {streams_dir}")
+    if clean:
+        print("  Modo: Limpeza total e reconstrução (--clean)")
 
     pipeline = IngestPipeline(
         bulk_dir=bulk_dir,
@@ -130,6 +135,7 @@ def cmd_ingest(args):
         streams_dir=streams_dir,
         selection=selection,
         activity_types=activity_types,
+        clean=clean,
     )
     stats = pipeline.run_ingest()
 
@@ -426,7 +432,7 @@ def _render_activity(args, catalog_db: Path, streams_dir: Path, outputs_dir: Pat
                 dim=float(getattr(args, "background_dim", 0.35)),
                 attribution=TILE_PROVIDERS[activity_basemap]["attribution"],
                 attribution_bottom_px=(
-                    h - int(round(h * 0.54)) + 6
+                    h - int(round(h * 0.50)) + 8  # MAP_SHARE_PORTRAIT in renderer/src/design/layout.ts
                     if args.video_type == "telemetry" and h > w
                     else 6
                 ),
@@ -438,7 +444,9 @@ def _render_activity(args, catalog_db: Path, streams_dir: Path, outputs_dir: Pat
         outputs_dir / "keyframes" / f"activity_{act_id}{keyframe_kind}_{theme}_{locale_tag}{basemap_tag}_{aspect.replace(':', '_')}"
         if write_keyframes else None
     )
-    engine = RemotionVideoEngine()
+    config = load_config(Path(args.config) if getattr(args, "config", None) else None)
+    renderer_dir = Path(config["paths"]["renderer_dir"]) if config.get("paths", {}).get("renderer_dir") else None
+    engine = RemotionVideoEngine(renderer_dir=renderer_dir)
     if args.video_type == "overlay":
         print(f"[Overlay] Renderizando {output_extension.upper()} transparente (locale: {locale}, theme: {theme})...")
         if output_extension == "png":
@@ -625,6 +633,8 @@ def main():
     # ingest
     p_ing = subparsers.add_parser("ingest", help="Ingestão lossless de atividades")
     add_selection_arguments(p_ing)
+    p_ing.add_argument("--all", action="store_true", help="Ingere todas as atividades do arquivo ignorando filtros temporais")
+    p_ing.add_argument("--clean", action="store_true", help="Limpa o catálogo DuckDB e streams antes de iniciar a ingestão")
     p_ing.add_argument("--activity-type", action="append",
                        help="Activity type to ingest; repeat to select several")
     p_ing.add_argument("--bulk-dir", type=str, help="Caminho para o diretório bulk_download")

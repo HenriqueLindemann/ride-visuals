@@ -70,7 +70,7 @@ def test_activity_basemap_uses_requested_provider_and_detail(tmp_path):
     ("width", "height", "view_w", "view_h", "padding"),
     [
         (1920, 1080, 1344, 1080, 64),
-        (1080, 1920, 1080, 1037, 56),
+        (1080, 1920, 1080, 960, 56),
     ],
 )
 def test_full_canvas_basemap_keeps_route_aligned_in_telemetry_panel(

@@ -81,9 +81,11 @@ def canvas_basemap_bounds(
 
     vertical = height > width
     scale_factor = height / (1920.0 if vertical else 1080.0)
+    # Mirrors renderer/src/design/layout.ts (MAP_SHARE_PORTRAIT / PANEL_SHARE_LANDSCAPE
+    # / mapPadding) so basemap tiles stay registered with RouteMap.tsx.
     if layout == "telemetry":
         view_w = width if vertical else int(round(width * 0.70))
-        view_h = int(round(height * 0.54)) if vertical else height
+        view_h = int(round(height * 0.50)) if vertical else height
         top_pad = int(round((56 if vertical else 64) * scale_factor))
         bottom_pad = int(round((56 if vertical else 64) * scale_factor))
         side_pad = int(round((56 if vertical else 64) * scale_factor))

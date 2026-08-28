@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from dataclasses import replace
@@ -12,6 +13,22 @@ from PIL import Image
 from ride_visuals.validate.media_validator import MediaValidator
 from ride_visuals.video.engines.base import EngineCapabilities
 from ride_visuals.video.spec import ActivityRenderSpec
+
+
+def _resolve_renderer_dir(renderer_dir: Path | None = None) -> Path:
+    if renderer_dir is not None:
+        return Path(renderer_dir)
+    env_dir = os.environ.get("RIDE_VISUALS_RENDERER_DIR")
+    if env_dir:
+        return Path(env_dir)
+    cwd_candidate = Path.cwd() / "renderer"
+    if (cwd_candidate / "src" / "index.ts").exists():
+        return cwd_candidate
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "renderer"
+        if (candidate / "src" / "index.ts").exists():
+            return candidate
+    return Path(__file__).resolve().parents[4] / "renderer"
 
 
 class RemotionVideoEngine:
@@ -29,8 +46,7 @@ class RemotionVideoEngine:
     )
 
     def __init__(self, renderer_dir: Path | None = None) -> None:
-        project_root = Path(__file__).resolve().parents[4]
-        self.renderer_dir = Path(renderer_dir or project_root / "renderer")
+        self.renderer_dir = _resolve_renderer_dir(renderer_dir)
         self.entrypoint = self.renderer_dir / "src" / "index.ts"
         self.cli = self.renderer_dir / "node_modules" / "@remotion" / "cli" / "remotion-cli.js"
         self.node = shutil.which("node")
@@ -52,10 +68,13 @@ class RemotionVideoEngine:
         if not self.node:
             errors.append("Node.js was not found in PATH")
         if not self.entrypoint.exists():
-            errors.append(f"Remotion entrypoint was not found: {self.entrypoint}")
+            errors.append(
+                f"Remotion entrypoint was not found: {self.entrypoint}. "
+                "Ensure you run from the repository root or set RIDE_VISUALS_RENDERER_DIR."
+            )
         if not self.cli.exists():
             errors.append(
-                "Remotion dependencies are missing. Run: npm --prefix renderer ci --no-bin-links"
+                f"Remotion dependencies are missing. Run: npm --prefix '{self.renderer_dir}' ci --no-bin-links"
             )
         return errors
 

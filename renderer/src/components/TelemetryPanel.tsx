@@ -13,8 +13,6 @@ type Props = {
   vertical: boolean;
 };
 
-const LANDSCAPE_METRICS_HEIGHT = '72%';
-
 const elapsed = (seconds: number) => {
   const total = Math.max(0, Math.round(seconds));
   const hours = Math.floor(total / 3600);
@@ -26,9 +24,10 @@ const Label = ({children, theme, s = 1, minSize = 11}: {children: string; theme:
   <div
     style={{
       color: theme.textMuted,
-      fontSize: Math.max(7, Math.round(minSize * s)),
+      // Linear in `s` — floors would break proportionality and truncate labels.
+      fontSize: Math.round(minSize * s),
       fontWeight: 700,
-      letterSpacing: '0.09em',
+      letterSpacing: '0.08em',
       textTransform: 'uppercase',
       lineHeight: 1.2,
       whiteSpace: 'nowrap',
@@ -46,36 +45,38 @@ const Stat = ({
   unit,
   theme,
   leftBorder = false,
-  centered = false,
   s = 1,
+  labelSize = 11,
+  portrait = false,
 }: {
   label: string;
   value: string;
   unit?: string;
   theme: Theme;
   leftBorder?: boolean;
-  centered?: boolean;
   s?: number;
+  labelSize?: number;
+  portrait?: boolean;
 }) => (
   <div
     style={{
       borderTop: `1px solid ${theme.border}`,
       borderLeft: leftBorder ? `1px solid ${theme.border}` : undefined,
-      padding: `${Math.round(12 * s)}px ${Math.round(14 * s)}px ${Math.round(10 * s)}px`,
+      padding: `${Math.round(10 * s)}px ${Math.round(12 * s)}px ${Math.round(8 * s)}px`,
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'center',
       minWidth: 0,
     }}
   >
-    <div style={{minHeight: Math.max(16, Math.round(18 * s)), display: 'flex', alignItems: 'center'}}>
-      <Label theme={theme} s={s}>{label}</Label>
+    <div style={{minHeight: Math.round((portrait ? 28 : 16) * s), display: 'flex', alignItems: 'center'}}>
+      <Label theme={theme} s={s} minSize={labelSize}>{label}</Label>
     </div>
     <div
       style={{
-        marginTop: Math.round(4 * s),
+        marginTop: Math.round(3 * s),
         color: theme.text,
-        fontSize: Math.max(24, Math.round(32 * s)),
+        fontSize: Math.round((portrait ? 56 : 32) * s),
         fontWeight: 600,
         lineHeight: 1.1,
         letterSpacing: '-0.025em',
@@ -89,9 +90,9 @@ const Stat = ({
       {unit ? (
         <span
           style={{
-            marginLeft: Math.round(5 * s),
+            marginLeft: Math.round(4 * s),
             color: theme.textMuted,
-            fontSize: Math.max(11, Math.round(13 * s)),
+            fontSize: Math.round((portrait ? 26 : 14) * s),
             fontWeight: 600,
           }}
         >
@@ -107,7 +108,8 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
   const s = vertical ? height / 1920 : height / 1080;
   const {t, number, date} = createI18n(spec.locale);
   const staticSummary = spec.outputMode === 'static-summary';
-  const landscape = !vertical;
+  // Portrait is consumed on phones: it runs a larger type scale than landscape.
+  const labelSize = vertical ? 22 : 12;
 
   const numericMean = (values: Array<number | null>): number | null => {
     const valid = values.filter((value): value is number => value !== null && Number.isFinite(value));
@@ -116,10 +118,6 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
   const numericMax = (values: Array<number | null>): number | null => {
     const valid = values.filter((value): value is number => value !== null && Number.isFinite(value));
     return valid.length > 0 ? Math.max(...valid) : null;
-  };
-  const numericMin = (values: Array<number | null>): number | null => {
-    const valid = values.filter((value): value is number => value !== null && Number.isFinite(value));
-    return valid.length > 0 ? Math.min(...valid) : null;
   };
   const measurement = (value: number | null | undefined, decimals = 0) =>
     value !== null && value !== undefined && Number.isFinite(value) ? number(value, decimals) : '—';
@@ -189,18 +187,17 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
   const header = (
     <div
       style={{
-        height: landscape ? '100%' : undefined,
         boxSizing: 'border-box',
-        paddingBottom: Math.round((vertical ? 14 : 18) * s),
-        display: landscape ? 'flex' : undefined,
-        flexDirection: landscape ? 'column' : undefined,
-        justifyContent: landscape ? 'center' : undefined,
+        paddingBottom: Math.round((vertical ? 14 : 22) * s),
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
       }}
     >
       {spec.activity.title ? (
         <div
           style={{
-            fontSize: Math.max(16, Math.min(Math.round((vertical ? 28 : 28) * s), Math.round(520 * s / Math.max(14, (spec.activity.title || '').length)))),
+            fontSize: Math.round((vertical ? 44 : 30) * s),
             fontWeight: 650,
             lineHeight: 1.15,
             letterSpacing: '-0.03em',
@@ -214,9 +211,9 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
       ) : null}
       <div
         style={{
-          fontSize: Math.max(11, Math.round(13 * s)),
+          fontSize: Math.round((vertical ? 24 : 15) * s),
           color: theme.textSecondary,
-          marginTop: spec.activity.title ? Math.round(6 * s) : 0,
+          marginTop: spec.activity.title ? Math.round(5 * s) : 0,
           lineHeight: 1.3,
         }}
       >
@@ -231,20 +228,22 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
       style={{
         borderTop: `1px solid ${theme.border}`,
         padding: vertical
-          ? `${Math.round(12 * s)}px ${Math.round(14 * s)}px ${Math.round(8 * s)}px 0`
-          : `${Math.round(14 * s)}px 0 ${Math.round(10 * s)}px`,
-        height: landscape ? '100%' : undefined,
+          ? `${Math.round(10 * s)}px ${Math.round(14 * s)}px ${Math.round(8 * s)}px 0`
+          : `${Math.round(16 * s)}px 0 ${Math.round(14 * s)}px`,
         boxSizing: 'border-box',
-        display: landscape ? 'flex' : undefined,
-        flexDirection: landscape ? 'column' : undefined,
-        justifyContent: landscape ? 'center' : undefined,
+        // Landscape: the wave absorbs this block's share of the leftover panel
+        // height, so no void ever opens below the chart.
+        display: 'flex',
+        flexDirection: 'column',
+        flex: vertical ? undefined : 1,
+        minHeight: 0,
       }}
     >
-      <Label theme={theme} s={s}>{staticSummary ? t('averageSpeed') : t('speed')}</Label>
-      <div style={{display: 'flex', flexDirection: 'column', gap: Math.round(8 * s), marginTop: Math.round(6 * s)}}>
+      <Label theme={theme} s={s} minSize={labelSize}>{staticSummary ? t('averageSpeed') : t('speed')}</Label>
+      <div style={{display: 'flex', flexDirection: 'column', gap: Math.round(6 * s), marginTop: Math.round(4 * s), flex: 1, minHeight: 0}}>
         <div
           style={{
-            fontSize: Math.max(24, Math.round((vertical ? 40 : 40) * s)),
+            fontSize: Math.round((vertical ? 72 : 48) * s),
             fontWeight: 600,
             lineHeight: 1,
             letterSpacing: '-0.04em',
@@ -253,7 +252,7 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
           }}
         >
           {measurement(speed, 1)}
-          <span style={{fontSize: Math.max(11, Math.round(13 * s)), color: theme.textMuted, marginLeft: Math.round(6 * s), fontWeight: 500}}>km/h</span>
+          <span style={{fontSize: Math.round((vertical ? 28 : 16) * s), color: theme.textMuted, marginLeft: Math.round(6 * s), fontWeight: 500}}>km/h</span>
         </div>
         <ProgressAxisChart
           values={speedSeries}
@@ -262,7 +261,9 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
           completed={theme.textSecondary}
           highlight={theme.text}
           muted={theme.border}
-          height={Math.max(52, Math.round((vertical ? 68 : 64) * s))}
+          height={vertical ? Math.round(48 * s) : undefined}
+          padY={4}
+          smoothingSamples={5}
         />
       </div>
     </div>
@@ -274,20 +275,20 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
         borderTop: `1px solid ${theme.border}`,
         borderLeft: vertical ? `1px solid ${theme.border}` : undefined,
         padding: vertical
-          ? `${Math.round(12 * s)}px 0 ${Math.round(8 * s)}px ${Math.round(14 * s)}px`
-          : `${Math.round(12 * s)}px 0 ${Math.round(10 * s)}px`,
-        height: landscape ? '100%' : undefined,
+          ? `${Math.round(10 * s)}px 0 ${Math.round(8 * s)}px ${Math.round(14 * s)}px`
+          : `${Math.round(16 * s)}px 0 ${Math.round(14 * s)}px`,
         boxSizing: 'border-box',
-        display: landscape ? 'flex' : undefined,
-        flexDirection: landscape ? 'column' : undefined,
-        justifyContent: landscape ? 'center' : undefined,
+        display: 'flex',
+        flexDirection: 'column',
+        flex: vertical ? undefined : 1,
+        minHeight: 0,
       }}
     >
-      <Label theme={theme} s={s}>{staticSummary ? t('averageHeartRate') : t('heartRate')}</Label>
-      <div style={{display: 'flex', flexDirection: 'column', gap: Math.round(8 * s), marginTop: Math.round(6 * s)}}>
+      <Label theme={theme} s={s} minSize={labelSize}>{staticSummary ? t('averageHeartRate') : t('heartRate')}</Label>
+      <div style={{display: 'flex', flexDirection: 'column', gap: Math.round(6 * s), marginTop: Math.round(4 * s), flex: 1, minHeight: 0}}>
         <div
           style={{
-            fontSize: Math.max(22, Math.round((vertical ? 34 : 34) * s)),
+            fontSize: Math.round((vertical ? 64 : 42) * s),
             fontWeight: 600,
             lineHeight: 1,
             letterSpacing: '-0.04em',
@@ -296,7 +297,7 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
           }}
         >
           {measurement(heartRate)}
-          <span style={{fontSize: Math.max(11, Math.round(13 * s)), color: theme.textMuted, marginLeft: Math.round(5 * s), fontWeight: 500}}>bpm</span>
+          <span style={{fontSize: Math.round((vertical ? 26 : 16) * s), color: theme.textMuted, marginLeft: Math.round(5 * s), fontWeight: 500}}>bpm</span>
         </div>
         <ProgressAxisChart
           values={heartRateSeries}
@@ -305,7 +306,9 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
           completed={theme.textSecondary}
           highlight={theme.text}
           muted={theme.border}
-          height={Math.max(52, Math.round((vertical ? 68 : 64) * s))}
+          height={vertical ? Math.round(48 * s) : undefined}
+          padY={4}
+          smoothingSamples={5}
         />
       </div>
     </div>
@@ -317,86 +320,79 @@ export const TelemetryPanel = ({spec, point, progress, theme, vertical}: Props) 
         height: '100%',
         boxSizing: 'border-box',
         padding: vertical
-          ? `${Math.round(20 * s)}px ${Math.round(28 * s)}px ${Math.round(18 * s)}px`
-          : `${Math.round(28 * s)}px ${Math.round(28 * s)}px ${Math.round(20 * s)}px`,
+          ? `${Math.round(24 * s)}px ${Math.round(28 * s)}px ${Math.round(20 * s)}px`
+          : `${Math.round(32 * s)}px ${Math.round(28 * s)}px ${Math.round(28 * s)}px`,
         display: 'flex',
         flexDirection: 'column',
         color: theme.text,
       }}
     >
-      <div
-        style={landscape ? {
-          height: LANDSCAPE_METRICS_HEIGHT,
-          display: 'grid',
-          gridTemplateRows: hasHeartRate ? 'auto auto auto minmax(0, 1fr)' : 'auto auto minmax(0, 1fr)',
-        } : undefined}
-      >
+      <div style={vertical ? undefined : {flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column'}}>
         {header}
-        <div style={vertical ? {display: 'grid', gridTemplateColumns: '1fr 1fr'} : landscape ? {display: 'contents'} : undefined}>
+        <div style={vertical ? {display: 'grid', gridTemplateColumns: '1fr 1fr'} : {flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column'}}>
           {speedBlock}
           {heartBlock}
         </div>
-        <div style={{display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)'}}>
-          {stats.map((stat, statIndex) => (
-            <Stat
-              key={stat.label}
-              {...stat}
-              theme={theme}
-              leftBorder={statIndex % 3 !== 0}
-              centered={landscape}
-              s={s}
-            />
-          ))}
-        </div>
+      </div>
 
+      <div style={{display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)'}}>
+        {stats.map((stat, statIndex) => (
+          <Stat
+            key={stat.label}
+            {...stat}
+            theme={theme}
+            leftBorder={statIndex % 3 !== 0}
+            labelSize={labelSize}
+            portrait={vertical}
+            s={s}
+          />
+        ))}
       </div>
 
       <div
         style={{
           borderTop: `1px solid ${theme.border}`,
-          padding: `${Math.round(12 * s)}px 0 ${Math.round(8 * s)}px`,
-          marginTop: Math.round(12 * s),
-          flex: 1,
-          minHeight: 0,
+          paddingTop: Math.round(10 * s),
+          paddingBottom: 0,
+          marginTop: Math.round(10 * s),
           display: 'flex',
           flexDirection: 'column',
-          justifyContent: 'space-between',
+          // Portrait: the profile grows into every leftover pixel. Landscape:
+          // fixed height — the root's space-between owns the breathing room.
+          flex: vertical ? 1 : undefined,
+          minHeight: 0,
         }}
       >
-        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: Math.round(6 * s)}}>
-          <Label theme={theme} s={s}>{t('elevationProfile')}</Label>
-          <div style={{fontSize: Math.max(11, Math.round(14 * s)), fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: theme.textSecondary}}>
-            {staticSummary
-              ? `${measurement(numericMin(altitudeProfile))}–${measurement(numericMax(altitudeProfile))} m`
-              : `${measurement(point.altitudeM)} m`}
-          </div>
+        <div style={{marginBottom: Math.round(8 * s)}}>
+          <Label theme={theme} s={s} minSize={labelSize}>{t('elevationProfile')}</Label>
         </div>
-        <div style={{flex: 1, minHeight: 0, display: 'flex', alignItems: 'center'}}>
-          <ProgressAxisChart
-            values={altitudeProfile}
-            progress={progress}
-            stroke={theme.textMuted}
-            completed={theme.text}
-            highlight={theme.text}
-            muted={theme.border}
-            height={Math.max(vertical ? 100 : 90, Math.round(180 * s))}
-            smoothingSamples={3}
-          />
-        </div>
+        {/* Fills every pixel the section has left — no fixed height, no dead space. */}
+        <ProgressAxisChart
+          values={altitudeProfile}
+          progress={progress}
+          stroke={theme.textMuted}
+          completed={theme.text}
+          highlight={theme.text}
+          muted={theme.border}
+          height={vertical ? undefined : Math.round(280 * s)}
+          padX={6}
+          padY={vertical ? 14 : 10}
+          smoothingSamples={3}
+        />
       </div>
 
       {spec.show_progress_bar === true ? (
-        <div style={{paddingTop: Math.round(10 * s)}}>
+        <div style={{paddingTop: Math.round(8 * s)}}>
           <div
             style={{
               display: 'flex',
               justifyContent: 'space-between',
               color: theme.textMuted,
-              fontSize: Math.max(9, Math.round(10 * s)),
+              fontSize: Math.round((vertical ? 18 : 11) * s),
               fontWeight: 700,
               letterSpacing: '0.11em',
               textTransform: 'uppercase',
-              marginBottom: Math.round(6 * s),
+              marginBottom: Math.round(4 * s),
             }}
           >
             <span>{t('progress')}</span>

@@ -1,14 +1,12 @@
 import {useMemo} from 'react';
-import {useVideoConfig} from 'remotion';
 import type {TelemetryPoint} from '../schema';
 import type {Theme} from '../design/tokens';
+import {useElementSize} from '../lib/use-element-size';
 
 type Props = {
   points: TelemetryPoint[];
   currentIndex: number;
   theme: Theme;
-  containerWidth?: number;
-  containerHeight?: number;
   topPadding?: number;
   bottomPadding?: number;
   sidePadding?: number;
@@ -68,8 +66,6 @@ export const RouteMap = ({
   points,
   currentIndex,
   theme,
-  containerWidth,
-  containerHeight,
   topPadding = 48,
   bottomPadding = 48,
   sidePadding = 48,
@@ -78,27 +74,31 @@ export const RouteMap = ({
   showBackgroundRoute = true,
   visualScale = 1,
 }: Props) => {
-  const {width, height} = useVideoConfig();
-  const viewW = containerWidth ?? width;
-  const viewH = containerHeight ?? height;
+  // The map projects against its real layout box (1 SVG unit = 1 CSS pixel),
+  // so it stays correctly registered in any container or aspect ratio.
+  const [slotRef, slot] = useElementSize<HTMLDivElement>();
+  const viewW = Math.round(slot.width);
+  const viewH = Math.round(slot.height);
 
-  const geometry = useMemo(
-    () => routeGeometry(points, viewW, viewH, topPadding, bottomPadding, sidePadding),
-    [points, viewW, viewH, topPadding, bottomPadding, sidePadding],
-  );
+  const geometry = useMemo(() => {
+    if (viewW < 2 || viewH < 2) return null;
+    return routeGeometry(points, viewW, viewH, topPadding, bottomPadding, sidePadding);
+  }, [bottomPadding, points, sidePadding, topPadding, viewH, viewW]);
 
-  const safeIndex = Math.min(
-    geometry.coords.length - 1,
-    Math.max(0, currentIndex),
-  );
-  const current = geometry.coords[safeIndex];
-  const completedPath = geometry.coords
-    .slice(0, safeIndex + 1)
-    .map(({x, y}, index) => `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`)
-    .join(' ');
+  const safeIndex = geometry
+    ? Math.min(geometry.coords.length - 1, Math.max(0, currentIndex))
+    : 0;
+  const current = geometry ? geometry.coords[safeIndex] : undefined;
+  const completedPath = geometry
+    ? geometry.coords
+        .slice(0, safeIndex + 1)
+        .map(({x, y}, index) => `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`)
+        .join(' ')
+    : '';
 
   return (
     <div
+      ref={slotRef}
       style={{
         position: 'relative',
         width: '100%',
@@ -113,42 +113,46 @@ export const RouteMap = ({
           : undefined,
       }}
     >
-      <svg
-        viewBox={`0 0 ${viewW} ${viewH}`}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-        }}
-      >
-        {showBackgroundRoute && (
+      {geometry ? (
+        <svg
+          width={viewW}
+          height={viewH}
+          viewBox={`0 0 ${viewW} ${viewH}`}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+          }}
+        >
+          {showBackgroundRoute && (
+            <path
+              d={geometry.path}
+              fill="none"
+              stroke={theme.routeInactive}
+              strokeWidth={4 * visualScale}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          )}
           <path
-            d={geometry.path}
+            d={completedPath}
             fill="none"
-            stroke={theme.routeInactive}
-            strokeWidth={4 * visualScale}
+            stroke={theme.route}
+            strokeWidth={4.5 * visualScale}
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-        )}
-        <path
-          d={completedPath}
-          fill="none"
-          stroke={theme.route}
-          strokeWidth={4.5 * visualScale}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        {current ? (
-          <circle
-            cx={current.x}
-            cy={current.y}
-            r={6 * visualScale}
-            fill={theme.routeHighlight}
-          />
-        ) : null}
-      </svg>
+          {current ? (
+            <circle
+              cx={current.x}
+              cy={current.y}
+              r={6 * visualScale}
+              fill={theme.routeHighlight}
+            />
+          ) : null}
+        </svg>
+      ) : null}
     </div>
   );
 };

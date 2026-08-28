@@ -19,6 +19,39 @@ from ride_visuals.ingest.metrics import enrich_trackpoints
 from ride_visuals.selection import ActivitySelection
 
 
+
+ACTIVITIES_TABLE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS activities (
+    id BIGINT PRIMARY KEY,
+    name VARCHAR,
+    start_date TIMESTAMPTZ,
+    activity_type VARCHAR,
+    distance_m DOUBLE,
+    elevation_gain_m DOUBLE,
+    moving_time_s BIGINT,
+    elapsed_time_s BIGINT,
+    avg_speed_mps DOUBLE,
+    max_speed_mps DOUBLE,
+    avg_heart_rate DOUBLE,
+    max_heart_rate DOUBLE,
+    relative_effort DOUBLE,
+    estimated_watts_avg DOUBLE,
+    estimated_watts_max DOUBLE,
+    temperature_avg DOUBLE,
+    temperature_max DOUBLE,
+    gear VARCHAR,
+    source_filename VARCHAR,
+    source_format VARCHAR,
+    file_sha256 VARCHAR,
+    point_count BIGINT,
+    has_hr_stream BOOLEAN,
+    has_speed_stream BOOLEAN,
+    has_temp_stream BOOLEAN,
+    has_watts_stream BOOLEAN
+)
+"""
+
+
 def compute_file_sha256(path: Path) -> str:
     """Calcula o hash SHA256 de um arquivo em disco."""
     hasher = hashlib.sha256()
@@ -36,12 +69,14 @@ class IngestPipeline:
                  catalog_db_path: Path,
                  streams_dir: Path,
                  selection: Optional[ActivitySelection] = None,
-                 activity_types: Optional[List[str]] = None):
+                 activity_types: Optional[List[str]] = None,
+                 clean: bool = False):
         self.bulk_dir = Path(bulk_dir)
         self.catalog_db_path = Path(catalog_db_path)
         self.streams_dir = Path(streams_dir)
         self.selection = selection or ActivitySelection()
         self.activity_types = set(activity_types or ["Ride", "Pedalada"])
+        self.clean = clean
 
         self.catalog_db_path.parent.mkdir(parents=True, exist_ok=True)
         self.streams_dir.mkdir(parents=True, exist_ok=True)
@@ -65,6 +100,8 @@ class IngestPipeline:
 
     def run_ingest(self) -> Dict[str, Any]:
         """Executa a ingestão completa com auditoria e procedência."""
+        # Resolve and parse the source before removing any prior outputs. A
+        # missing or malformed export must never turn --clean into data loss.
         csv_file, act_dir = self._find_export_root()
         reader = CSVActivityReader(csv_file)
         all_csv_records = reader.read_activities()
@@ -74,6 +111,15 @@ class IngestPipeline:
             dt = r["start_date"]
             if self.selection.matches(dt) and r["activity_type"] in self.activity_types:
                 scoped_records.append(r)
+
+        if self.clean:
+            # Remove the previous derived data only after validating the source.
+            for stream_file in self.streams_dir.glob("*.parquet"):
+                stream_file.unlink()
+            if self.catalog_db_path.exists():
+                con = duckdb.connect(str(self.catalog_db_path))
+                con.execute("DROP TABLE IF EXISTS activities")
+                con.close()
 
         # Mapear arquivos da pasta activities
         file_map = {f.name: f for f in act_dir.glob("*") if f.is_file() and not f.name.startswith(".")}
@@ -195,7 +241,7 @@ class IngestPipeline:
             )
             activities.append(activity_summary)
 
-        # Salvar catálogo consolidado no DuckDB
+        # Salvar catálogo consolidado no DuckDB (upsert mantendo dados históricos)
         self._write_catalog_duckdb(activities)
 
         return stats
@@ -226,14 +272,12 @@ class IngestPipeline:
         pq.write_table(table, path, compression="zstd")
 
     def _write_catalog_duckdb(self, activities: List[ActivitySummary]):
-        """Persiste a tabela de catálogo de atividades no DuckDB."""
-        if not activities:
-            return
-
-        dicts = [a.to_dict() for a in activities]
-        df = pd.DataFrame(dicts)
-        df["start_date"] = pd.to_datetime(df["start_date"], utc=True)
-
+        """Persiste a tabela de catálogo de atividades no DuckDB de forma incremental."""
         con = duckdb.connect(str(self.catalog_db_path))
-        con.execute("CREATE OR REPLACE TABLE activities AS SELECT * FROM df")
+        con.execute(ACTIVITIES_TABLE_SCHEMA_SQL)
+        if activities:
+            dicts = [a.to_dict() for a in activities]
+            df = pd.DataFrame(dicts)
+            df["start_date"] = pd.to_datetime(df["start_date"], utc=True)
+            con.execute("INSERT OR REPLACE INTO activities BY NAME SELECT * FROM df")
         con.close()

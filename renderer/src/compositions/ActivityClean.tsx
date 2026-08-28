@@ -2,6 +2,7 @@ import {AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig} from 'remoti
 import {BackgroundLayer} from '../components/BackgroundLayer';
 import {RouteMap} from '../components/RouteMap';
 import {themes} from '../design/tokens';
+import {FONT_FAMILY} from '../design/layout';
 import {createI18n} from '../i18n/messages';
 import {pointAtProgress} from '../lib/telemetry';
 import type {ActivityRenderSpec} from '../schema';
@@ -32,7 +33,7 @@ export const ActivityClean = (props: ActivityRenderSpec) => {
       style={{
         background: theme.canvas,
         color: theme.text,
-        fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONT_FAMILY,
       }}
     >
       <BackgroundLayer background={props.background} />
@@ -40,8 +41,6 @@ export const ActivityClean = (props: ActivityRenderSpec) => {
         points={props.points}
         currentIndex={currentIndex}
         theme={theme}
-        containerWidth={width}
-        containerHeight={height}
         topPadding={topPadding}
         bottomPadding={bottomPadding}
         sidePadding={sidePadding}
@@ -65,7 +64,7 @@ export const ActivityClean = (props: ActivityRenderSpec) => {
         <div style={{minWidth: 0}}>
           {props.activity.title ? (
             <div style={{
-              fontSize: Math.max(22, Math.min(vertical ? 36 : 39, Math.round((vertical ? 600 : 800) / Math.max(16, (props.activity.title || '').length)))) * scaleFactor,
+              fontSize: Math.round((vertical ? 36 : 38) * scaleFactor),
               fontWeight: 650,
               lineHeight: 1.08,
               letterSpacing: '-0.035em',

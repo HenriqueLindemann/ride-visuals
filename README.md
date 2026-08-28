@@ -2,7 +2,7 @@
 
 Ride Visuals turns cycling activity archives into maps, reports, and animated
 telemetry. It is a small tool born from a personal archive and shared for anyone
-who wants to see their rides differently. Everything runs locally.
+who wants to see their rides differently.
 
 ## A collection over time
 
@@ -96,7 +96,7 @@ then generate the complete archive output set:
 make --jobs=6 final
 ```
 
-This creates three reports, three maps, and collection, progress, and timeline videos in both 16:9 and 9:16.
+This ingests the archive into a persistent catalog and streams, then creates three reports, three maps, and collection, progress, and timeline videos in both 16:9 and 9:16.
 Individual activity media needs an ID and
 is generated separately:
 
@@ -114,7 +114,8 @@ make final SCOPE="--start-date 2024-02-01 --end-date 2024-12-31"
 ```
 
 Filters are inclusive and combine with each other. With no filter, every
-catalogued activity is used. Run `ride-visuals --help` for individual maps,
+catalogued activity is used. Ingestion builds the catalog incrementally; use
+`ride-visuals ingest --clean --all` for a full archive rebuild. Run `ride-visuals --help` for individual maps,
 reports, videos, and activity overlays.
 
 ## Development
