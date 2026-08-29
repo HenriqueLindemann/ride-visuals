@@ -2,7 +2,7 @@ import {AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig} from 'remoti
 import {BackgroundLayer} from '../components/BackgroundLayer';
 import {RouteMap} from '../components/RouteMap';
 import {themes} from '../design/tokens';
-import {FONT_FAMILY} from '../design/layout';
+import {FONT_FAMILY, landscapeSafeInsets} from '../design/layout';
 import {createI18n} from '../i18n/messages';
 import {pointAtProgress} from '../lib/telemetry';
 import type {ActivityRenderSpec} from '../schema';
@@ -27,6 +27,7 @@ export const ActivityClean = (props: ActivityRenderSpec) => {
     ? Math.round(75 * scaleFactor)
     : Math.round(48 * scaleFactor);
   const sidePadding = vertical ? Math.round(48 * scaleFactor) : Math.round(64 * scaleFactor);
+  const safeInsets = landscapeSafeInsets(props.presentation);
 
   return (
     <AbsoluteFill
@@ -36,25 +37,35 @@ export const ActivityClean = (props: ActivityRenderSpec) => {
         fontFamily: FONT_FAMILY,
       }}
     >
-      <BackgroundLayer background={props.background} />
-      <RouteMap
-        points={props.points}
-        currentIndex={currentIndex}
-        theme={theme}
-        topPadding={topPadding}
-        bottomPadding={bottomPadding}
-        sidePadding={sidePadding}
-        transparent={hasBackground}
-        showBackgroundRoute={props.show_background_route}
-        visualScale={scaleFactor}
-      />
+      <BackgroundLayer background={props.background} presentation={props.presentation} />
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          bottom: 0,
+          left: safeInsets.left,
+          right: safeInsets.right,
+        }}
+      >
+        <RouteMap
+          points={props.points}
+          currentIndex={currentIndex}
+          theme={theme}
+          topPadding={topPadding}
+          bottomPadding={bottomPadding}
+          sidePadding={sidePadding}
+          transparent={hasBackground}
+          showBackgroundRoute={props.show_background_route}
+          visualScale={scaleFactor}
+        />
+      </div>
 
       <div
         style={{
           position: 'absolute',
           top: Math.round((vertical ? 54 : 52) * scaleFactor),
-          left: Math.round((vertical ? 56 : 64) * scaleFactor),
-          right: Math.round((vertical ? 56 : 64) * scaleFactor),
+          left: safeInsets.left + Math.round((vertical ? 56 : 64) * scaleFactor),
+          right: safeInsets.right + Math.round((vertical ? 56 : 64) * scaleFactor),
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'flex-start',
@@ -63,26 +74,42 @@ export const ActivityClean = (props: ActivityRenderSpec) => {
       >
         <div style={{minWidth: 0}}>
           {props.activity.title ? (
-            <div style={{
-              fontSize: Math.round((vertical ? 36 : 38) * scaleFactor),
-              fontWeight: 650,
-              lineHeight: 1.08,
-              letterSpacing: '-0.035em',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap'
-            }}>
+            <div
+              style={{
+                fontSize: Math.round((vertical ? 36 : 38) * scaleFactor),
+                fontWeight: 650,
+                lineHeight: 1.08,
+                letterSpacing: '-0.035em',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
               {props.activity.title}
             </div>
           ) : null}
-          <div style={{marginTop: props.activity.title ? 9 * scaleFactor : 0, color: theme.textSecondary, fontSize: 15 * scaleFactor, lineHeight: 1.3}}>
+          <div
+            style={{
+              marginTop: props.activity.title ? 9 * scaleFactor : 0,
+              color: theme.textSecondary,
+              fontSize: 15 * scaleFactor,
+              lineHeight: 1.3,
+            }}
+          >
             {props.activity.date ? `${date(props.activity.date)} · ` : ''}
             {number(props.summary.distanceKm, 1)} km · +{number(props.summary.elevationGainM)} m
           </div>
         </div>
       </div>
       {props.show_progress_bar === true ? (
-        <div style={{position: 'absolute', left: (vertical ? 56 : 64) * scaleFactor, right: (vertical ? 56 : 64) * scaleFactor, bottom: (vertical ? 52 : 44) * scaleFactor}}>
+        <div
+          style={{
+            position: 'absolute',
+            left: safeInsets.left + (vertical ? 56 : 64) * scaleFactor,
+            right: safeInsets.right + (vertical ? 56 : 64) * scaleFactor,
+            bottom: (vertical ? 52 : 44) * scaleFactor,
+          }}
+        >
           <div style={{display: 'flex', justifyContent: 'space-between', color: theme.textMuted, fontSize: 11 * scaleFactor, fontWeight: 700, letterSpacing: '0.11em', textTransform: 'uppercase', marginBottom: 10 * scaleFactor}}>
             <span>{t('progress')}</span><span>{Math.round(progress * 100)}%</span>
           </div>

@@ -95,8 +95,8 @@ def _build_render_spec(
         locale=context.runtime.locale,
         theme=context.runtime.theme,
         profile=RenderProfile(
-            width=preset.canvas.width,
-            height=preset.canvas.height,
+            width=preset.canvas.render_width,
+            height=preset.canvas.render_height,
             fps=preset.fps,
             duration_seconds=preset.duration_seconds,
             hold_seconds=preset.hold_seconds,
@@ -107,6 +107,7 @@ def _build_render_spec(
         background_dim=args.background_dim,
         show_progress_bar=args.show_progress_bar,
         show_background_route=True if args.background_tracks is None else args.background_tracks,
+        presentation=preset.canvas.presentation,
     )
 
 
@@ -117,6 +118,7 @@ def _apply_basemap(
 ) -> ActivityRenderSpec:
     from ride_visuals.maps.tiles import TILE_PROVIDERS
     from ride_visuals.video.activity_basemap import render_activity_basemap
+    from ride_visuals.video.instagram import safe_insets
     from ride_visuals.video.spec import BackgroundSpec
 
     args = context.args
@@ -128,15 +130,18 @@ def _apply_basemap(
         / f"activity_{args.activity_id}_{args.basemap}_{args.aspect.replace(':', '_')}.png"
     )
     print(f"[Basemap] Gerando fundo {args.basemap} georreferenciado...")
+    safe_left_px, safe_right_px = safe_insets(preset.canvas.presentation)
     render_activity_basemap(
         spec.points,
         background_file,
         provider=args.basemap,
-        width=preset.canvas.width,
-        height=preset.canvas.height,
+        width=preset.canvas.render_width,
+        height=preset.canvas.render_height,
         layout="clean" if args.video_type == "clean" else "telemetry",
         map_detail=args.map_detail,
         show_progress_bar=args.show_progress_bar,
+        safe_left_px=safe_left_px,
+        safe_right_px=safe_right_px,
     )
     return replace(
         spec,
@@ -146,8 +151,11 @@ def _apply_basemap(
             dim=args.background_dim,
             attribution=TILE_PROVIDERS[args.basemap]["attribution"],
             attribution_bottom_px=(
-                preset.canvas.height - int(round(preset.canvas.height * 0.50)) + 8
-                if args.video_type == "telemetry" and preset.canvas.height > preset.canvas.width
+                preset.canvas.render_height - int(round(preset.canvas.render_height * 0.50)) + 8
+                if (
+                    args.video_type == "telemetry"
+                    and preset.canvas.render_height > preset.canvas.render_width
+                )
                 else 6
             ),
         ),

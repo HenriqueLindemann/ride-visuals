@@ -18,6 +18,11 @@ from ride_visuals.design import EFFORT_COLORS, get_theme
 from ride_visuals.i18n import Translator
 from ride_visuals.selection import ActivitySelection
 from ride_visuals.video.encoding import RawVideoEncoder
+from ride_visuals.video.instagram import (
+    place_safe_content,
+    present_frame,
+    safe_content_dimensions,
+)
 
 
 class ProgressMovieRenderer:
@@ -272,16 +277,27 @@ class ProgressMovieRenderer:
 
     def render_movie(self, output_mp4_path: Optional[Path] = None, *, width: int = 1920,
                      height: int = 1080, fps: int = 30, chapter_duration_s: float = 3.5,
-                     keyframes_dir: Optional[Path] = None) -> Path:
+                     keyframes_dir: Optional[Path] = None,
+                     presentation: str = "standard") -> Path:
         output = Path(output_mp4_path or (self.outputs_dir / f"progress_{self.selection.slug()}.mp4"))
         output.parent.mkdir(parents=True, exist_ok=True)
         keyframes = Path(keyframes_dir) if keyframes_dir else None
         if keyframes:
             keyframes.mkdir(parents=True, exist_ok=True)
 
+        render_width, render_height = safe_content_dimensions(width, height, presentation)
         metrics = self.extract_summary_metrics()
-        slides = [self._render_chapter_slide(chapter, metrics, width, height)
-                  for chapter in range(1, self.CHAPTER_COUNT + 1)]
+        slides = [
+            present_frame(
+                place_safe_content(
+                    self._render_chapter_slide(chapter, metrics, render_width, render_height),
+                    presentation=presentation,
+                    background=self.theme.canvas,
+                ),
+                presentation=presentation,
+            )
+            for chapter in range(1, self.CHAPTER_COUNT + 1)
+        ]
         if keyframes:
             for chapter, slide in enumerate(slides, start=1):
                 slide.save(keyframes / f"chapter_{chapter:02d}.png")

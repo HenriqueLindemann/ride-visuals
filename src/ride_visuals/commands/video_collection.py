@@ -43,6 +43,7 @@ def render_timeline(context: VideoCommandContext) -> None:
         duration_s=preset.duration_seconds,
         hold_s=preset.hold_seconds,
         keyframes_dir=keyframes,
+        presentation=preset.canvas.presentation,
     )
     print(f"[Vídeo] Timeline unificada gerada: {output}")
     if keyframes:
@@ -102,6 +103,7 @@ def render_collection(context: VideoCommandContext) -> None:
         map_detail=args.map_detail,
         show_progress_bar=args.show_progress_bar,
         show_background_tracks=args.background_tracks,
+        presentation=preset.canvas.presentation,
     )
     print(f"[Vídeo] Coleção gerada com sucesso em: {output_path}")
     if keyframes_dir:
@@ -143,6 +145,7 @@ def render_progress(context: VideoCommandContext) -> None:
         fps=preset.fps,
         chapter_duration_s=preset.duration_seconds,
         keyframes_dir=keyframes_dir,
+        presentation=preset.canvas.presentation,
     )
     print(f"[Vídeo] Filme de progresso gerado com sucesso: {output_file}")
     if keyframes_dir:

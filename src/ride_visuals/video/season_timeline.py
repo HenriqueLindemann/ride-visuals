@@ -17,6 +17,11 @@ from ride_visuals.selection import ActivitySelection
 from ride_visuals.validate.media_validator import MediaValidator
 from ride_visuals.video.fonts import FontManager
 from ride_visuals.video.encoding import RawVideoEncoder
+from ride_visuals.video.instagram import (
+    place_safe_content,
+    present_frame,
+    safe_content_dimensions,
+)
 
 
 class SeasonTimelineVideoRenderer:
@@ -34,12 +39,16 @@ class SeasonTimelineVideoRenderer:
 
     def render(self, output_mp4_path: Path, *, width: int = 1920, height: int = 1080,
                fps: int = 30, duration_s: float = 5.0, hold_s: float = 1.0,
-               keyframes_dir: Optional[Path] = None) -> Path:
+               keyframes_dir: Optional[Path] = None,
+               presentation: str = "standard") -> Path:
         output = Path(output_mp4_path)
         output.parent.mkdir(parents=True, exist_ok=True)
         keyframes = Path(keyframes_dir) if keyframes_dir else None
         if keyframes:
             keyframes.mkdir(parents=True, exist_ok=True)
+
+        output_width, output_height = width, height
+        width, height = safe_content_dimensions(output_width, output_height, presentation)
 
         with tempfile.TemporaryDirectory(prefix="ride-visuals-timeline-", dir="/tmp") as temporary:
             generator = SeasonTimelineGenerator(
@@ -95,8 +104,8 @@ class SeasonTimelineVideoRenderer:
 
             with RawVideoEncoder(
                 output,
-                width=width,
-                height=height,
+                width=output_width,
+                height=output_height,
                 fps=fps,
                 operation="timeline video",
             ) as encoder:
@@ -185,9 +194,19 @@ class SeasonTimelineVideoRenderer:
                                    fill=canvas_rgb)
                     draw.text((plot_right - footer_width, footer_y), footer_text, fill=muted_rgb, font=font)
 
+                    final_image = present_frame(
+                        place_safe_content(
+                            image,
+                            presentation=presentation,
+                            background=self.theme.canvas,
+                        ),
+                        presentation=presentation,
+                    )
                     if keyframes and frame_index in keyframe_indices:
-                        image.save(keyframes / f"keyframe_{keyframe_indices[frame_index]}pct.png")
-                    encoder.write(image)
+                        final_image.save(
+                            keyframes / f"keyframe_{keyframe_indices[frame_index]}pct.png"
+                        )
+                    encoder.write(final_image)
 
         validation = MediaValidator.validate_video(output)
         if not validation.get("valid") or validation.get("has_faststart") is not True:

@@ -150,6 +150,7 @@ class ActivityRenderSpec:
     background: BackgroundSpec | None
     summary: dict[str, float]
     points: list[dict[str, Any]]
+    presentation: str = "standard"
     output_mode: str = "animated"
     show_progress_bar: bool = False
     show_background_route: bool = True
@@ -171,6 +172,7 @@ class ActivityRenderSpec:
         background_dim: float = 0.35,
         show_progress_bar: bool = False,
         show_background_route: bool = True,
+        presentation: str = "standard",
     ) -> "ActivityRenderSpec":
         effective_profile = profile or RenderProfile()
         source_frame = pq.read_table(parquet_path).to_pandas()
@@ -223,6 +225,7 @@ class ActivityRenderSpec:
                 "maximumGradePct": round(timeline.maximum_grade_pct, 1),
             },
             points=_records(timeline, selected, cumulative_elevation_gain),
+            presentation=presentation,
             show_progress_bar=show_progress_bar,
             show_background_route=show_background_route,
         )

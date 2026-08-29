@@ -6,6 +6,7 @@ export const defaultActivitySpec: ActivityRenderSpec = {
   outputMode: 'animated',
   locale: 'en',
   theme: 'midnight',
+  presentation: 'standard',
   show_progress_bar: false,
   show_background_route: true,
   profile: {width: 1920, height: 1080, fps: 30, duration_seconds: 5, hold_seconds: 1},

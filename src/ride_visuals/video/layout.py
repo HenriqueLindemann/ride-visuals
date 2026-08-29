@@ -45,27 +45,43 @@ class VideoPartitionLayout:
     safe_margin_px: int = 24
 
     @classmethod
-    def create(cls, width: int, height: int, mode: str = "16:9") -> "VideoPartitionLayout":
+    def create(
+        cls,
+        width: int,
+        height: int,
+        mode: str = "16:9",
+        *,
+        safe_left_px: int = 0,
+        safe_right_px: int = 0,
+        landscape_panel_share: float = 0.30,
+    ) -> "VideoPartitionLayout":
         """Calcula a partição do canvas antes de qualquer enquadramento geográfico."""
+        if safe_left_px < 0 or safe_right_px < 0:
+            raise ValueError("As margens seguras não podem ser negativas")
+        if not 0 < landscape_panel_share < 1:
+            raise ValueError("A proporção do painel deve estar entre 0 e 1")
+        content_w = width - safe_left_px - safe_right_px
+        if content_w <= 0:
+            raise ValueError("As margens seguras excedem a largura do canvas")
+
         if mode == "16:9":
-            # 70% à esquerda para mapa, 30% à direita para telemetria
-            map_w = int(width * 0.70)
-            telem_w = width - map_w
-            map_r = Rect(0, 0, map_w, height)
-            telem_r = Rect(map_w, 0, telem_w, height)
+            map_w = int(content_w * (1 - landscape_panel_share))
+            telem_w = content_w - map_w
+            map_r = Rect(safe_left_px, 0, map_w, height)
+            telem_r = Rect(map_r.x1, 0, telem_w, height)
             return cls(width, height, "16:9", map_r, telem_r)
 
         elif mode == "9:16":
             # 60% no topo para mapa, 40% na base para telemetria
             map_h = int(height * 0.60)
             telem_h = height - map_h
-            map_r = Rect(0, 0, width, map_h)
-            telem_r = Rect(0, map_h, width, telem_h)
+            map_r = Rect(safe_left_px, 0, content_w, map_h)
+            telem_r = Rect(safe_left_px, map_h, content_w, telem_h)
             return cls(width, height, "9:16", map_r, telem_r)
 
         elif mode == "clean":
             # 100% mapa com safe margin
-            map_r = Rect(0, 0, width, height)
+            map_r = Rect(safe_left_px, 0, content_w, height)
             telem_r = Rect(0, 0, 0, 0)
             return cls(width, height, "clean", map_r, telem_r)
 

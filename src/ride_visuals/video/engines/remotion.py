@@ -12,6 +12,11 @@ from PIL import Image
 
 from ride_visuals.validate.media_validator import MediaValidator
 from ride_visuals.video.engines.base import EngineCapabilities
+from ride_visuals.video.instagram import (
+    INSTAGRAM_STORY_LANDSCAPE,
+    ffmpeg_filter,
+    present_frame,
+)
 from ride_visuals.video.spec import ActivityRenderSpec
 
 
@@ -134,23 +139,34 @@ class RemotionVideoEngine:
             "-y",
             "-i",
             str(video_only),
-            "-f",
-            "lavfi",
-            "-i",
-            "anullsrc=channel_layout=stereo:sample_rate=44100",
             "-map",
             "0:v:0",
-            "-map",
-            "1:a:0",
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-shortest",
-            "-movflags",
-            "+faststart",
-            str(output),
+            "-an",
         ]
+        if spec.presentation == INSTAGRAM_STORY_LANDSCAPE:
+            mux_command.extend(
+                [
+                    "-vf",
+                    ffmpeg_filter(),
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "18",
+                    "-pix_fmt",
+                    "yuv420p",
+                ]
+            )
+        else:
+            mux_command.extend(["-c:v", "copy"])
+        mux_command.extend(
+            [
+                "-movflags",
+                "+faststart",
+                str(output),
+            ]
+        )
         self._run(mux_command, "media normalization")
         video_only.unlink(missing_ok=True)
 
@@ -206,9 +222,16 @@ class RemotionVideoEngine:
             *self._browser_args(),
         ]
         self._run(command, "transparent overlay still", retries=1)
-        with Image.open(output) as rendered:
-            if rendered.mode != "RGBA" or rendered.getchannel("A").getextrema() == (255, 255):
-                raise RuntimeError("Overlay PNG was rendered without an alpha channel")
+        if spec.presentation == INSTAGRAM_STORY_LANDSCAPE:
+            with Image.open(output) as rendered:
+                story_frame = present_frame(
+                    rendered.convert("RGBA"),
+                    presentation=spec.presentation,
+                )
+            story_frame.save(output)
+        validation = MediaValidator.validate_transparent_still(output)
+        if not validation.get("valid"):
+            raise RuntimeError(f"Overlay PNG failed validation: {validation}")
         return output
 
     def render_overlay_video(
@@ -243,13 +266,18 @@ class RemotionVideoEngine:
             raise ValueError("Transparent video output must use .webm or .mov")
         output.parent.mkdir(parents=True, exist_ok=True)
         serialized_spec = spec.write(spec_path).resolve()
+        remotion_output = (
+            output.with_name(f".{output.stem}.remotion{output.suffix}")
+            if spec.presentation == INSTAGRAM_STORY_LANDSCAPE
+            else output
+        )
         command = [
             self.node or "node",
             str(self.cli),
             "render",
             str(self.entrypoint),
             "ActivityOverlay",
-            str(output.resolve()),
+            str(remotion_output.resolve()),
             "--props",
             str(serialized_spec),
             "--image-format",
@@ -266,8 +294,49 @@ class RemotionVideoEngine:
             *self._browser_args(),
         ]
         self._run(command, "transparent overlay video", retries=1)
+        if spec.presentation == INSTAGRAM_STORY_LANDSCAPE:
+            if suffix == ".webm":
+                transform_codec_args = [
+                    "-c:v",
+                    "libvpx-vp9",
+                    "-pix_fmt",
+                    "yuva420p",
+                    "-auto-alt-ref",
+                    "0",
+                ]
+                input_codec_args = ["-c:v", "libvpx-vp9"]
+            else:
+                transform_codec_args = [
+                    "-c:v",
+                    "prores_ks",
+                    "-profile:v",
+                    "4",
+                    "-pix_fmt",
+                    "yuva444p10le",
+                ]
+                input_codec_args = []
+            transform_command = [
+                self.ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                *input_codec_args,
+                "-i",
+                str(remotion_output),
+                "-vf",
+                ffmpeg_filter(transparent=True),
+                *transform_codec_args,
+                "-an",
+                str(output),
+            ]
+            self._run(transform_command, "Instagram transparent presentation")
+            remotion_output.unlink(missing_ok=True)
         if not output.exists() or output.stat().st_size < 1024:
             raise RuntimeError(f"Transparent video render is invalid: {output}")
+        validation = MediaValidator.validate_transparent_video(output)
+        if not validation.get("valid"):
+            raise RuntimeError(f"Transparent video failed validation: {validation}")
         return output
 
     def _browser_args(self) -> list[str]:

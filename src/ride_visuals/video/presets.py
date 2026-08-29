@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ride_visuals.video.instagram import INSTAGRAM_STORY_LANDSCAPE, render_dimensions
+
 
 @dataclass(frozen=True)
 class CanvasPreset:
@@ -11,6 +13,15 @@ class CanvasPreset:
     width: int
     height: int
     layout: str
+    presentation: str = "standard"
+
+    @property
+    def render_width(self) -> int:
+        return render_dimensions(self.width, self.height, self.presentation)[0]
+
+    @property
+    def render_height(self) -> int:
+        return render_dimensions(self.width, self.height, self.presentation)[1]
 
 
 @dataclass(frozen=True)
@@ -24,6 +35,13 @@ class VideoPreset:
 CANVASES = {
     "16:9": CanvasPreset("16:9", 1920, 1080, "16:9"),
     "9:16": CanvasPreset("9:16", 1080, 1920, "9:16"),
+    "instagram": CanvasPreset(
+        "instagram",
+        1080,
+        1920,
+        "16:9",
+        INSTAGRAM_STORY_LANDSCAPE,
+    ),
     "4k": CanvasPreset("4k", 3840, 2160, "16:9"),
 }
 
@@ -53,5 +71,11 @@ def get_video_preset(kind: str, aspect: str, *, preview: bool = False, clean: bo
     except KeyError as exc:
         raise ValueError(f"Unsupported video preset {kind!r}") from exc
     if clean:
-        canvas = CanvasPreset(canvas.aspect, canvas.width, canvas.height, "clean")
+        canvas = CanvasPreset(
+            canvas.aspect,
+            canvas.width,
+            canvas.height,
+            "clean",
+            canvas.presentation,
+        )
     return VideoPreset(canvas=canvas, fps=30, duration_seconds=duration, hold_seconds=hold)

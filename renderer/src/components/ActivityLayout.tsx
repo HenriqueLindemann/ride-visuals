@@ -3,7 +3,14 @@ import {BackgroundLayer} from './BackgroundLayer';
 import {RouteMap} from './RouteMap';
 import {TelemetryPanel} from './TelemetryPanel';
 import {themes} from '../design/tokens';
-import {FONT_FAMILY, MAP_SHARE_PORTRAIT, PANEL_SHARE_LANDSCAPE, mapPadding} from '../design/layout';
+import {
+  FONT_FAMILY,
+  INSTAGRAM_PANEL_SHARE,
+  MAP_SHARE_PORTRAIT,
+  PANEL_SHARE_LANDSCAPE,
+  landscapeSafeInsets,
+  mapPadding,
+} from '../design/layout';
 import {pointAtProgress} from '../lib/telemetry';
 import type {ActivityRenderSpec, TelemetryPoint} from '../schema';
 
@@ -42,6 +49,11 @@ export const ActivityLayout = ({spec, variant = 'full'}: Props) => {
   const hasBackground = spec.background !== null;
   const divider = `1px solid ${theme.border}`;
   const padding = mapPadding(vertical, scale);
+  const safeInsets = landscapeSafeInsets(spec.presentation);
+  const panelShare =
+    spec.presentation === 'instagram-story-landscape'
+      ? INSTAGRAM_PANEL_SHARE
+      : PANEL_SHARE_LANDSCAPE;
 
   const panelChrome = overlay
     ? {
@@ -66,11 +78,18 @@ export const ActivityLayout = ({spec, variant = 'full'}: Props) => {
         boxSizing: 'border-box',
       }}
     >
-      {overlay ? null : <BackgroundLayer background={spec.background} />}
-      <AbsoluteFill
+      {overlay ? null : (
+        <BackgroundLayer background={spec.background} presentation={spec.presentation} />
+      )}
+      <div
         style={{
+          position: 'absolute',
+          top: 0,
+          bottom: 0,
+          left: safeInsets.left,
+          right: safeInsets.right,
           display: 'grid',
-          gridTemplateColumns: vertical ? '1fr' : `${(1 - PANEL_SHARE_LANDSCAPE) * 100}% ${PANEL_SHARE_LANDSCAPE * 100}%`,
+          gridTemplateColumns: vertical ? '1fr' : `${(1 - panelShare) * 100}% ${panelShare * 100}%`,
           gridTemplateRows: vertical ? `${MAP_SHARE_PORTRAIT * 100}% 1fr` : '1fr',
           background: 'transparent',
         }}
@@ -100,7 +119,7 @@ export const ActivityLayout = ({spec, variant = 'full'}: Props) => {
         <div style={{minHeight: 0, ...panelChrome}}>
           <TelemetryPanel spec={spec} point={point} progress={progress} theme={theme} vertical={vertical} />
         </div>
-      </AbsoluteFill>
+      </div>
     </AbsoluteFill>
   );
 };

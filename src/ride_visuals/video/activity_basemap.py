@@ -7,6 +7,7 @@ from typing import Mapping, Sequence
 
 from ride_visuals.maps.tiles import TILE_PROVIDERS, TileManager
 from ride_visuals.maps.projection import project_mercator, unproject_mercator
+from ride_visuals.video.instagram import INSTAGRAM_PANEL_SHARE
 
 
 def _mercator(lon: float, lat: float) -> tuple[float, float]:
@@ -59,6 +60,8 @@ def canvas_basemap_bounds(
     height: int,
     layout: str,
     show_progress_bar: bool = False,
+    safe_left_px: int = 0,
+    safe_right_px: int = 0,
 ) -> tuple[float, float, float, float]:
     """Extend the route viewport extent to the edges of its map partition,
 
@@ -81,16 +84,20 @@ def canvas_basemap_bounds(
 
     vertical = height > width
     scale_factor = height / (1920.0 if vertical else 1080.0)
+    content_w = width - safe_left_px - safe_right_px
+    if content_w <= 0:
+        raise ValueError("Activity basemap safe margins exceed the canvas width")
     # Mirrors renderer/src/design/layout.ts (MAP_SHARE_PORTRAIT / PANEL_SHARE_LANDSCAPE
     # / mapPadding) so basemap tiles stay registered with RouteMap.tsx.
     if layout == "telemetry":
-        view_w = width if vertical else int(round(width * 0.70))
+        map_share = 1 - INSTAGRAM_PANEL_SHARE if safe_left_px or safe_right_px else 0.70
+        view_w = content_w if vertical else int(round(content_w * map_share))
         view_h = int(round(height * 0.50)) if vertical else height
         top_pad = int(round((56 if vertical else 64) * scale_factor))
         bottom_pad = int(round((56 if vertical else 64) * scale_factor))
         side_pad = int(round((56 if vertical else 64) * scale_factor))
     elif layout == "clean":
-        view_w = width
+        view_w = content_w
         view_h = height
         top_pad = int(round((150 if vertical else 140) * scale_factor))
         bottom_pad = int(round((75 if show_progress_bar else 48) * scale_factor))
@@ -105,7 +112,7 @@ def canvas_basemap_bounds(
     rendered_w = data_w * scale
     rendered_h = data_h * scale
 
-    offset_x = side_pad + (usable_w - rendered_w) / 2.0
+    offset_x = safe_left_px + side_pad + (usable_w - rendered_w) / 2.0
     offset_y = top_pad + (usable_h - rendered_h) / 2.0
 
     # Extend the same georeferenced plane beneath the telemetry panel. Route
@@ -130,6 +137,8 @@ def render_activity_basemap(
     layout: str,
     map_detail: str = "standard",
     show_progress_bar: bool = False,
+    safe_left_px: int = 0,
+    safe_right_px: int = 0,
     tile_manager: TileManager | None = None,
 ) -> Path:
     """Render a full-canvas tile image aligned to the route partition."""
@@ -147,6 +156,8 @@ def render_activity_basemap(
         height=height,
         layout=layout,
         show_progress_bar=show_progress_bar,
+        safe_left_px=safe_left_px,
+        safe_right_px=safe_right_px,
     )
     manager = tile_manager or TileManager()
     image = manager.render_basemap_layer(

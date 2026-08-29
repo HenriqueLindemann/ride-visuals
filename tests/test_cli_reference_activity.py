@@ -124,3 +124,43 @@ def test_reference_ride_progress_report_matches_canonical_metrics(
         )
     )
     assert actual == expected
+
+
+def test_instagram_activity_keeps_landscape_spec_and_portrait_delivery_path(
+    reference_cli_workspace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeRemotionVideoEngine:
+        def __init__(self, renderer_dir=None):
+            pass
+
+        def render_activity(self, spec, output_path, **kwargs):
+            calls.append({"spec": spec, "output_path": output_path, **kwargs})
+            return output_path, []
+
+    monkeypatch.setattr(
+        "ride_visuals.video.engines.remotion.RemotionVideoEngine",
+        FakeRemotionVideoEngine,
+    )
+
+    main(
+        [
+            "video",
+            "telemetry",
+            str(REFERENCE_ACTIVITY_ID),
+            "--preview",
+            "--no-keyframes",
+            "--aspect",
+            "instagram",
+            "--config",
+            str(reference_cli_workspace.config_path),
+        ]
+    )
+
+    call = calls[0]
+    spec = call["spec"]
+    assert (spec.profile.width, spec.profile.height) == (1920, 1080)
+    assert spec.presentation == "instagram-story-landscape"
+    assert call["output_path"].name.endswith("_instagram_preview.mp4")

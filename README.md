@@ -62,6 +62,10 @@ ride-visuals video telemetry <activity-id> --background-image photo.jpg \
   --title "" --config config/config.toml
 ```
 
+Every video and overlay type also accepts `--aspect instagram`: the render is
+authored in 16:9 and delivered as a 1080×1920 Story, with text and data kept
+inside Instagram's safe areas.
+
 ## Shape the collection
 
 Collection videos support chronological, simultaneous, elapsed-time, and comet

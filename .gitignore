@@ -3,6 +3,7 @@ bulk_download/
 rides/
 data/
 outputs/
+outputs_backup*/
 config/config.toml
 *.fit
 *.fit.gz

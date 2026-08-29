@@ -46,6 +46,7 @@ def test_render_spec_is_versioned_and_json_safe(tmp_path):
     assert payload["background"] is None
     assert payload["summary"]["speedWindowSeconds"] >= 30
     assert payload["show_progress_bar"] is False
+    assert payload["presentation"] == "standard"
     assert len(payload["points"]) == 3
     assert payload["points"][0]["powerWatts"] is None
     assert "cumulativeElevationGainM" in payload["points"][0]

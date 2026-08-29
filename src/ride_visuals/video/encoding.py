@@ -10,7 +10,7 @@ from PIL import Image
 
 
 class RawVideoEncoder:
-    """Stream fixed-size RGB frames to a normalized H.264/AAC MP4."""
+    """Stream fixed-size RGB frames to a normalized silent-free H.264 MP4."""
 
     def __init__(
         self,
@@ -36,9 +36,8 @@ class RawVideoEncoder:
             "-f", "rawvideo", "-vcodec", "rawvideo",
             "-s", f"{self.width}x{self.height}", "-pix_fmt", "rgb24",
             "-r", str(self.fps), "-i", "-",
-            "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
             "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-            "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
+            "-pix_fmt", "yuv420p",
             "-movflags", "+faststart", str(self.output_path),
         ]
         self._process = subprocess.Popen(

@@ -22,6 +22,7 @@ export const activityRenderSpecSchema = z.object({
   outputMode: z.enum(['animated', 'static-summary']).default('animated'),
   locale: z.enum(['en', 'pt-BR']),
   theme: z.enum(['midnight', 'frost']),
+  presentation: z.enum(['standard', 'instagram-story-landscape']).default('standard'),
   profile: z.object({
     width: z.number().int().positive(),
     height: z.number().int().positive(),

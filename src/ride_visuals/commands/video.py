@@ -98,7 +98,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--aspect",
         choices=VIDEO_ASPECTS,
         default="16:9",
-        help="Canvas do vídeo: paisagem, vertical ou UHD 3840x2160",
+        help=(
+            "Canvas do vídeo: paisagem, vertical, Instagram Story horizontal "
+            "(gire o telefone) ou UHD 3840x2160"
+        ),
     )
     parser.add_argument(
         "--engine",

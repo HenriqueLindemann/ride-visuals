@@ -23,6 +23,30 @@ class TestVideoLayout(unittest.TestCase):
         self.assertEqual(layout.telemetry_rect.w, 1080)
         self.assertFalse(layout.map_rect.intersects(layout.telemetry_rect))
 
+    def test_instagram_safe_insets_keep_partitions_between_ui_zones(self):
+        layout = VideoPartitionLayout.create(
+            1920,
+            1080,
+            mode="16:9",
+            safe_left_px=220,
+            safe_right_px=220,
+        )
+
+        self.assertEqual(layout.map_rect.x0, 220)
+        self.assertEqual(layout.telemetry_rect.x1, 1700)
+        self.assertEqual(layout.map_rect.w + layout.telemetry_rect.w, 1480)
+
+        wider_panel = VideoPartitionLayout.create(
+            1920,
+            1080,
+            mode="16:9",
+            safe_left_px=220,
+            safe_right_px=220,
+            landscape_panel_share=0.36,
+        )
+        self.assertEqual(wider_panel.map_rect.w, 947)
+        self.assertEqual(wider_panel.telemetry_rect.w, 533)
+
     def test_projected_route_stays_within_map_rect(self):
         layout = VideoPartitionLayout.create(1920, 1080, mode="16:9")
         # Simular coordenadas geográficas de uma rota

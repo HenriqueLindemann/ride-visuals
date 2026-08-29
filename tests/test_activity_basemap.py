@@ -67,21 +67,29 @@ def test_activity_basemap_uses_requested_provider_and_detail(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("width", "height", "view_w", "view_h", "padding"),
+    ("width", "height", "view_w", "view_h", "padding", "safe_left", "safe_right"),
     [
-        (1920, 1080, 1344, 1080, 64),
-        (1080, 1920, 1080, 960, 56),
+        (1920, 1080, 1344, 1080, 64, 0, 0),
+        (1080, 1920, 1080, 960, 56, 0, 0),
+        (1920, 1080, 947, 1080, 64, 220, 220),
     ],
 )
 def test_full_canvas_basemap_keeps_route_aligned_in_telemetry_panel(
-    width, height, view_w, view_h, padding
+    width, height, view_w, view_h, padding, safe_left, safe_right
 ):
     points = [
         {"lon": 7.0, "lat": 49.0},
         {"lon": 7.6, "lat": 49.1},
         {"lon": 8.2, "lat": 49.4},
     ]
-    bounds = canvas_basemap_bounds(points, width=width, height=height, layout="telemetry")
+    bounds = canvas_basemap_bounds(
+        points,
+        width=width,
+        height=height,
+        layout="telemetry",
+        safe_left_px=safe_left,
+        safe_right_px=safe_right,
+    )
     canvas_min_x, canvas_min_y = _mercator(bounds[0], bounds[1])
     canvas_max_x, canvas_max_y = _mercator(bounds[2], bounds[3])
 
@@ -97,7 +105,7 @@ def test_full_canvas_basemap_keeps_route_aligned_in_telemetry_panel(
     usable_w = view_w - 2 * side_pad
     usable_h = view_h - top_pad - bottom_pad
     scale = min(usable_w / data_w, usable_h / data_h)
-    offset_x = side_pad + (usable_w - data_w * scale) / 2.0
+    offset_x = safe_left + side_pad + (usable_w - data_w * scale) / 2.0
     offset_y = top_pad + (usable_h - data_h * scale) / 2.0
 
     for point in points:

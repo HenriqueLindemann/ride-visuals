@@ -1,15 +1,23 @@
 import {Img} from 'remotion';
+import {landscapeSafeInsets} from '../design/layout';
 import type {ActivityRenderSpec} from '../schema';
 
 type Background = ActivityRenderSpec['background'];
 
-export const BackgroundLayer = ({background}: {background: Background}) => {
+export const BackgroundLayer = ({
+  background,
+  presentation = 'standard',
+}: {
+  background: Background;
+  presentation?: ActivityRenderSpec['presentation'];
+}) => {
   if (!background) {
     return null;
   }
 
   // Scale slightly so a CSS blur never exposes transparent canvas edges.
   const scale = 1 + background.blur_px / 500;
+  const safeInsets = landscapeSafeInsets(presentation);
   return (
     <div style={{position: 'absolute', inset: 0, overflow: 'hidden'}}>
       <Img
@@ -29,9 +37,11 @@ export const BackgroundLayer = ({background}: {background: Background}) => {
         <div
           style={{
             position: 'absolute',
-            left: 8,
+            left: safeInsets.left + 8,
             bottom: background.attribution_bottom_px,
-            maxWidth: 'calc(100% - 16px)',
+            // Only `left` is set so the label shrinks to fit its text; the
+            // maxWidth keeps the pill inside the safe content area.
+            maxWidth: `calc(100% - ${safeInsets.left + safeInsets.right + 16}px)`,
             padding: '2px 5px',
             color: 'rgba(255, 255, 255, 0.82)',
             background: 'rgba(0, 0, 0, 0.62)',

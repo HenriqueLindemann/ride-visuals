@@ -35,6 +35,22 @@ def test_final_presets_keep_native_resolution():
     assert (uhd.canvas.width, uhd.canvas.height) == (3840, 2160)
 
 
+def test_instagram_preset_delivers_portrait_but_renders_landscape():
+    preset = get_video_preset("activity", "instagram")
+
+    assert (preset.canvas.width, preset.canvas.height) == (1080, 1920)
+    assert (preset.canvas.render_width, preset.canvas.render_height) == (1920, 1080)
+    assert preset.canvas.layout == "16:9"
+    assert preset.canvas.presentation == "instagram-story-landscape"
+
+
+def test_clean_instagram_preset_preserves_story_presentation():
+    preset = get_video_preset("collection", "instagram", clean=True)
+
+    assert preset.canvas.layout == "clean"
+    assert preset.canvas.presentation == "instagram-story-landscape"
+
+
 def test_progress_preview_stays_below_ten_seconds():
     preset = get_video_preset("progress", "16:9", preview=True)
     assert preset.duration_seconds * 8 <= 10.0

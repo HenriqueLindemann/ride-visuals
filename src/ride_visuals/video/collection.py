@@ -39,6 +39,13 @@ from ride_visuals.video.collection_scene import (
     draw_route,
     route_metric_color as route_metric_color,
 )
+from ride_visuals.video.instagram import (
+    INSTAGRAM_PANEL_SHARE,
+    INSTAGRAM_STORY_LANDSCAPE,
+    present_frame,
+    render_dimensions,
+    safe_insets,
+)
 from ride_visuals.video.collection_panel import (
     CollectionPanelState,
     draw_collection_panel,
@@ -158,7 +165,8 @@ class CollectionVideoRenderer:
                           basemap: str = "plain",
                           map_detail: str = "standard",
                           show_progress_bar: bool = False,
-                          show_background_tracks: Optional[bool] = None) -> Tuple[Path, List[Path]]:
+                          show_background_tracks: Optional[bool] = None,
+                          presentation: str = "standard") -> Tuple[Path, List[Path]]:
         output_mp4_path = Path(output_mp4_path)
         output_mp4_path.parent.mkdir(parents=True, exist_ok=True)
         if keyframes_dir:
@@ -179,12 +187,25 @@ class CollectionVideoRenderer:
         if map_detail not in {"standard", "high"}:
             raise ValueError("Map detail must be standard or high")
 
+        logical_width, logical_height = render_dimensions(width, height, presentation)
         sc = ssaa_scale
-        render_w = width * sc
-        render_h = height * sc
-        output_scale = width / (1080.0 if mode == "9:16" else 1920.0)
+        render_w = logical_width * sc
+        render_h = logical_height * sc
+        output_scale = logical_width / (1080.0 if mode == "9:16" else 1920.0)
         ui = max(1, int(round(sc * output_scale)))
-        layout = VideoPartitionLayout.create(render_w, render_h, mode)
+        safe_left_px, safe_right_px = safe_insets(presentation, scale=sc)
+        layout = VideoPartitionLayout.create(
+            render_w,
+            render_h,
+            mode,
+            safe_left_px=safe_left_px,
+            safe_right_px=safe_right_px,
+            landscape_panel_share=(
+                INSTAGRAM_PANEL_SHARE
+                if presentation == INSTAGRAM_STORY_LANDSCAPE
+                else 0.30
+            ),
+        )
         projection = project_collection_tracks(
             tracks,
             layout,
@@ -588,7 +609,14 @@ class CollectionVideoRenderer:
                     scale=ui,
                 )
 
-                final_frame = img.resize((width, height), Image.Resampling.LANCZOS)
+                logical_frame = img.resize(
+                    (logical_width, logical_height),
+                    Image.Resampling.LANCZOS,
+                )
+                final_frame = present_frame(
+                    logical_frame,
+                    presentation=presentation,
+                )
 
                 # Salvar keyframe
                 if keyframes_dir:

@@ -16,6 +16,6 @@ COLLECTION_STYLES = (
     "speed",
     "grade",
 )
-VIDEO_ASPECTS = ("16:9", "9:16", "4k")
+VIDEO_ASPECTS = ("16:9", "9:16", "instagram", "4k")
 VIDEO_TYPES = ("clean", "telemetry", "overlay", "progress", "collection", "timeline")
 OVERLAY_FORMATS = ("png", "webm", "mov")

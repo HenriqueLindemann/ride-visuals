@@ -9,7 +9,7 @@ from PIL import Image
 
 
 class MediaValidator:
-    """Valida duração, resolução, codecs (H.264/AAC) e flag faststart de vídeos MP4."""
+    """Valida duração, resolução, codecs (H.264; AAC opcional) e flag faststart de vídeos MP4."""
 
     @staticmethod
     def validate_video(file_path: Path) -> Dict[str, Any]:
@@ -76,8 +76,8 @@ class MediaValidator:
             violations.append("final MP4 must be 15 seconds")
         elif "_preview" in file_path.stem and duration > 10.15:
             violations.append("preview must be at most 10 seconds")
-        if not has_audio or a_codec != "aac":
-            violations.append("silent AAC audio track is required")
+        if has_audio and a_codec != "aac":
+            violations.append("audio track must be AAC when present")
         if not has_faststart:
             violations.append("faststart moov atom is missing")
 
@@ -143,7 +143,8 @@ class MediaValidator:
 
         codec = stream.get("codec_name")
         pixel_format = stream.get("pix_fmt", "")
-        alpha_tag = str(stream.get("tags", {}).get("alpha_mode", "0")) == "1"
+        tags = {str(key).lower(): value for key, value in stream.get("tags", {}).items()}
+        alpha_tag = str(tags.get("alpha_mode", "0")) == "1"
         has_alpha = "a" in pixel_format or alpha_tag
         duration = float(info.get("format", {}).get("duration", 0.0))
         expected_codec = "vp9" if file_path.suffix.lower() == ".webm" else "prores"
