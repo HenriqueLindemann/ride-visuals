@@ -35,7 +35,7 @@ make preview-activity ACTIVITY_ID=<activity-id> TELEMETRY_BASEMAP=satellite
 ## A reusable overlay
 
 <p align="center">
-  <img src="showcase/ride-overlay.png" alt="A transparent overlay for a 115.8 km ride to Eberbach">
+  <img src="showcase/ride-overlay.png" alt="A transparent overlay for a 127.5 km ride to the Kalmit">
 </p>
 
 The same route and summary can be exported as a transparent PNG, alpha WebM,
@@ -98,6 +98,14 @@ then generate the complete archive output set:
 
 ```bash
 make --jobs=6 final
+```
+
+Rides recorded outside Strava, or downloaded individually as `.fit` files, can
+be added to the collection with `ingest-fit`. The file is copied into the
+export, registered in `activities.csv`, and ingested.
+
+```bash
+ride-visuals ingest-fit ~/Downloads/Kalmit_Weinstraße.fit --config config/config.toml
 ```
 
 This ingests the archive into a persistent catalog and streams, then creates three reports, three maps, and collection, progress, and timeline videos in both 16:9 and 9:16.

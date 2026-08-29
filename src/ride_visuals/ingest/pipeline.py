@@ -61,6 +61,25 @@ def compute_file_sha256(path: Path) -> str:
     return hasher.hexdigest()
 
 
+def find_export_root(bulk_dir: Path) -> Tuple[Path, Path]:
+    """Localiza o activities.csv e a pasta activities/ no bulk download."""
+    bulk_dir = Path(bulk_dir)
+    candidates = list(bulk_dir.glob("export_*")) + [bulk_dir]
+    for c in candidates:
+        csv_cand = c / "activities.csv"
+        act_cand = c / "activities"
+        if csv_cand.exists() and act_cand.exists():
+            return csv_cand, act_cand
+
+    # Busca recursiva
+    for csv_cand in bulk_dir.rglob("activities.csv"):
+        act_cand = csv_cand.parent / "activities"
+        if act_cand.exists():
+            return csv_cand, act_cand
+
+    raise FileNotFoundError(f"Activity export not found in {bulk_dir}")
+
+
 class IngestPipeline:
     """Orquestrador de ingestão lossless."""
 
@@ -70,33 +89,22 @@ class IngestPipeline:
                  streams_dir: Path,
                  selection: Optional[ActivitySelection] = None,
                  activity_types: Optional[List[str]] = None,
-                 clean: bool = False):
+                 clean: bool = False,
+                 only_ids: Optional[set[int]] = None):
         self.bulk_dir = Path(bulk_dir)
         self.catalog_db_path = Path(catalog_db_path)
         self.streams_dir = Path(streams_dir)
         self.selection = selection or ActivitySelection()
         self.activity_types = set(activity_types or ["Ride", "Pedalada"])
         self.clean = clean
+        self.only_ids = only_ids
 
         self.catalog_db_path.parent.mkdir(parents=True, exist_ok=True)
         self.streams_dir.mkdir(parents=True, exist_ok=True)
 
     def _find_export_root(self) -> Tuple[Path, Path]:
         """Localiza o activities.csv e a pasta activities/ no bulk download."""
-        candidates = list(self.bulk_dir.glob("export_*")) + [self.bulk_dir]
-        for c in candidates:
-            csv_cand = c / "activities.csv"
-            act_cand = c / "activities"
-            if csv_cand.exists() and act_cand.exists():
-                return csv_cand, act_cand
-
-        # Busca recursiva
-        for csv_cand in self.bulk_dir.rglob("activities.csv"):
-            act_cand = csv_cand.parent / "activities"
-            if act_cand.exists():
-                return csv_cand, act_cand
-
-        raise FileNotFoundError(f"Activity export not found in {self.bulk_dir}")
+        return find_export_root(self.bulk_dir)
 
     def run_ingest(self) -> Dict[str, Any]:
         """Executa a ingestão completa com auditoria e procedência."""
@@ -142,6 +150,8 @@ class IngestPipeline:
 
         for record in scoped_records:
             act_id = record["id"]
+            if self.only_ids is not None and act_id not in self.only_ids:
+                continue
             raw_filename = record["filename"]
             base_fname = Path(raw_filename).name if raw_filename else f"{act_id}.tcx.gz"
 
@@ -279,5 +289,11 @@ class IngestPipeline:
             dicts = [a.to_dict() for a in activities]
             df = pd.DataFrame(dicts)
             df["start_date"] = pd.to_datetime(df["start_date"], utc=True)
-            con.execute("INSERT OR REPLACE INTO activities BY NAME SELECT * FROM df")
+            # Upsert por DELETE + INSERT: funciona tanto em catálogos criados
+            # com PRIMARY KEY quanto em catálogos legados sem constraint
+            # (INSERT OR REPLACE exige UNIQUE/PRIMARY KEY na tabela).
+            con.execute("BEGIN TRANSACTION")
+            con.execute("DELETE FROM activities WHERE id IN (SELECT id FROM df)")
+            con.execute("INSERT INTO activities BY NAME SELECT * FROM df")
+            con.execute("COMMIT")
         con.close()

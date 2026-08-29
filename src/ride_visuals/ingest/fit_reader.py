@@ -22,6 +22,33 @@ class FITReader:
     """Extrai trackpoints e metadados de arquivos FIT sem perda de telemetria."""
 
     @staticmethod
+    def read_session_metadata(file_path: Path) -> Dict[str, Any]:
+        """Extrai apenas os campos da mensagem session de um arquivo FIT.
+
+        Leitura leve para pré-visualização e importação avulsa: não processa
+        os records de telemetria.
+        """
+        file_path = Path(file_path)
+        if not file_path.exists():
+            raise FileNotFoundError(f"Arquivo FIT não encontrado: {file_path}")
+
+        raw_bytes = file_path.read_bytes()
+        if file_path.name.endswith(".gz") or raw_bytes[:2] == b"\x1f\x8b":
+            raw_bytes = gzip.decompress(raw_bytes)
+
+        session: Dict[str, Any] = {}
+        with fitdecode.FitReader(io.BytesIO(raw_bytes)) as fit:
+            for frame in fit:
+                if not isinstance(frame, fitdecode.FitDataMessage):
+                    continue
+                if frame.name == "session":
+                    for field in frame.fields:
+                        if field.value is not None:
+                            session[field.name] = field.value
+                    break
+        return session
+
+    @staticmethod
     def read_fit(file_path: Path) -> Tuple[List[TrackPoint], Dict[str, Any]]:
         file_path = Path(file_path)
         if not file_path.exists():

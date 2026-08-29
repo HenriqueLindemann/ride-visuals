@@ -48,6 +48,27 @@ def add_selection_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def print_ingest_stats(stats: dict[str, Any]) -> None:
+    """Imprime o resumo padronizado de uma execução de ingestão."""
+    print("\n==================================================")
+    print(" Ingestão Concluída com Sucesso!")
+    print("==================================================")
+    print(f"  Atividades no recorte:        {stats['total_scoped']}")
+    print(f"  Atividades salvas:            {stats['ingested_activities']}")
+    print(f"  Total de pontos de telemetria:{stats['total_points']:,}")
+    print(
+        "  Arquivos originais:           "
+        f"{stats['fit_count']} FIT · {stats['tcx_count']} TCX · {stats['gpx_count']} GPX"
+    )
+    print(f"  Streams com Frequência Card.: {stats['with_hr_stream']}/{stats['ingested_activities']}")
+    print(f"  Streams com Velocidade expl.: {stats['with_speed_stream']}/{stats['ingested_activities']}")
+    print(f"  Streams com Temperatura:      {stats['with_temp_stream']}/{stats['ingested_activities']}")
+    print(f"  Streams com Watts estimados:  {stats['with_watts_stream']}/{stats['ingested_activities']}")
+    print(f"  Distância total acumulada:    {stats['total_distance_m'] / 1000.0:.1f} km")
+    print(f"  Altimetria acumulada:         {stats['total_elevation_m']:.0f} m")
+    print("==================================================")
+
+
 @dataclass(frozen=True)
 class RuntimeConfig:
     """Resolved configuration shared by command orchestration."""

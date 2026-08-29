@@ -3,7 +3,10 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from ride_visuals.ingest.pipeline import IngestPipeline
+from ride_visuals.ingest.pipeline import (
+    ACTIVITIES_TABLE_SCHEMA_SQL,
+    IngestPipeline,
+)
 from ride_visuals.model.activity import ActivitySummary
 from ride_visuals.video.engines.remotion import RemotionVideoEngine, _resolve_renderer_dir
 
@@ -85,6 +88,33 @@ def test_write_catalog_upserts_and_preserves_existing_activities(tmp_path: Path)
         (2, "Ride 2 Updated"),
         (3, "Ride 3"),
     ]
+
+
+def test_write_catalog_upserts_into_legacy_table_without_primary_key(tmp_path: Path):
+    """Catálogos criados por versões antigas não têm PRIMARY KEY em activities."""
+    db_path = tmp_path / "catalog.duckdb"
+    streams_dir = tmp_path / "streams"
+    pipeline = IngestPipeline(
+        bulk_dir=tmp_path,
+        catalog_db_path=db_path,
+        streams_dir=streams_dir,
+    )
+
+    con = duckdb.connect(str(db_path))
+    con.execute(ACTIVITIES_TABLE_SCHEMA_SQL.replace("id BIGINT PRIMARY KEY", "id BIGINT"))
+    con.execute("INSERT INTO activities (id, name) VALUES (1, 'Legacy Ride')")
+    con.close()
+
+    pipeline._write_catalog_duckdb([
+        _make_activity(1, "Legacy Ride Updated", "2024-01-01T10:00:00Z"),
+        _make_activity(2, "New Ride", "2024-01-02T10:00:00Z"),
+    ])
+
+    con = duckdb.connect(str(db_path), read_only=True)
+    rows = con.execute("SELECT id, name FROM activities ORDER BY id").fetchall()
+    con.close()
+
+    assert rows == [(1, "Legacy Ride Updated"), (2, "New Ride")]
 
 
 def test_clean_mode_removes_old_streams_and_resets_catalog(tmp_path: Path, monkeypatch):

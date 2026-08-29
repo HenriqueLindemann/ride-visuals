@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from ride_visuals.commands.common import RuntimeConfig, add_selection_arguments
+from ride_visuals.commands.common import RuntimeConfig, add_selection_arguments, print_ingest_stats
 from ride_visuals.selection import ActivitySelection
 
 
@@ -56,21 +56,4 @@ def run(args: argparse.Namespace) -> None:
         clean=args.clean,
     )
     stats = pipeline.run_ingest()
-
-    print("\n==================================================")
-    print(" Ingestão Concluída com Sucesso!")
-    print("==================================================")
-    print(f"  Atividades no recorte:        {stats['total_scoped']}")
-    print(f"  Atividades salvas:            {stats['ingested_activities']}")
-    print(f"  Total de pontos de telemetria:{stats['total_points']:,}")
-    print(
-        "  Arquivos originais:           "
-        f"{stats['fit_count']} FIT · {stats['tcx_count']} TCX · {stats['gpx_count']} GPX"
-    )
-    print(f"  Streams com Frequência Card.: {stats['with_hr_stream']}/{stats['ingested_activities']}")
-    print(f"  Streams com Velocidade expl.: {stats['with_speed_stream']}/{stats['ingested_activities']}")
-    print(f"  Streams com Temperatura:      {stats['with_temp_stream']}/{stats['ingested_activities']}")
-    print(f"  Streams com Watts estimados:  {stats['with_watts_stream']}/{stats['ingested_activities']}")
-    print(f"  Distância total acumulada:    {stats['total_distance_m'] / 1000.0:.1f} km")
-    print(f"  Altimetria acumulada:         {stats['total_elevation_m']:.0f} m")
-    print("==================================================")
+    print_ingest_stats(stats)

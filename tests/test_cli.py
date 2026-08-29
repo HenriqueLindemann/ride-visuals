@@ -40,6 +40,7 @@ def _choices(command: str, destination: str) -> tuple[str, ...]:
     [
         (["doctor"], "doctor"),
         (["ingest"], "ingest"),
+        (["ingest-fit", "ride.fit"], "ingest-fit"),
         (["audit"], "audit"),
         (["map", "overview"], "map"),
         (["video", "collection"], "video"),
