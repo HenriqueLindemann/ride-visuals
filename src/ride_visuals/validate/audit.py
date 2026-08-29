@@ -3,7 +3,6 @@
 from pathlib import Path
 from typing import Dict, Any
 import duckdb
-import pandas as pd
 import pyarrow.parquet as pq
 from ride_visuals.selection import ActivitySelection
 

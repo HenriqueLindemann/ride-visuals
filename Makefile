@@ -28,6 +28,12 @@ install:
 
 check:
 	$(RUN) doctor
+	$(PYTHON) -m ruff check src tests
+	$(PYTHON) -m ruff check \
+		src/ride_visuals/cli.py src/ride_visuals/commands \
+		tests/conftest.py tests/test_cli.py tests/test_cli_reference_activity.py \
+		tests/test_reference_activity.py \
+		--extend-select I,B,C4,SIM,C90,PLR0912,PLR0913,PLR0915
 	PYTHONPATH=src $(PYTHON) -m pytest -q
 	$(PYTHON) -m compileall -q src
 	npm --prefix renderer run typecheck

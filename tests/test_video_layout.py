@@ -3,7 +3,7 @@
 import unittest
 import numpy as np
 
-from ride_visuals.video.layout import VideoPartitionLayout, Rect
+from ride_visuals.video.layout import VideoPartitionLayout
 
 
 class TestVideoLayout(unittest.TestCase):

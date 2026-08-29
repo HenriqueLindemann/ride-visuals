@@ -83,7 +83,6 @@ class SeasonTimelineVideoRenderer:
             canvas_rgb = ImageColor.getrgb(self.theme.canvas)
             route_rgb = ImageColor.getrgb(self.theme.route_primary)
             muted_rgb = ImageColor.getrgb(self.theme.text_muted)
-            border_rgb = ImageColor.getrgb(self.theme.border)
             footer_font_size = max(8, int(round(9.5 * (dpi / 72.0))))
             summary_font_size = max(10, int(round(18.0 * (dpi / 72.0))))
             font = FontManager.get_font(footer_font_size, bold=True)

@@ -4,7 +4,7 @@ Regra inquebrável: A telemetria NUNCA cobre ou intercepta o traçado da rota ou
 """
 
 from dataclasses import dataclass
-from typing import Tuple, Dict, Any
+from typing import Tuple
 import numpy as np
 
 

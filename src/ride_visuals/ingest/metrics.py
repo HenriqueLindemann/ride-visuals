@@ -1,8 +1,7 @@
 """Cálculo e derivação de métricas de telemetria (distância, velocidade, inclinação, bearing)."""
 
 import math
-from typing import List, Tuple
-import numpy as np
+from typing import List
 
 from ride_visuals.model.trackpoint import TrackPoint
 

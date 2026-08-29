@@ -2,9 +2,9 @@
 
 import gzip
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Tuple
 import dateutil.parser
 
 from ride_visuals.model.trackpoint import TrackPoint

@@ -4,7 +4,6 @@ import gzip
 import tempfile
 import unittest
 from pathlib import Path
-import numpy as np
 
 from ride_visuals.ingest.tcx_reader import TCXReader
 

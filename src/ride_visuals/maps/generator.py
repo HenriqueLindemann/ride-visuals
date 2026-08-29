@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional
 import duckdb
 import matplotlib
 matplotlib.use("Agg")
@@ -14,7 +14,6 @@ from matplotlib.patches import Rectangle
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
-from PIL import Image
 
 from ride_visuals.design import EFFORT_COLORS, MONTH_ROUTE_COLORS, get_theme, route_color
 from ride_visuals.i18n import Translator

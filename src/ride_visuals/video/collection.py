@@ -26,7 +26,7 @@ from ride_visuals.video.collection_data import (
 )
 from ride_visuals.video.collection_motion import (
     SUPPORTED_MOTIONS,
-    elapsed_point_count,
+    elapsed_point_count as elapsed_point_count,
     maximum_elapsed_seconds,
     normalized_distance_profile,
     parallel_motion_state,
@@ -37,7 +37,7 @@ from ride_visuals.video.collection_scene import (
     choose_map_legend_box,
     draw_map_legend,
     draw_route,
-    route_metric_color,
+    route_metric_color as route_metric_color,
 )
 from ride_visuals.video.collection_panel import (
     CollectionPanelState,

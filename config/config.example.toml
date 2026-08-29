@@ -1,5 +1,6 @@
 [app]
 locale = "en"
+#or pt-BR
 
 [video]
 theme = "midnight"
