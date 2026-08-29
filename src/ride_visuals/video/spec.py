@@ -9,21 +9,74 @@ from __future__ import annotations
 import json
 import math
 import mimetypes
+import shutil
+import subprocess
 from base64 import b64encode
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-from ride_visuals.i18n import normalize_locale
 from ride_visuals.design import get_theme
+from ride_visuals.i18n import normalize_locale
 from ride_visuals.video.telemetry import TelemetryTimeline, adaptive_speed_window_seconds
 
-
 RENDER_SPEC_VERSION = "1.0"
+BACKGROUND_KINDS = ("image", "video")
+
+
+@dataclass(frozen=True)
+class VideoMetadata:
+    duration_seconds: float
+    has_audio: bool
+
+
+def probe_video(path: Path) -> VideoMetadata:
+    """Return the playback metadata needed for a video background."""
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe is None:
+        raise RuntimeError("ffprobe was not found in PATH")
+    command = [
+        ffprobe,
+        "-v",
+        "error",
+        "-print_format",
+        "json",
+        "-show_format",
+        "-show_streams",
+        str(path),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        detail = result.stderr.strip() or "ffprobe could not read the file"
+        raise ValueError(f"Could not inspect background video {path}: {detail}")
+    try:
+        info = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"ffprobe returned invalid metadata for background video: {path}") from exc
+    streams = info.get("streams", [])
+    video = next((s for s in streams if s.get("codec_type") == "video"), None)
+    if video is None:
+        raise ValueError(f"Background video has no video stream: {path}")
+    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    duration = 0.0
+    # Prefer the video-stream duration: a longer audio stream must not make a
+    # short visual track appear suitable. Some containers only expose format
+    # duration, so retain that as a fallback.
+    for raw_duration in (video.get("duration"), info.get("format", {}).get("duration")):
+        try:
+            candidate = float(raw_duration)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(candidate) and candidate > 0.0:
+            duration = candidate
+            break
+    if duration == 0.0:
+        raise ValueError(f"Background video duration could not be determined: {path}")
+    return VideoMetadata(duration_seconds=duration, has_audio=audio is not None)
 
 
 @dataclass(frozen=True)
@@ -56,8 +109,11 @@ class ActivityIdentity:
 class BackgroundSpec:
     """Portable background embedded in the render contract.
 
-    Data URLs keep visual engines independent from the local filesystem and
-    make saved render specs portable.
+    Image backgrounds carry data URLs so visual engines stay independent from
+    the local filesystem and saved render specs remain portable. Video
+    backgrounds keep a filesystem reference: they are too large to inline, so
+    the render engine stages the file into the renderer public dir and the
+    component reads it through staticFile.
     """
 
     src: str
@@ -65,6 +121,8 @@ class BackgroundSpec:
     dim: float = 0.35
     attribution: str | None = None
     attribution_bottom_px: float = 6.0
+    kind: Literal["image", "video"] = "image"
+    audio: bool = False
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.blur_px <= 100.0:
@@ -73,6 +131,10 @@ class BackgroundSpec:
             raise ValueError("Background dim must be between 0 and 1")
         if self.attribution_bottom_px < 0.0:
             raise ValueError("Attribution position cannot be negative")
+        if self.kind not in BACKGROUND_KINDS:
+            raise ValueError(f"Background kind must be one of: {', '.join(BACKGROUND_KINDS)}")
+        if self.kind == "image" and self.audio:
+            raise ValueError("Background audio flag only applies to video backgrounds")
 
     @classmethod
     def from_image(
@@ -97,6 +159,41 @@ class BackgroundSpec:
             dim=dim,
             attribution=attribution,
             attribution_bottom_px=attribution_bottom_px,
+        )
+
+    @classmethod
+    def from_video(
+        cls,
+        path: Path,
+        *,
+        blur_px: float = 0.0,
+        dim: float = 0.35,
+        audio: bool = True,
+        required_duration: float | None = None,
+    ) -> "BackgroundSpec":
+        """Reference a video file that plays underneath the composition.
+
+        Unlike images, the source stays a filesystem path: it is too large to
+        inline, so the render engine stages the file into the renderer public
+        dir and the component reads it through staticFile. The clip must cover
+        the composition duration; the composition length is canonical, not the
+        clip length.
+        """
+        source = Path(path).resolve()
+        if not source.is_file():
+            raise FileNotFoundError(f"Background video was not found: {source}")
+        media = probe_video(source)
+        if required_duration is not None and media.duration_seconds < required_duration - 1e-3:
+            raise ValueError(
+                f"Background video is {media.duration_seconds:.2f}s long but the composition "
+                f"runs for {required_duration:.2f}s; use a clip that covers the animation"
+            )
+        return cls(
+            src=str(source),
+            blur_px=blur_px,
+            dim=dim,
+            kind="video",
+            audio=audio and media.has_audio,
         )
 
 
@@ -168,12 +265,16 @@ class ActivityRenderSpec:
         profile: RenderProfile | None = None,
         max_points: int | None = None,
         background_image: Path | None = None,
+        background_video: Path | None = None,
+        background_video_audio: bool = True,
         background_blur_px: float = 0.0,
         background_dim: float = 0.35,
         show_progress_bar: bool = False,
         show_background_route: bool = True,
         presentation: str = "standard",
     ) -> "ActivityRenderSpec":
+        if background_image is not None and background_video is not None:
+            raise ValueError("Use either a background image or a background video, not both")
         effective_profile = profile or RenderProfile()
         source_frame = pq.read_table(parquet_path).to_pandas()
         raw_timestamps = pd.to_datetime(source_frame["timestamp"], utc=True, errors="coerce").dropna().sort_values()
@@ -207,13 +308,25 @@ class ActivityRenderSpec:
                 date=activity_date,
             ),
             background=(
-                BackgroundSpec.from_image(
-                    background_image,
+                BackgroundSpec.from_video(
+                    background_video,
                     blur_px=background_blur_px,
                     dim=background_dim,
+                    audio=background_video_audio,
+                    required_duration=(
+                        effective_profile.duration_seconds + effective_profile.hold_seconds
+                    ),
                 )
-                if background_image is not None
-                else None
+                if background_video is not None
+                else (
+                    BackgroundSpec.from_image(
+                        background_image,
+                        blur_px=background_blur_px,
+                        dim=background_dim,
+                    )
+                    if background_image is not None
+                    else None
+                )
             ),
             summary={
                 "distanceKm": round(timeline.total_distance_km, 3),

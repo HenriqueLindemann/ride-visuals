@@ -42,6 +42,12 @@ export const activityRenderSpecSchema = z.object({
       dim: z.number().min(0).max(1),
       attribution: z.string().nullable().default(null),
       attribution_bottom_px: z.number().nonnegative().default(6),
+      // 'image' embeds a data URL; 'video' references a file inside the
+      // renderer public dir, staged by the Python engine.
+      kind: z.enum(['image', 'video']).default('image'),
+      // Delivery metadata consumed by the Python engine when muxing the final
+      // MP4; the renderer always plays the background video muted.
+      audio: z.boolean().default(false),
     })
     .nullable(),
   summary: z.object({

@@ -62,6 +62,16 @@ ride-visuals video telemetry <activity-id> --background-image photo.jpg \
   --title "" --config config/config.toml
 ```
 
+A video can also be used as the background, with its audio preserved. It must
+cover the full render (15 s for final activity videos).
+
+```bash
+ride-visuals video telemetry <activity-id> --background-video clip.mp4 \
+  --background-dim 0.2 --aspect instagram --config config/config.toml
+```
+
+Pass `--no-background-video-audio` when only the clip's visuals should be used.
+
 Every video and overlay type also accepts `--aspect instagram`: the render is
 authored in 16:9 and delivered as a 1080×1920 Story, with text and data kept
 inside Instagram's safe areas.

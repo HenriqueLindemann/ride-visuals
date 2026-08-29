@@ -68,6 +68,9 @@ def test_video_parser_preserves_defaults_and_choices() -> None:
     assert args.overlay_format == "png"
     assert args.show_progress_bar is False
     assert args.background_tracks is None
+    assert args.background_image is None
+    assert args.background_video is None
+    assert args.background_video_audio is True
     assert _choices("video", "video_type") == VIDEO_TYPES
     assert _choices("video", "motion") == COLLECTION_MOTIONS
     assert _choices("video", "style") == COLLECTION_STYLES
@@ -77,6 +80,23 @@ def test_video_parser_preserves_defaults_and_choices() -> None:
     assert _choices("video", "locale") == LOCALES
     assert _choices("video", "theme") == THEMES
     assert _choices("video", "overlay_format") == OVERLAY_FORMATS
+
+
+def test_video_parser_rejects_multiple_background_sources() -> None:
+    with pytest.raises(SystemExit) as error:
+        build_parser().parse_args(
+            [
+                "video",
+                "telemetry",
+                "42",
+                "--background-image",
+                "photo.jpg",
+                "--background-video",
+                "clip.mp4",
+            ]
+        )
+
+    assert error.value.code == 2
 
 
 def test_other_parser_choices_and_defaults_remain_stable() -> None:

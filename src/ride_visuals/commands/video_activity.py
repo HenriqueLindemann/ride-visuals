@@ -81,6 +81,24 @@ def _build_render_spec(
         if args.video_type in {"clean", "telemetry"} and args.background_image
         else None
     )
+    if args.background_video and args.video_type not in {"clean", "telemetry"}:
+        print(
+            "[Aviso] --background-video se aplica apenas a vídeos clean/telemetry; "
+            "o overlay permanece transparente."
+        )
+    background_video = (
+        Path(args.background_video)
+        if args.video_type in {"clean", "telemetry"} and args.background_video
+        else None
+    )
+    if background_video is not None and background_image is not None:
+        raise ValueError(
+            "Use either --background-image or --background-video for an activity render, not both"
+        )
+    if background_video is not None and args.basemap != "plain":
+        raise ValueError(
+            "Use either --background-video or --basemap for an activity render, not both"
+        )
     if background_image is not None and args.basemap != "plain":
         raise ValueError("Use either --background-image or --basemap for an activity render, not both")
     if args.basemap != "plain" and args.background_blur > 0.0:
@@ -103,6 +121,8 @@ def _build_render_spec(
         ),
         max_points=6000 if args.preview else None,
         background_image=background_image,
+        background_video=background_video,
+        background_video_audio=args.background_video_audio,
         background_blur_px=args.background_blur,
         background_dim=args.background_dim,
         show_progress_bar=args.show_progress_bar,

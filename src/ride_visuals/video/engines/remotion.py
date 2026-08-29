@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,23 +19,166 @@ from ride_visuals.video.instagram import (
     ffmpeg_filter,
     present_frame,
 )
-from ride_visuals.video.spec import ActivityRenderSpec
+from ride_visuals.video.spec import ActivityRenderSpec, BackgroundSpec
 
 
 def _resolve_renderer_dir(renderer_dir: Path | None = None) -> Path:
     if renderer_dir is not None:
-        return Path(renderer_dir)
+        return Path(renderer_dir).resolve()
     env_dir = os.environ.get("RIDE_VISUALS_RENDERER_DIR")
     if env_dir:
-        return Path(env_dir)
+        return Path(env_dir).resolve()
     cwd_candidate = Path.cwd() / "renderer"
     if (cwd_candidate / "src" / "index.ts").exists():
-        return cwd_candidate
+        return cwd_candidate.resolve()
     for parent in Path(__file__).resolve().parents:
         candidate = parent / "renderer"
         if (candidate / "src" / "index.ts").exists():
-            return candidate
-    return Path(__file__).resolve().parents[4] / "renderer"
+            return candidate.resolve()
+    return (Path(__file__).resolve().parents[4] / "renderer").resolve()
+
+
+def stage_background_video(
+    spec: ActivityRenderSpec,
+    renderer_dir: Path,
+) -> ActivityRenderSpec:
+    """Copy a video background into the renderer public dir for staticFile.
+
+    The staged copy is content-addressed so repeated renders reuse the same
+    file. The returned spec references the copy relative to the public dir,
+    which is what the saved render spec records.
+    """
+    background = spec.background
+    if background is None or background.kind != "video":
+        return spec
+    source = Path(background.src)
+    if not source.is_absolute() and (renderer_dir / "public" / background.src).is_file():
+        # Already staged by a previous pass; keep the public-relative reference.
+        return spec
+    if not source.is_file():
+        raise FileNotFoundError(f"Background video was not found: {source}")
+    suffix = source.suffix.lower() or ".mp4"
+    staging_dir = renderer_dir / "public" / "backgrounds"
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=staging_dir,
+        prefix=".background-",
+        suffix=".part",
+    )
+    temporary = Path(temporary_name)
+    digest = hashlib.sha256()
+    try:
+        with os.fdopen(descriptor, "wb") as staged_file, source.open("rb") as source_file:
+            while chunk := source_file.read(1024 * 1024):
+                digest.update(chunk)
+                staged_file.write(chunk)
+        staged_name = f"{digest.hexdigest()[:16]}{suffix}"
+        staged = staging_dir / staged_name
+        if staged.exists():
+            temporary.unlink()
+        else:
+            os.replace(temporary, staged)
+    finally:
+        temporary.unlink(missing_ok=True)
+    print(f"[Background] Vídeo de fundo preparado: backgrounds/{staged_name}")
+    return replace(spec, background=replace(background, src=f"backgrounds/{staged_name}"))
+
+
+def background_video_source(
+    background: BackgroundSpec | None,
+    renderer_dir: Path,
+) -> Path | None:
+    """Resolve a staged video background back to an absolute filesystem path."""
+    if background is None or background.kind != "video":
+        return None
+    candidate = Path(background.src)
+    return candidate if candidate.is_absolute() else renderer_dir / "public" / candidate
+
+
+def media_normalization_command(
+    ffmpeg: str,
+    video_only: Path,
+    output: Path,
+    spec: ActivityRenderSpec,
+    background_video: Path | None,
+) -> list[str]:
+    """Build the final video/audio normalization command."""
+    keep_background_audio = (
+        background_video is not None
+        and spec.background is not None
+        and spec.background.kind == "video"
+        and spec.background.audio
+    )
+    command = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(video_only),
+    ]
+    if keep_background_audio:
+        command.extend(["-i", str(background_video)])
+    command.extend(["-map", "0:v:0"])
+    if keep_background_audio:
+        total_frames = round(
+            (spec.profile.duration_seconds + spec.profile.hold_seconds) * spec.profile.fps
+        )
+        total_seconds = total_frames / spec.profile.fps
+        command.extend(
+            [
+                "-map",
+                "1:a:0",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "160k",
+                "-ar",
+                "48000",
+                "-ac",
+                "2",
+                "-af",
+                (
+                    f"atrim=duration={total_seconds:.6f},"
+                    f"asetpts=PTS-STARTPTS,apad=whole_dur={total_seconds:.6f}"
+                ),
+                "-shortest",
+            ]
+        )
+    else:
+        command.append("-an")
+    if spec.presentation == INSTAGRAM_STORY_LANDSCAPE:
+        command.extend(
+            [
+                "-vf",
+                ffmpeg_filter(),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+                # Story delivery best practices: High profile, a closed GOP
+                # roughly every two seconds and explicit bt709 tagging.
+                "-profile:v",
+                "high",
+                "-g",
+                str(max(2, 2 * spec.profile.fps)),
+                "-colorspace",
+                "bt709",
+                "-color_primaries",
+                "bt709",
+                "-color_trc",
+                "bt709",
+            ]
+        )
+    else:
+        command.extend(["-c:v", "copy"])
+    command.extend(["-movflags", "+faststart", str(output)])
+    return command
 
 
 class RemotionVideoEngine:
@@ -43,6 +188,7 @@ class RemotionVideoEngine:
         transparent_still=True,
         transparent_video=True,
         background_image=True,
+        background_video=True,
         collection=False,
         clean_route=True,
         embedded_preview=True,
@@ -100,6 +246,7 @@ class RemotionVideoEngine:
         output.parent.mkdir(parents=True, exist_ok=True)
         if composition not in {"ActivityTelemetry", "ActivityClean"}:
             raise ValueError(f"Unsupported activity composition: {composition}")
+        spec = stage_background_video(spec, self.renderer_dir)
         serialized_spec = spec.write(spec_path).resolve()
         video_only = output.with_name(f".{output.stem}.remotion.mp4")
         assert self.node is not None
@@ -129,46 +276,20 @@ class RemotionVideoEngine:
         ]
         if self.browser_executable:
             render_command.extend(["--browser-executable", str(self.browser_executable)])
-        self._run(render_command, "Remotion render", retries=1)
+        try:
+            self._run(render_command, "Remotion render", retries=1)
 
-        mux_command = [
-            self.ffmpeg,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-i",
-            str(video_only),
-            "-map",
-            "0:v:0",
-            "-an",
-        ]
-        if spec.presentation == INSTAGRAM_STORY_LANDSCAPE:
-            mux_command.extend(
-                [
-                    "-vf",
-                    ffmpeg_filter(),
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "fast",
-                    "-crf",
-                    "18",
-                    "-pix_fmt",
-                    "yuv420p",
-                ]
+            background_video = background_video_source(spec.background, self.renderer_dir)
+            mux_command = media_normalization_command(
+                self.ffmpeg,
+                video_only,
+                output,
+                spec,
+                background_video,
             )
-        else:
-            mux_command.extend(["-c:v", "copy"])
-        mux_command.extend(
-            [
-                "-movflags",
-                "+faststart",
-                str(output),
-            ]
-        )
-        self._run(mux_command, "media normalization")
-        video_only.unlink(missing_ok=True)
+            self._run(mux_command, "media normalization")
+        finally:
+            video_only.unlink(missing_ok=True)
 
         validation = MediaValidator.validate_video(output)
         if not validation.get("valid") or validation.get("has_faststart") is not True:
@@ -357,7 +478,7 @@ class RemotionVideoEngine:
         total = spec.profile.duration_seconds + spec.profile.hold_seconds
         times = (0.0, total * 0.5, max(0.0, total - 1.0 / spec.profile.fps))
         paths: list[Path] = []
-        for label, timestamp in zip(("00", "50", "100"), times):
+        for label, timestamp in zip(("00", "50", "100"), times, strict=True):
             frame = destination / f"keyframe_{label}pct.png"
             command = [
                 self.ffmpeg,

@@ -15,6 +15,7 @@ class EngineCapabilities:
     transparent_still: bool
     transparent_video: bool
     background_image: bool
+    background_video: bool
     collection: bool
     clean_route: bool
     embedded_preview: bool

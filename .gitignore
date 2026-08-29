@@ -4,6 +4,7 @@ rides/
 data/
 outputs/
 outputs_backup*/
+/video.mp4
 config/config.toml
 *.fit
 *.fit.gz
@@ -43,6 +44,7 @@ node_modules/
 renderer/out/
 renderer/build/
 renderer/.remotion/
+renderer/public/backgrounds/
 /.cache/
 /.remotion/
 

@@ -115,10 +115,26 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--title",
         help="Override the title of an individual activity (an empty string hides the title)",
     )
-    parser.add_argument(
+    background_group = parser.add_mutually_exclusive_group()
+    background_group.add_argument(
         "--background-image",
         type=str,
         help="Imagem JPEG/PNG/WebP usada atrás da atividade (incompatível com --basemap)",
+    )
+    background_group.add_argument(
+        "--background-video",
+        type=str,
+        help=(
+            "Vídeo renderizado por baixo da UI da atividade, com o próprio áudio no "
+            "MP4 final (clean/telemetry; incompatível com --basemap e --background-image)"
+        ),
+    )
+    parser.add_argument(
+        "--background-video-audio",
+        action=argparse.BooleanOptionalAction,
+        dest="background_video_audio",
+        default=True,
+        help="Mantém o áudio original do --background-video no vídeo entregue",
     )
     parser.add_argument(
         "--background-blur",
