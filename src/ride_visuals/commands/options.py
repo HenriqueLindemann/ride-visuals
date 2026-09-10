@@ -20,6 +20,7 @@ VIDEO_ASPECTS = ("16:9", "9:16", "instagram", "4k")
 VIDEO_TYPES = (
     "clean",
     "telemetry",
+    "minimal",
     "overlay",
     "route-overlay",
     "stats-overlay",

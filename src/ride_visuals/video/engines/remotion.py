@@ -148,11 +148,13 @@ def media_normalization_command(
         )
     else:
         command.append("-an")
-    if spec.presentation == INSTAGRAM_STORY_LANDSCAPE:
+    if spec.presentation == INSTAGRAM_STORY_LANDSCAPE or (
+        spec.profile.width == 1080 and spec.profile.height == 1920
+    ):
+        if spec.presentation == INSTAGRAM_STORY_LANDSCAPE:
+            command.extend(["-vf", ffmpeg_filter()])
         command.extend(
             [
-                "-vf",
-                ffmpeg_filter(),
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -161,12 +163,18 @@ def media_normalization_command(
                 "18",
                 "-pix_fmt",
                 "yuv420p",
-                # Story delivery best practices: High profile, a closed GOP
-                # roughly every two seconds and explicit bt709 tagging.
                 "-profile:v",
                 "high",
+                "-level:v",
+                "4.2",
                 "-g",
                 str(max(2, 2 * spec.profile.fps)),
+                "-keyint_min",
+                str(spec.profile.fps),
+                "-sc_threshold",
+                "0",
+                "-bf",
+                "2",
                 "-colorspace",
                 "bt709",
                 "-color_primaries",
@@ -244,7 +252,7 @@ class RemotionVideoEngine:
 
         output = Path(output_path).resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
-        if composition not in {"ActivityTelemetry", "ActivityClean"}:
+        if composition not in {"ActivityTelemetry", "ActivityClean", "ActivityMinimal"}:
             raise ValueError(f"Unsupported activity composition: {composition}")
         spec = stage_background_video(spec, self.renderer_dir)
         serialized_spec = spec.write(spec_path).resolve()
@@ -466,7 +474,12 @@ class RemotionVideoEngine:
 
     @staticmethod
     def _validate_overlay_composition(composition: str) -> None:
-        if composition not in {"ActivityOverlay", "RouteOverlay", "StatsOverlay"}:
+        if composition not in {
+            "ActivityOverlay",
+            "RouteOverlay",
+            "StatsOverlay",
+            "ActivityMinimal",
+        }:
             raise ValueError(f"Unsupported overlay composition: {composition}")
 
     def _browser_args(self) -> list[str]:
@@ -516,5 +529,7 @@ class RemotionVideoEngine:
             if result.returncode == 0:
                 return
             if attempt < retries:
-                print(f"[Remotion] {operation} falhou; repetindo uma vez com o mesmo perfil estável...")
+                print(
+                    f"[Remotion] {operation} falhou; repetindo uma vez com o mesmo perfil estável..."
+                )
         raise RuntimeError(f"{operation} failed with exit code {result.returncode}")

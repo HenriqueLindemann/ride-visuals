@@ -87,13 +87,23 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         default="standard",
         help="Tiles padrão ou uma camada extra de resolução antes do downsample",
     )
-    parser.add_argument("--preview", action="store_true", help="Renderiza versão curta/preview rápido")
+    parser.add_argument(
+        "--preview", action="store_true", help="Renderiza versão curta/preview rápido"
+    )
     parser.add_argument(
         "--no-keyframes",
         action="store_true",
         help="Não extrai frames de inspeção 0/50/100",
     )
-    parser.add_argument("--clean", action="store_true", help="Renderiza coleção sem painel de telemetria")
+    parser.add_argument(
+        "--clean", action="store_true", help="Renderiza coleção sem painel de telemetria"
+    )
+    parser.add_argument(
+        "--minimal",
+        action="store_true",
+        default=False,
+        help="Gera visualização minimalista (apenas traçado, velocidade, distância e altimetria)",
+    )
     parser.add_argument(
         "--aspect",
         choices=VIDEO_ASPECTS,
@@ -175,6 +185,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 def run(args: argparse.Namespace) -> None:
     """Renderiza vídeos com ou sem telemetria, filme de progresso e coleções completas."""
+    if getattr(args, "minimal", False) and args.video_type == "telemetry":
+        args.video_type = "minimal"
     context = VideoCommandContext.from_args(args)
     if args.video_type == "timeline":
         from ride_visuals.commands.video_collection import render_timeline

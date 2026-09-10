@@ -3,6 +3,7 @@ import {ActivityTelemetry} from './compositions/ActivityTelemetry';
 import {ActivityOverlay} from './compositions/ActivityOverlay';
 import {RouteOverlay, StatsOverlay} from './compositions/MinimalOverlays';
 import {ActivityClean} from './compositions/ActivityClean';
+import {ActivityMinimal} from './compositions/ActivityMinimal';
 import {defaultActivitySpec} from './defaults';
 import {activityRenderSpecSchema, type ActivityRenderSpec} from './schema';
 
@@ -35,6 +36,17 @@ export const RideVisualsRoot = () => (
     <Composition
       id="ActivityClean"
       component={ActivityClean}
+      durationInFrames={180}
+      fps={30}
+      width={1920}
+      height={1080}
+      defaultProps={defaultActivitySpec}
+      calculateMetadata={calculateMetadata}
+      schema={activityRenderSpecSchema}
+    />
+    <Composition
+      id="ActivityMinimal"
+      component={ActivityMinimal}
       durationInFrames={180}
       fps={30}
       width={1920}

@@ -27,7 +27,7 @@ export const RouteOverlay = (spec: ActivityRenderSpec) => {
   );
 };
 
-const ElevationTrace = ({points, index, color}: {
+export const ElevationTrace = ({points, index, color}: {
   points: TelemetryPoint[]; index: number; color: string;
 }) => {
   const geometry = useMemo(() => {

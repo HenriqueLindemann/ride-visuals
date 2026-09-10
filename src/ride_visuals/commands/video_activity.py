@@ -70,6 +70,72 @@ def _load_activity_metadata(catalog_db: Path, activity_id: int) -> tuple[Any, An
         ).fetchone()
 
 
+def _ensure_background_video_duration(
+    video_path: Path,
+    required_duration: float,
+    outputs_dir: Path,
+) -> Path:
+    import subprocess
+
+    from ride_visuals.video.spec import probe_video
+
+    media = probe_video(video_path)
+    if media.duration_seconds >= required_duration - 1e-3:
+        return video_path
+
+    pad_duration = max(1.0, (required_duration - media.duration_seconds) + 1.0)
+    bg_dir = outputs_dir / "backgrounds"
+    bg_dir.mkdir(parents=True, exist_ok=True)
+    target_path = bg_dir / f"{video_path.stem}_padded_{int(required_duration)}s.mp4"
+    if target_path.exists():
+        media_padded = probe_video(target_path)
+        if media_padded.duration_seconds >= required_duration - 1e-3:
+            return target_path
+
+    command = [
+        "ffmpeg",
+        "-v",
+        "error",
+        "-y",
+        "-i",
+        str(video_path),
+        "-vf",
+        f"tpad=stop_mode=clone:stop_duration={pad_duration}",
+        "-t",
+        f"{required_duration + 0.5}",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-colorspace",
+        "bt709",
+        "-color_primaries",
+        "bt709",
+        "-color_trc",
+        "bt709",
+    ]
+    if media.has_audio:
+        command.extend(
+            [
+                "-af",
+                f"apad=whole_dur={required_duration + 0.5}",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+            ]
+        )
+    else:
+        command.append("-an")
+    command.append(str(target_path))
+    subprocess.run(command, check=True)
+    return target_path
+
+
 def _build_render_spec(
     context: VideoCommandContext,
     preset: VideoPreset,
@@ -87,19 +153,24 @@ def _build_render_spec(
     activity_date = str(activity_row[1]) if activity_row and activity_row[1] else None
     background_image = (
         Path(args.background_image)
-        if args.video_type in {"clean", "telemetry"} and args.background_image
+        if args.video_type in {"clean", "telemetry", "minimal"} and args.background_image
         else None
     )
-    if args.background_video and args.video_type not in {"clean", "telemetry"}:
+    if args.background_video and args.video_type not in {"clean", "telemetry", "minimal"}:
         print(
-            "[Aviso] --background-video se aplica apenas a vídeos clean/telemetry; "
+            "[Aviso] --background-video se aplica apenas a vídeos clean/telemetry/minimal; "
             "o overlay permanece transparente."
         )
     background_video = (
         Path(args.background_video)
-        if args.video_type in {"clean", "telemetry"} and args.background_video
+        if args.video_type in {"clean", "telemetry", "minimal"} and args.background_video
         else None
     )
+    if background_video is not None:
+        required_duration = preset.duration_seconds + preset.hold_seconds
+        background_video = _ensure_background_video_duration(
+            background_video, required_duration, context.outputs_dir
+        )
     if background_video is not None and background_image is not None:
         raise ValueError(
             "Use either --background-image or --background-video for an activity render, not both"
@@ -203,7 +274,14 @@ def _render_with_engine(
 
     args = context.args
     engine = RemotionVideoEngine(renderer_dir=context.runtime.renderer_dir)
-    if args.video_type in OVERLAY_COMPOSITIONS:
+    if args.video_type in OVERLAY_COMPOSITIONS or (
+        args.video_type == "minimal" and args.overlay_format is not None
+    ):
+        comp = (
+            "ActivityMinimal"
+            if args.video_type == "minimal"
+            else OVERLAY_COMPOSITIONS[args.video_type]
+        )
         print(
             f"[Overlay] Renderizando {output_extension.upper()} transparente "
             f"(locale: {context.runtime.locale}, theme: {context.runtime.theme})..."
@@ -213,14 +291,14 @@ def _render_with_engine(
                 spec,
                 paths.output_file,
                 spec_path=paths.spec_path,
-                composition=OVERLAY_COMPOSITIONS[args.video_type],
+                composition=comp,
             )
         else:
             output = engine.render_overlay_video(
                 spec,
                 paths.output_file,
                 spec_path=paths.spec_path,
-                composition=OVERLAY_COMPOSITIONS[args.video_type],
+                composition=comp,
             )
         print(f"[Overlay] Saída transparente gerada: {output}")
         return
@@ -229,12 +307,17 @@ def _render_with_engine(
         f"[Vídeo] Renderizando com engine visual (locale: {context.runtime.locale}, "
         f"theme: {context.runtime.theme}, preview: {args.preview})..."
     )
+    composition = (
+        "ActivityClean"
+        if args.video_type == "clean"
+        else ("ActivityMinimal" if args.video_type == "minimal" else "ActivityTelemetry")
+    )
     output, keyframes = engine.render_activity(
         spec,
         paths.output_file,
         spec_path=paths.spec_path,
         keyframes_dir=paths.keyframes_dir,
-        composition="ActivityClean" if args.video_type == "clean" else "ActivityTelemetry",
+        composition=composition,
     )
     print(f"[Vídeo] Gerado: {output}")
     if paths.keyframes_dir:
@@ -266,12 +349,15 @@ def render_activity(context: VideoCommandContext) -> None:
             raise ValueError("Stats overlays support --aspect 16:9 or 9:16")
         width, height = (960, 320) if args.aspect == "16:9" else (320, 640)
         preset = replace(preset, canvas=CanvasPreset(args.aspect, width, height, args.aspect))
+    is_overlay = args.video_type in OVERLAY_COMPOSITIONS or (
+        args.video_type == "minimal" and args.overlay_format is not None
+    )
     output_extension = (
         args.overlay_format or ("png" if args.video_type == "overlay" else "webm")
-        if args.video_type in OVERLAY_COMPOSITIONS
+        if is_overlay
         else "mp4"
     )
-    if args.video_type in OVERLAY_COMPOSITIONS and args.basemap != "plain":
+    if is_overlay and args.basemap != "plain":
         raise ValueError(
             "Individual basemaps are supported by clean and telemetry videos; "
             "overlays remain reusable and transparent"
