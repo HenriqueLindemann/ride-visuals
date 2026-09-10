@@ -44,6 +44,7 @@ class VideoEngine(Protocol):
         *,
         spec_path: Path,
         frame: int | None = None,
+        composition: str = "ActivityOverlay",
     ) -> Path: ...
 
     def render_overlay_video(
@@ -52,4 +53,5 @@ class VideoEngine(Protocol):
         output_path: Path,
         *,
         spec_path: Path,
+        composition: str = "ActivityOverlay",
     ) -> Path: ...

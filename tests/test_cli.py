@@ -65,7 +65,7 @@ def test_video_parser_preserves_defaults_and_choices() -> None:
     assert args.map_detail == "standard"
     assert args.aspect == "16:9"
     assert args.engine == "auto"
-    assert args.overlay_format == "png"
+    assert args.overlay_format is None
     assert args.show_progress_bar is False
     assert args.background_tracks is None
     assert args.background_image is None

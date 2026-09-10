@@ -165,8 +165,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument(
         "--overlay-format",
         choices=OVERLAY_FORMATS,
-        default="png",
-        help="PNG estático, WebM alpha ou ProRes 4444 MOV",
+        default=None,
+        help="PNG estático, WebM alpha ou ProRes 4444 MOV (novos overlays: WebM; overlay: PNG)",
     )
     parser.add_argument("--config", type=str, help="Caminho para config/config.toml")
     add_selection_arguments(parser)

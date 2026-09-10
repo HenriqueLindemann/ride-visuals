@@ -53,7 +53,8 @@ def discover_media(target_dir: Path) -> MediaFiles:
         mp4=tuple(target_dir.rglob("*.mp4")),
         alpha_videos=(*target_dir.rglob("*.webm"), *target_dir.rglob("*.mov")),
         alpha_stills=tuple(
-            path for path in target_dir.rglob("*.png") if "overlay" in path.parts
+            path for path in target_dir.rglob("*.png")
+            if {"overlay", "route-overlay", "stats-overlay"}.intersection(path.parts)
         ),
     )
 

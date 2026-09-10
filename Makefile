@@ -37,6 +37,7 @@ check:
 	PYTHONPATH=src $(PYTHON) -m pytest -q
 	$(PYTHON) -m compileall -q src
 	npm --prefix renderer run typecheck
+	npm --prefix renderer test
 	git diff --check
 
 audit:

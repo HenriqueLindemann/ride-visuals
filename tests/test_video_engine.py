@@ -255,3 +255,12 @@ def test_frame_critical_svgs_do_not_depend_on_async_dom_measurement():
         assert "new ResizeObserver" not in source
         assert "useElementSize<" not in source
         assert "preserveAspectRatio" in source
+
+
+@pytest.mark.parametrize('size', [(960, 320), (320, 640)])
+def test_compact_overlay_stills_are_validated(tmp_path, size):
+    output = tmp_path / 'stats.png'
+    Image.new('RGBA', size, (0, 0, 0, 0)).save(output)
+    assert MediaValidator.validate_transparent_still(output)['valid']
+    Image.new('RGB', size, (0, 0, 0)).save(output)
+    assert not MediaValidator.validate_transparent_still(output)['valid']

@@ -12,6 +12,13 @@ if TYPE_CHECKING:
     from ride_visuals.video.spec import ActivityRenderSpec
 
 
+OVERLAY_COMPOSITIONS = {
+    "overlay": "ActivityOverlay",
+    "route-overlay": "RouteOverlay",
+    "stats-overlay": "StatsOverlay",
+}
+
+
 @dataclass(frozen=True)
 class ActivityRenderPaths:
     output_file: Path
@@ -36,7 +43,9 @@ def _activity_paths(
         / args.video_type
         / f"{stem}{basemap_tag}_{aspect_tag}{preview_tag}.{output_extension}"
     )
-    spec_path = context.outputs_dir.parent / "render-specs" / f"{stem}{basemap_tag}_{aspect_tag}.json"
+    spec_path = (
+        context.outputs_dir.parent / "render-specs" / f"{stem}{basemap_tag}_{aspect_tag}.json"
+    )
     keyframe_kind = "_clean" if args.video_type == "clean" else ""
     keyframes_dir = (
         context.outputs_dir
@@ -100,7 +109,9 @@ def _build_render_spec(
             "Use either --background-video or --basemap for an activity render, not both"
         )
     if background_image is not None and args.basemap != "plain":
-        raise ValueError("Use either --background-image or --basemap for an activity render, not both")
+        raise ValueError(
+            "Use either --background-image or --basemap for an activity render, not both"
+        )
     if args.basemap != "plain" and args.background_blur > 0.0:
         raise ValueError(
             "A georeferenced basemap cannot be blurred because scaling it would misalign the route"
@@ -192,15 +203,25 @@ def _render_with_engine(
 
     args = context.args
     engine = RemotionVideoEngine(renderer_dir=context.runtime.renderer_dir)
-    if args.video_type == "overlay":
+    if args.video_type in OVERLAY_COMPOSITIONS:
         print(
             f"[Overlay] Renderizando {output_extension.upper()} transparente "
             f"(locale: {context.runtime.locale}, theme: {context.runtime.theme})..."
         )
         if output_extension == "png":
-            output = engine.render_overlay_still(spec, paths.output_file, spec_path=paths.spec_path)
+            output = engine.render_overlay_still(
+                spec,
+                paths.output_file,
+                spec_path=paths.spec_path,
+                composition=OVERLAY_COMPOSITIONS[args.video_type],
+            )
         else:
-            output = engine.render_overlay_video(spec, paths.output_file, spec_path=paths.spec_path)
+            output = engine.render_overlay_video(
+                spec,
+                paths.output_file,
+                spec_path=paths.spec_path,
+                composition=OVERLAY_COMPOSITIONS[args.video_type],
+            )
         print(f"[Overlay] Saída transparente gerada: {output}")
         return
 
@@ -238,8 +259,19 @@ def render_activity(context: VideoCommandContext) -> None:
         preview=args.preview,
         clean=args.video_type == "clean",
     )
-    output_extension = args.overlay_format if args.video_type == "overlay" else "mp4"
-    if args.video_type == "overlay" and args.basemap != "plain":
+    if args.video_type == "stats-overlay":
+        from ride_visuals.video.presets import CanvasPreset
+
+        if args.aspect not in {"16:9", "9:16"}:
+            raise ValueError("Stats overlays support --aspect 16:9 or 9:16")
+        width, height = (960, 320) if args.aspect == "16:9" else (320, 640)
+        preset = replace(preset, canvas=CanvasPreset(args.aspect, width, height, args.aspect))
+    output_extension = (
+        args.overlay_format or ("png" if args.video_type == "overlay" else "webm")
+        if args.video_type in OVERLAY_COMPOSITIONS
+        else "mp4"
+    )
+    if args.video_type in OVERLAY_COMPOSITIONS and args.basemap != "plain":
         raise ValueError(
             "Individual basemaps are supported by clean and telemetry videos; "
             "overlays remain reusable and transparent"

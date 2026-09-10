@@ -109,7 +109,7 @@ class MediaValidator:
                 width, height = image.size
         except Exception as exc:
             return {"valid": False, "error": f"Falha ao abrir PNG: {exc}"}
-        supported_dimensions = {(1920, 1080), (1080, 1920), (3840, 2160)}
+        supported_dimensions = {(1920, 1080), (1080, 1920), (3840, 2160), (960, 320), (320, 640)}
         if "_preview" in file_path.stem:
             supported_dimensions = supported_dimensions | {(960, 540), (540, 960)}
         valid = has_alpha and has_transparency and (width, height) in supported_dimensions
@@ -149,7 +149,7 @@ class MediaValidator:
         duration = float(info.get("format", {}).get("duration", 0.0))
         expected_codec = "vp9" if file_path.suffix.lower() == ".webm" else "prores"
         dimensions = (int(stream.get("width", 0)), int(stream.get("height", 0)))
-        supported_dimensions = {(1920, 1080), (1080, 1920), (3840, 2160)}
+        supported_dimensions = {(1920, 1080), (1080, 1920), (3840, 2160), (960, 320), (320, 640)}
         if "_preview" in file_path.stem:
             supported_dimensions = supported_dimensions | {(960, 540), (540, 960)}
         violations = []

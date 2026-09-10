@@ -15,6 +15,8 @@ REFERENCE_ACTIVITY_ID = 19666115840
     [
         ("telemetry", "activity", "mp4"),
         ("overlay", "overlay_still", "png"),
+        ("route-overlay", "overlay_video", "webm"),
+        ("stats-overlay", "overlay_video", "webm"),
     ],
 )
 def test_reference_ride_reaches_visual_engine_with_stable_spec_and_paths(
@@ -52,6 +54,12 @@ def test_reference_ride_reaches_visual_engine_with_stable_spec_and_paths(
             )
             return output_path
 
+        def render_overlay_video(self, spec, output_path, **kwargs):
+            calls.append(
+                {"method": "overlay_video", "spec": spec, "output_path": output_path, **kwargs}
+            )
+            return output_path
+
     monkeypatch.setattr(
         "ride_visuals.video.engines.remotion.RemotionVideoEngine",
         FakeRemotionVideoEngine,
@@ -80,16 +88,25 @@ def test_reference_ride_reaches_visual_engine_with_stable_spec_and_paths(
         reference_cli_workspace.outputs_dir
         / "videos"
         / video_type
-        / (
-            f"activity_{REFERENCE_ACTIVITY_ID}_{video_type}_frost_en_16_9_preview."
-            f"{extension}"
-        )
+        / (f"activity_{REFERENCE_ACTIVITY_ID}_{video_type}_frost_en_16_9_preview.{extension}")
     )
     assert render_call["spec_path"] == (
         reference_cli_workspace.outputs_dir
         / "render-specs"
         / f"activity_{REFERENCE_ACTIVITY_ID}_{video_type}_frost_en_16_9.json"
     )
+    if video_type in {"route-overlay", "stats-overlay"}:
+        assert (
+            render_call["composition"]
+            == {
+                "route-overlay": "RouteOverlay",
+                "stats-overlay": "StatsOverlay",
+            }[video_type]
+        )
+        assert spec.profile.fps == 30
+        assert spec.profile.hold_seconds == 1.0
+        if video_type == "stats-overlay":
+            assert (spec.profile.width, spec.profile.height) == (960, 320)
     assert calls[0]["renderer_dir"] == reference_cli_workspace.config_path.parent / "renderer"
     if video_type == "telemetry":
         assert render_call["composition"] == "ActivityTelemetry"
@@ -113,15 +130,12 @@ def test_reference_ride_progress_report_matches_canonical_metrics(
     )
 
     actual = json.loads(
-        (
-            reference_cli_workspace.outputs_dir
-            / "reports/progress_metrics_all.json"
-        ).read_text(encoding="utf-8")
-    )
-    expected = json.loads(
-        (reference_cli_workspace.fixture_dir / "expected_metrics.json").read_text(
+        (reference_cli_workspace.outputs_dir / "reports/progress_metrics_all.json").read_text(
             encoding="utf-8"
         )
+    )
+    expected = json.loads(
+        (reference_cli_workspace.fixture_dir / "expected_metrics.json").read_text(encoding="utf-8")
     )
     assert actual == expected
 
@@ -164,3 +178,43 @@ def test_instagram_activity_keeps_landscape_spec_and_portrait_delivery_path(
     assert (spec.profile.width, spec.profile.height) == (1920, 1080)
     assert spec.presentation == "instagram-story-landscape"
     assert call["output_path"].name.endswith("_instagram_preview.mp4")
+
+
+def test_separate_overlays_share_timeline_across_orientations(
+    reference_cli_workspace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+
+    class Engine:
+        def __init__(self, **kwargs):
+            pass
+
+        def render_overlay_video(self, spec, output_path, **kwargs):
+            calls.append((spec, output_path, kwargs))
+            return output_path
+
+    monkeypatch.setattr("ride_visuals.video.engines.remotion.RemotionVideoEngine", Engine)
+    for kind, aspect in [("route-overlay", "16:9"), ("stats-overlay", "9:16")]:
+        main(
+            [
+                "video",
+                kind,
+                str(REFERENCE_ACTIVITY_ID),
+                "--aspect",
+                aspect,
+                "--overlay-format",
+                "mov",
+                "--config",
+                str(reference_cli_workspace.config_path),
+            ]
+        )
+    route, stats = (call[0] for call in calls)
+    assert route.points == stats.points
+    assert route.summary == stats.summary
+    assert route.profile.fps == stats.profile.fps == 30
+    assert route.profile.duration_seconds == stats.profile.duration_seconds == 13
+    assert route.profile.hold_seconds == stats.profile.hold_seconds == 2
+    assert (stats.profile.width, stats.profile.height) == (320, 640)
+    assert stats.presentation == "standard"
+    assert all(call[1].suffix == ".mov" for call in calls)

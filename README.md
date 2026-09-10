@@ -46,6 +46,21 @@ ride-visuals video overlay <activity-id> --overlay-format png --aspect 16:9 \
   --config config/config.toml
 ```
 
+### Separate overlays
+
+An orange route drawn on transparency, plus minimal speed, distance, heart rate
+and elevation. Export both with the same preview setting and align their first
+frames in your editor to keep them synchronized.
+
+```bash
+ride-visuals video route-overlay <activity-id> --overlay-format mov
+ride-visuals video stats-overlay <activity-id> --aspect 16:9 --overlay-format mov
+ride-visuals video stats-overlay <activity-id> --aspect 9:16 --overlay-format mov
+```
+
+MOV uses ProRes 4444 with alpha; WebM is the default. Statistics fit a compact
+960×320 or 320×640 canvas, with no panel background.
+
 ### Telemetry over media
 
 <p align="center">
@@ -72,7 +87,7 @@ ride-visuals video telemetry <activity-id> --background-video clip.mp4 \
 
 Pass `--no-background-video-audio` when only the clip's visuals should be used.
 
-Every video and overlay type also accepts `--aspect instagram`: the render is
+Full-canvas video and overlay types also accept `--aspect instagram`: the render is
 authored in 16:9 and delivered as a 1080×1920 Story, with text and data kept
 inside Instagram's safe areas.
 

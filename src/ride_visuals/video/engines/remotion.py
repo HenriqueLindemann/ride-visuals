@@ -305,11 +305,13 @@ class RemotionVideoEngine:
         *,
         spec_path: Path,
         frame: int | None = None,
+        composition: str = "ActivityOverlay",
     ) -> Path:
         """Render a reusable RGBA PNG overlay at a chosen animation frame."""
         errors = self.doctor()
         if errors:
             raise RuntimeError("; ".join(errors))
+        self._validate_overlay_composition(composition)
         output = Path(output_path).resolve()
         if output.suffix.lower() != ".png":
             raise ValueError("Transparent still output must use the .png extension")
@@ -327,7 +329,7 @@ class RemotionVideoEngine:
             str(self.cli),
             "still",
             str(self.entrypoint),
-            "ActivityOverlay",
+            composition,
             str(output.resolve()),
             "--props",
             str(serialized_spec),
@@ -361,6 +363,7 @@ class RemotionVideoEngine:
         output_path: Path,
         *,
         spec_path: Path,
+        composition: str = "ActivityOverlay",
     ) -> Path:
         """Render an animated alpha overlay as WebM or ProRes 4444 MOV.
 
@@ -371,6 +374,7 @@ class RemotionVideoEngine:
         if errors:
             raise RuntimeError("; ".join(errors))
         output = Path(output_path).resolve()
+        self._validate_overlay_composition(composition)
         suffix = output.suffix.lower()
         if suffix == ".webm":
             codec_args = ["--codec", "vp9", "--pixel-format", "yuva420p"]
@@ -397,7 +401,7 @@ class RemotionVideoEngine:
             str(self.cli),
             "render",
             str(self.entrypoint),
-            "ActivityOverlay",
+            composition,
             str(remotion_output.resolve()),
             "--props",
             str(serialized_spec),
@@ -459,6 +463,11 @@ class RemotionVideoEngine:
         if not validation.get("valid"):
             raise RuntimeError(f"Transparent video failed validation: {validation}")
         return output
+
+    @staticmethod
+    def _validate_overlay_composition(composition: str) -> None:
+        if composition not in {"ActivityOverlay", "RouteOverlay", "StatsOverlay"}:
+            raise ValueError(f"Unsupported overlay composition: {composition}")
 
     def _browser_args(self) -> list[str]:
         if self.browser_executable is None:

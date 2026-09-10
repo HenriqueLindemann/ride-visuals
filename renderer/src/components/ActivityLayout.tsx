@@ -1,4 +1,4 @@
-import {AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig} from 'remotion';
+import {AbsoluteFill, useVideoConfig} from 'remotion';
 import {BackgroundLayer} from './BackgroundLayer';
 import {RouteMap} from './RouteMap';
 import {TelemetryPanel} from './TelemetryPanel';
@@ -11,27 +11,8 @@ import {
   landscapeSafeInsets,
   mapPadding,
 } from '../design/layout';
-import {pointAtProgress} from '../lib/telemetry';
-import type {ActivityRenderSpec, TelemetryPoint} from '../schema';
-
-/** Smoothstep timeline + damped numeric readouts, shared by every composition. */
-const useActivityTimeline = (spec: ActivityRenderSpec) => {
-  const frame = useCurrentFrame();
-  const {fps} = useVideoConfig();
-  const animationFrames = Math.round(spec.profile.duration_seconds * fps);
-  const linear = interpolate(frame, [0, animationFrames], [0, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  });
-  const progress = linear * linear * (3 - 2 * linear);
-  const index = pointAtProgress(spec.points, progress, spec.summary.sourceDurationSeconds);
-  // Numbers tick in ~0.2%-of-route steps so they stay readable.
-  const readoutStep = 0.2 / spec.profile.duration_seconds;
-  const steppedProgress = progress > 1 - readoutStep ? 1 : Math.floor(progress / readoutStep) * readoutStep;
-  const point: TelemetryPoint =
-    spec.points[pointAtProgress(spec.points, steppedProgress, spec.summary.sourceDurationSeconds)];
-  return {progress, index, point};
-};
+import {useActivityTimeline} from '../lib/activityTimeline';
+import type {ActivityRenderSpec} from '../schema';
 
 type Props = {
   spec: ActivityRenderSpec;

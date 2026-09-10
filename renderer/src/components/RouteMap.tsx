@@ -11,8 +11,10 @@ type Props = {
   sidePadding?: number;
   transparent?: boolean;
   showGrid?: boolean;
+  showCursor?: boolean;
   showBackgroundRoute?: boolean;
   visualScale?: number;
+  completedStrokeWidth?: number;
 };
 
 const mercator = (lon: number, lat: number): [number, number] => {
@@ -52,8 +54,10 @@ export const RouteMap = ({
   sidePadding = 48,
   transparent = false,
   showGrid = true,
+  showCursor = true,
   showBackgroundRoute = true,
   visualScale = 1,
+  completedStrokeWidth = 4.5,
 }: Props) => {
   // SVG's preserveAspectRatio performs the same uniform fit as the previous
   // pixel projection, but it is available synchronously on the first render.
@@ -120,12 +124,12 @@ export const RouteMap = ({
               d={completedPath}
               fill="none"
               stroke={theme.route}
-              strokeWidth={4.5 * visualScale}
+              strokeWidth={completedStrokeWidth * visualScale}
               strokeLinecap="round"
               strokeLinejoin="round"
               vectorEffect="non-scaling-stroke"
             />
-            {current ? (
+            {current && showCursor ? (
               <path
                 d={`M ${current.x} ${current.y} L ${current.x} ${current.y}`}
                 fill="none"
