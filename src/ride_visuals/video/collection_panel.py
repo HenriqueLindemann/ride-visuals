@@ -168,7 +168,7 @@ def _draw_chart(
     theme: VisualTheme,
     scale: int,
 ) -> None:
-    if motion == "elapsed":
+    if motion in {"elapsed", "simultaneous"}:
         draw_finish_distribution(
             draw,
             x,
@@ -273,7 +273,7 @@ def draw_collection_panel(
         chart_top = y + (42 if show_progress_bar else 16) * scale
         chart_label_font = FontManager.get_font(13 * scale, bold=True)
         chart_value_font = FontManager.get_font(28 * scale, bold=True)
-        if motion == "elapsed":
+        if motion in {"elapsed", "simultaneous"}:
             chart_label = "collection.finish_distribution"
             chart_value = f"{state.finished_count} / {state.total_rides}"
         else:

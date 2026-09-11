@@ -11,7 +11,7 @@ import pandas as pd
 from PIL import Image, ImageColor, ImageDraw, ImageEnhance
 
 from ride_visuals.design import get_theme
-from ride_visuals.i18n import Translator, sanitize_display_text
+from ride_visuals.i18n import DEFAULT_LOCALE, Translator, sanitize_display_text
 from ride_visuals.video.layout import VideoPartitionLayout
 from ride_visuals.video.fonts import FontManager
 from ride_visuals.maps.tiles import TILE_PROVIDERS, TileManager
@@ -31,6 +31,7 @@ from ride_visuals.video.collection_motion import (
     normalized_distance_profile,
     parallel_motion_state,
     smoothstep,
+    visible_distance_m,
 )
 from ride_visuals.video.collection_scene import (
     DATA_STYLE_SPECS,
@@ -45,6 +46,9 @@ from ride_visuals.video.instagram import (
     present_frame,
     render_dimensions,
     safe_insets,
+)
+from ride_visuals.video.collection_minimal import (
+    minimal_layout, fit_minimal_map, draw_minimal_distance, distance_counter_width,
 )
 from ride_visuals.video.collection_panel import (
     CollectionPanelState,
@@ -67,7 +71,7 @@ class CollectionVideoRenderer:
                  catalog_db_path: Path,
                  streams_dir: Path,
                  outputs_dir: Path,
-                 locale: str = "pt-BR",
+                 locale: str = DEFAULT_LOCALE,
                  theme: str = "midnight",
                  selection: Optional[ActivitySelection] = None):
         self.catalog_db_path = Path(catalog_db_path)
@@ -166,14 +170,19 @@ class CollectionVideoRenderer:
                           map_detail: str = "standard",
                           show_progress_bar: bool = False,
                           show_background_tracks: Optional[bool] = None,
-                          presentation: str = "standard") -> Tuple[Path, List[Path]]:
+                          presentation: str = "standard",
+                          show_cursors: Optional[bool] = None,
+                          show_legend: Optional[bool] = None) -> Tuple[Path, List[Path]]:
         output_mp4_path = Path(output_mp4_path)
         output_mp4_path.parent.mkdir(parents=True, exist_ok=True)
         if keyframes_dir:
             keyframes_dir = Path(keyframes_dir)
             keyframes_dir.mkdir(parents=True, exist_ok=True)
 
-        effective_show_bg = (style != "density") if show_background_tracks is None else show_background_tracks
+        minimal = mode == "minimal"
+        effective_show_bg = (style != "density" and not minimal) if show_background_tracks is None else show_background_tracks
+        effective_cursors = not minimal if show_cursors is None else show_cursors
+        effective_legend = not minimal if show_legend is None else show_legend
 
         tracks = self.load_all_collection_tracks()
         if not tracks:
@@ -191,13 +200,13 @@ class CollectionVideoRenderer:
         sc = ssaa_scale
         render_w = logical_width * sc
         render_h = logical_height * sc
-        output_scale = logical_width / (1080.0 if mode == "9:16" else 1920.0)
+        output_scale = logical_width / (1080.0 if logical_height > logical_width else 1920.0)
         ui = max(1, int(round(sc * output_scale)))
         safe_left_px, safe_right_px = safe_insets(presentation, scale=sc)
         layout = VideoPartitionLayout.create(
             render_w,
             render_h,
-            mode,
+            "clean" if minimal else mode,
             safe_left_px=safe_left_px,
             safe_right_px=safe_right_px,
             landscape_panel_share=(
@@ -206,11 +215,18 @@ class CollectionVideoRenderer:
                 else 0.30
             ),
         )
-        projection = project_collection_tracks(
-            tracks,
-            layout,
-            margin_px=24 * ui,
-        )
+        if minimal:
+            layout = minimal_layout(
+                render_w, render_h, safe_left=safe_left_px, safe_right=safe_right_px,
+                reserve_legend=effective_legend and style in DATA_STYLE_SPECS,
+                counter_width_px=distance_counter_width(
+                    sum(track.dist_km for track in tracks), i18n=self.i18n,
+                    scale=render_h / (1920 if logical_height > logical_width else 1080),
+                ),
+            )
+            layout, projection = fit_minimal_map(tracks, layout, margin_px=24 * ui)
+        else:
+            projection = project_collection_tracks(tracks, layout, margin_px=24 * ui)
         projected_tracks = projection.tracks
 
         basemap_layer: Optional[Image.Image] = None
@@ -232,7 +248,8 @@ class CollectionVideoRenderer:
                 render_w,
                 render_h,
                 provider=basemap,
-                dim_pct=0.28 if basemap == "satellite" else 0.40,
+                dim_pct=(0.0 if minimal and self.theme.name == "frost"
+                         else 0.28 if basemap == "satellite" else 0.40),
                 detail_scale=2 if map_detail == "high" else 1,
             )
             basemap_layer = ImageEnhance.Color(basemap_layer).enhance(
@@ -256,6 +273,13 @@ class CollectionVideoRenderer:
         cumulative_km_profile = np.concatenate(
             ([0.0], np.cumsum([track.dist_km for track in projected_tracks], dtype=float))
         )
+        if minimal:
+            cumulative_km_profile = np.concatenate((
+                [0.0], np.cumsum([
+                    visible_distance_m(track, len(track.pixel_points)) / 1000.0
+                    for track in projected_tracks
+                ]),
+            ))
         ride_timestamps = [pd.Timestamp(track.date) for track in projected_tracks]
         season_time_profile = np.array(
             [ride_timestamps[0].timestamp(), *[timestamp.timestamp() for timestamp in ride_timestamps]],
@@ -276,14 +300,22 @@ class CollectionVideoRenderer:
         )
 
         distance_profile = normalized_distance_profile(projected_tracks, parallel_axis)
-        map_legend_wide = mode == "9:16"
+        map_legend_wide = logical_height > logical_width
         map_legend_box = (
             choose_map_legend_box(
                 projected_tracks, layout, scale=ui, wide=map_legend_wide,
                 has_attribution=basemap != "plain",
             )
-            if style in DATA_STYLE_SPECS else None
+            if style in DATA_STYLE_SPECS and effective_legend else None
         )
+
+        if minimal and map_legend_box is not None:
+            # An explicitly enabled legend gets its own space above the routes.
+            map_legend_box = (
+                layout.map_rect.x0, layout.map_rect.y0 - 100 * ui,
+                min((760 if map_legend_wide else 480) * ui, layout.map_rect.w),
+                (62 if map_legend_wide else 82) * ui,
+            )
 
         with RawVideoEncoder(
             output_mp4_path,
@@ -369,10 +401,10 @@ class CollectionVideoRenderer:
                         chart_x_values = season_time_profile
                         chart_ticks = month_ticks
                     else:
-                        elapsed_mode = motion == "elapsed"
+                        elapsed_mode = motion in {"elapsed", "simultaneous"}
                         motion_state = parallel_motion_state(
                             projected_tracks,
-                            ease_t,
+                            t_norm if elapsed_mode else ease_t,
                             elapsed=elapsed_mode,
                             max_elapsed_s=max_elapsed_s,
                         )
@@ -384,6 +416,12 @@ class CollectionVideoRenderer:
                             pts = pt_data.pixel_points
                             if k >= 2:
                                 density_segments.append(np.asarray(pts[:k]))
+                            if 0 < k < len(pts):
+                                cx, cy = pts[k - 1]
+                                active_cursors.append((
+                                    cx, cy, DENSITY_CURSOR_RADIUS * ui,
+                                    self.theme.route_primary,
+                                ))
 
                         current_km = motion_state.combined_distance_km
                         current_elev = motion_state.combined_ascent_m
@@ -401,7 +439,7 @@ class CollectionVideoRenderer:
                             ((self.i18n.text("metric.farthest_route"), f"{self.i18n.number(max(distances_km, default=0.0), 1)} km"),
                              (self.i18n.text("metric.ascent"), f"{self.i18n.number(current_elev)} m")),
                         )
-                        progress_pct = ease_t
+                        progress_pct = motion_state.progress
                         chart_values = distance_profile
                         chart_position = ease_t * (len(chart_values) - 1)
                         chart_x_values = parallel_axis
@@ -469,10 +507,10 @@ class CollectionVideoRenderer:
                     chart_x_values = season_time_profile
                     chart_ticks = month_ticks
                 else:
-                    elapsed_mode = motion == "elapsed"
+                    elapsed_mode = motion in {"elapsed", "simultaneous"}
                     motion_state = parallel_motion_state(
                         projected_tracks,
-                        ease_t,
+                        t_norm if elapsed_mode else ease_t,
                         elapsed=elapsed_mode,
                         max_elapsed_s=max_elapsed_s,
                     )
@@ -514,13 +552,13 @@ class CollectionVideoRenderer:
                         ((self.i18n.text("metric.farthest_route"), f"{self.i18n.number(max(distances_km, default=0.0), 1)} km"),
                          (self.i18n.text("metric.ascent"), f"{self.i18n.number(current_elev)} m")),
                     )
-                    progress_pct = ease_t
+                    progress_pct = motion_state.progress
                     chart_values = distance_profile
                     chart_position = ease_t * (len(chart_values) - 1)
                     chart_x_values = parallel_axis
                     chart_ticks = None
 
-                for cx, cy, r, color in active_cursors:
+                for cx, cy, r, color in (active_cursors if effective_cursors else []):
                     rad = max(2 * ui, r)
                     draw.ellipse(
                         (cx - rad, cy - rad, cx + rad, cy + rad),
@@ -552,7 +590,13 @@ class CollectionVideoRenderer:
                     pad_x = 4 * sc
                     pad_y = 3 * sc
                     attribution_x = layout.map_rect.x0 + 5 * sc - text_box[0]
-                    attribution_y = layout.map_rect.y1 - 6 * sc - text_box[3]
+                    attribution_bottom = layout.map_rect.y1 - 6 * sc
+                    if minimal:
+                        visual_scale = render_h / (1920 if logical_height > logical_width else 1080)
+                        attribution_bottom = render_h - round(
+                            (160 if logical_height > logical_width else 16) * visual_scale
+                        )
+                    attribution_y = attribution_bottom - text_box[3]
                     visible_box = (
                         attribution_x + text_box[0],
                         attribution_y + text_box[1],
@@ -580,34 +624,48 @@ class CollectionVideoRenderer:
                         font=attribution_font,
                     )
 
-                draw_collection_panel(
-                    img,
-                    layout,
-                    CollectionPanelState(
-                        ride_name=current_ride_name,
-                        metric_rows=metric_rows,
-                        progress_pct=progress_pct,
-                        current_distance_km=current_km,
-                        current_ascent_m=current_elev,
-                        active_rides_count=active_rides_count,
-                        finished_count=finished_count,
-                        total_rides=total_rides,
-                        chart_values=chart_values,
-                        chart_position=chart_position,
-                        chart_x_values=chart_x_values,
-                        chart_ticks=chart_ticks,
-                        finish_durations=finish_durations,
-                        cursor_elapsed_s=cursor_elapsed,
-                    ),
-                    motion=motion,
-                    mode=mode,
-                    basemap=basemap,
-                    has_basemap=basemap_layer is not None,
-                    show_progress_bar=show_progress_bar,
-                    i18n=self.i18n,
-                    theme=self.theme,
-                    scale=ui,
-                )
+                if minimal:
+                    if motion == "chronological":
+                        completed = min(int(t_norm * total_rides), total_rides)
+                        current_km = float(cumulative_km_profile[completed])
+                        if completed < total_rides:
+                            track = projected_tracks[completed]
+                            count = int((t_norm * total_rides - completed) * len(track.pixel_points))
+                            current_km += visible_distance_m(track, count) / 1000.0
+                    draw_minimal_distance(
+                        img, layout, current_km, float(cumulative_km_profile[-1]),
+                        i18n=self.i18n, theme=self.theme,
+                        has_basemap=basemap_layer is not None,
+                    )
+                else:
+                    draw_collection_panel(
+                        img,
+                        layout,
+                        CollectionPanelState(
+                            ride_name=current_ride_name,
+                            metric_rows=metric_rows,
+                            progress_pct=progress_pct,
+                            current_distance_km=current_km,
+                            current_ascent_m=current_elev,
+                            active_rides_count=active_rides_count,
+                            finished_count=finished_count,
+                            total_rides=total_rides,
+                            chart_values=chart_values,
+                            chart_position=chart_position,
+                            chart_x_values=chart_x_values,
+                            chart_ticks=chart_ticks,
+                            finish_durations=finish_durations,
+                            cursor_elapsed_s=cursor_elapsed,
+                        ),
+                        motion=motion,
+                        mode=mode,
+                        basemap=basemap,
+                        has_basemap=basemap_layer is not None,
+                        show_progress_bar=show_progress_bar,
+                        i18n=self.i18n,
+                        theme=self.theme,
+                        scale=ui,
+                    )
 
                 logical_frame = img.resize(
                     (logical_width, logical_height),

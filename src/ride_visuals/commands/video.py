@@ -65,7 +65,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         choices=COLLECTION_MOTIONS,
         default="chronological",
         help=(
-            "Cinemática da coleção; elapsed alinha as largadas e preserva a duração real "
+            "Cinemática da coleção; simultaneous/elapsed alinham as largadas e preservam a duração real "
             "de cada rota"
         ),
     )
@@ -95,15 +95,21 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Não extrai frames de inspeção 0/50/100",
     )
-    parser.add_argument(
+    layout_group = parser.add_mutually_exclusive_group()
+    layout_group.add_argument(
         "--clean", action="store_true", help="Renderiza coleção sem painel de telemetria"
     )
-    parser.add_argument(
+    layout_group.add_argument(
         "--minimal",
         action="store_true",
         default=False,
-        help="Gera visualização minimalista (apenas traçado, velocidade, distância e altimetria)",
+        help="Visualização minimalista: coleção com distância; atividade com velocidade e distância",
     )
+    for option in ("cursors", "legend"):
+        parser.add_argument(
+            f"--{option}", action=argparse.BooleanOptionalAction, default=None,
+            help=f"Show collection {option} (hidden by default in minimal mode)",
+        )
     parser.add_argument(
         "--aspect",
         choices=VIDEO_ASPECTS,
@@ -119,7 +125,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         default="auto",
         help="Motor visual para atividades e overlays",
     )
-    parser.add_argument("--locale", choices=LOCALES, help="Idioma do conteúdo visual")
+    parser.add_argument("--locale", choices=LOCALES, help="Visual language: en or pt-BR (default: en; configurable in [app].locale)")
     parser.add_argument("--theme", choices=THEMES, help="Tema visual compartilhado")
     parser.add_argument(
         "--title",

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ride_visuals.i18n import DEFAULT_LOCALE
 from ride_visuals.selection import ActivitySelection
 
 DEFAULT_CONFIG_PATH = Path("config/config.toml")
@@ -104,7 +105,7 @@ class RuntimeConfig:
             ),
             outputs_dir=Path(getattr(args, "outputs_dir", None) or paths.get("outputs_dir", "outputs")),
             renderer_dir=Path(renderer_dir) if renderer_dir else None,
-            locale=getattr(args, "locale", None) or raw.get("app", {}).get("locale", "pt-BR"),
+            locale=getattr(args, "locale", None) or raw.get("app", {}).get("locale", DEFAULT_LOCALE),
             theme=getattr(args, "theme", None) or raw.get("video", {}).get("theme", "midnight"),
             selection=activity_selection(args, raw),
             activity_types=(

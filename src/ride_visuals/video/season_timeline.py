@@ -12,7 +12,7 @@ from PIL import Image, ImageColor, ImageDraw
 
 from ride_visuals.analytics.season_timeline import SeasonTimelineGenerator
 from ride_visuals.design import get_theme
-from ride_visuals.i18n import Translator, sanitize_display_text
+from ride_visuals.i18n import DEFAULT_LOCALE, Translator, sanitize_display_text
 from ride_visuals.selection import ActivitySelection
 from ride_visuals.validate.media_validator import MediaValidator
 from ride_visuals.video.fonts import FontManager
@@ -28,7 +28,7 @@ class SeasonTimelineVideoRenderer:
     """Animate one truthful shared calendar instead of mixing telemetry units."""
 
     def __init__(self, catalog_db_path: Path, outputs_dir: Path, *,
-                 locale: str = "pt-BR", theme: str = "midnight",
+                 locale: str = DEFAULT_LOCALE, theme: str = "midnight",
                  selection: ActivitySelection | None = None):
         self.catalog_db_path = Path(catalog_db_path)
         self.outputs_dir = Path(outputs_dir)

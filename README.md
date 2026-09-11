@@ -93,8 +93,9 @@ inside Instagram's safe areas.
 
 ## Shape the collection
 
-Collection videos support chronological, simultaneous, elapsed-time, and comet
-motion. Routes can be colored by heart rate, temperature, altitude, speed,
+Collection videos support chronological, simultaneous, and comet motion.
+Simultaneous playback aligns starts and preserves each ride’s elapsed time:
+shorter-duration rides finish first. `elapsed` is an alias. Routes can be colored by heart rate, temperature, altitude, speed,
 grade, month, or a fixed palette, over plain, dark, satellite, topographic, or
 OpenStreetMap backgrounds. A quiet light-grey basemap is also available for the
 Frost theme.
@@ -103,6 +104,18 @@ Frost theme.
 ride-visuals video collection --motion elapsed --style altitude --basemap topo \
   --config config/config.toml
 ```
+
+For a map-first video with only accumulated distance, add `--minimal`:
+
+```bash
+ride-visuals video collection --minimal --style density --motion chronological
+ride-visuals video collection --minimal --style density --motion simultaneous --aspect 9:16
+```
+
+Add `--cursors`, `--legend`, or `--background-tracks` to show more detail.
+Use `--clean` to hide all telemetry. Add `--basemap satellite` for satellite imagery.
+Videos default to English; use `--locale pt-BR` for Portuguese or `--locale en`
+for English. Set `[app].locale` in your config to change the default.
 
 ## Start
 

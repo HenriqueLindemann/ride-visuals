@@ -15,7 +15,7 @@ from PIL import Image
 
 from ride_visuals.analytics.progress import SeasonAnalytics
 from ride_visuals.design import EFFORT_COLORS, get_theme
-from ride_visuals.i18n import Translator
+from ride_visuals.i18n import DEFAULT_LOCALE, Translator
 from ride_visuals.selection import ActivitySelection
 from ride_visuals.video.encoding import RawVideoEncoder
 from ride_visuals.video.instagram import (
@@ -31,7 +31,7 @@ class ProgressMovieRenderer:
     CHAPTER_COUNT = 8
 
     def __init__(self, catalog_db_path: Path, streams_dir: Path, outputs_dir: Path,
-                 *, locale: str = "pt-BR", theme: str = "midnight",
+                 *, locale: str = DEFAULT_LOCALE, theme: str = "midnight",
                  selection: ActivitySelection | None = None):
         self.catalog_db_path = Path(catalog_db_path)
         self.streams_dir = Path(streams_dir)

@@ -130,3 +130,9 @@ def test_every_external_tile_provider_has_visible_credit_text():
     assert "OpenStreetMap contributors" in TILE_PROVIDERS["topo"]["attribution"]
     assert "OpenTopoMap" in TILE_PROVIDERS["topo"]["attribution"]
     assert "HERE" in TILE_PROVIDERS["dark"]["attribution"]
+
+
+def test_continent_scale_collection_uses_world_zoom_instead_of_hundreds_of_tiles():
+    zoom = TileManager.optimal_zoom(-70, -40, 40, 65, 3840, 2160)
+    assert 0 <= zoom < 6
+    assert TileManager.optimal_zoom(-70, -40, 40, 65, 3840, 2160, detail_scale=2) == zoom + 1

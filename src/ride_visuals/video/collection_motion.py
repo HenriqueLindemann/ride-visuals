@@ -27,16 +27,19 @@ def elapsed_point_count(elapsed_seconds: np.ndarray, cursor_seconds: float) -> i
 
 
 def visible_distance_m(track: ProjectedCollectionTrack, point_count: int) -> float:
-    """Return visible distance with the catalog total as a missing-data fallback."""
-    if point_count <= 0:
+    """Distance between the first drawable sample and the last revealed sample.
+
+    Keep the stream endpoint at completion: a catalog total can include distance
+    after GPS recording stopped. One point alone does not draw a route segment.
+    """
+    count = min(max(point_count, 0), len(track.pixel_points))
+    if count < 2:
         return 0.0
     distances = np.asarray(track.point_distances_m, dtype=float)
-    if point_count >= len(distances):
-        return track.dist_km * 1000.0
-    finite = distances[:point_count][np.isfinite(distances[:point_count])]
-    if len(finite):
-        return float(finite[-1])
-    return track.dist_km * 1000.0 * point_count / max(len(distances), 1)
+    finite = distances[:count][np.isfinite(distances[:count])]
+    if len(finite) >= 2:
+        return max(0.0, float(finite[-1] - finite[0]))
+    return track.dist_km * 1000.0 * (count - 1) / max(len(track.pixel_points) - 1, 1)
 
 
 def visible_ascent_m(track: ProjectedCollectionTrack, point_count: int) -> float:

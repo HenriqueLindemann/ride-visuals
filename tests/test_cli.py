@@ -195,7 +195,9 @@ def test_media_discovery_preserves_file_classification(tmp_path: Path) -> None:
     assert media.alpha_stills == (overlay_dir / "still.png",)
 
 
+@pytest.mark.parametrize("minimal", [False, True])
 def test_collection_dispatch_preserves_output_and_keyframe_options(
+    minimal,
     reference_cli_workspace,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -218,6 +220,7 @@ def test_collection_dispatch_preserves_output_and_keyframe_options(
         [
             "video",
             "collection",
+            *(["--minimal", "--cursors", "--legend"] if minimal else []),
             "--preview",
             "--no-keyframes",
             "--aspect",
@@ -234,10 +237,28 @@ def test_collection_dispatch_preserves_output_and_keyframe_options(
     render = captured["render"]
     assert render["output_mp4_path"] == (
         reference_cli_workspace.outputs_dir
-        / "videos/collection/collection_all_chronological_grade_dark_9_16_preview.mp4"
+        / ("videos/collection/collection_all_chronological_grade_dark_9_16"
+           + ("_minimal" if minimal else "") + "_en_preview.mp4")
     )
     assert render["keyframes_dir"] is None
+    assert render["mode"] == ("minimal" if minimal else "9:16")
+    assert render["show_cursors"] == (True if minimal else None)
+    assert render["show_legend"] == (True if minimal else None)
     assert render["width"] == 1080
     assert render["height"] == 1920
     assert render["show_progress_bar"] is False
     assert render["show_background_tracks"] is None
+
+
+@pytest.mark.parametrize("configured,explicit,expected", [
+    (None, None, "en"), (None, "pt-BR", "pt-BR"),
+    ("pt-BR", None, "pt-BR"), ("pt-BR", "en", "en"),
+    ("en", "pt-BR", "pt-BR"),
+])
+def test_video_language_default_and_overrides(tmp_path, configured, explicit, expected):
+    config = tmp_path / "locale.toml"
+    config.write_text(f'[app]\nlocale = "{configured}"\n' if configured else "")
+    argv = ["video", "collection", "--minimal", "--config", str(config)]
+    if explicit:
+        argv += ["--locale", explicit]
+    assert RuntimeConfig.from_args(build_parser().parse_args(argv)).locale == expected

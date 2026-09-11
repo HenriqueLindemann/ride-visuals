@@ -94,24 +94,25 @@ class TileManager:
         cached_file.parent.mkdir(parents=True, exist_ok=True)
         url = self._tile_url(provider, z, x, y)
 
-        try:
-            req = urllib.request.Request(
-                url,
-                headers={
-                    "User-Agent": (
-                        "RideVisuals/0.1 "
-                        "(+https://github.com/HenriqueLindemann/ride-visuals)"
-                    )
-                },
-            )
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = resp.read()
-                img = Image.open(io.BytesIO(data)).convert("RGB")
-                img.save(cached_file)
-                return img
-        except Exception:
-            # Fallback elegante caso a rede esteja indisponível
-            return None
+        for attempt in range(3):
+            try:
+                req = urllib.request.Request(
+                    url,
+                    headers={
+                        "User-Agent": (
+                            "RideVisuals/0.1 "
+                            "(+https://github.com/HenriqueLindemann/ride-visuals)"
+                        )
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = resp.read()
+                    img = Image.open(io.BytesIO(data)).convert("RGB")
+                    img.save(cached_file)
+                    return img
+            except Exception:
+                if attempt == 2:
+                    return None
 
     @staticmethod
     def optimal_zoom(min_lon: float, min_lat: float, max_lon: float, max_lat: float,
@@ -130,7 +131,7 @@ class TileManager:
         z_lon = math.log2(360.0 / lon_span * (target_w / 256.0))
         z_lat = math.log2(180.0 / lat_span * (target_h / 256.0))
         zoom = int(math.floor(min(z_lon, z_lat))) + int(math.log2(detail_scale))
-        return max(6, min(16, zoom))
+        return max(0, min(16, zoom))
 
     def render_basemap_layer(self,
                              min_lon: float, min_lat: float,

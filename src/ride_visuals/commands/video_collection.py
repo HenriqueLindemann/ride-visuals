@@ -56,13 +56,16 @@ def render_collection(context: VideoCommandContext) -> None:
 
     args = context.args
     collection_dir = context.outputs_dir / "collection"
+    locale_tag = context.runtime.locale.lower().replace("-", "_")
+    minimal = getattr(args, "minimal", False)
+    layout_tag = "_minimal" if minimal else ("_clean" if args.clean else "")
     detail_tag = "_map-high" if args.map_detail == "high" else ""
     keyframes_dir = (
         context.outputs_dir
         / "keyframes"
         / (
             f"collection_{args.motion}_{args.style}_{args.basemap}{detail_tag}_"
-            f"{args.aspect.replace(':', '_')}"
+            f"{args.aspect.replace(':', '_')}{layout_tag}_{locale_tag}"
         )
         if context.write_keyframes
         else None
@@ -80,18 +83,17 @@ def render_collection(context: VideoCommandContext) -> None:
         selection=context.selection,
     )
     preset = get_video_preset("collection", args.aspect, preview=args.preview, clean=args.clean)
-    clean_tag = "_clean" if args.clean else ""
     basemap_tag = "" if args.basemap == "plain" else f"_{args.basemap}"
     preview_tag = "_preview" if args.preview else ""
     output_file = collection_dir / (
         f"collection_{context.selection_tag}_{args.motion}_{args.style}{basemap_tag}{detail_tag}_"
-        f"{args.aspect.replace(':', '_')}{clean_tag}{preview_tag}.mp4"
+        f"{args.aspect.replace(':', '_')}{layout_tag}_{locale_tag}{preview_tag}.mp4"
     )
     output_path, keyframes = renderer.render_collection(
         output_mp4_path=output_file,
         motion=args.motion,
         style=args.style,
-        mode=preset.canvas.layout,
+        mode="minimal" if minimal else preset.canvas.layout,
         width=preset.canvas.width,
         height=preset.canvas.height,
         fps=preset.fps,
@@ -102,6 +104,8 @@ def render_collection(context: VideoCommandContext) -> None:
         basemap=args.basemap,
         map_detail=args.map_detail,
         show_progress_bar=args.show_progress_bar,
+        show_cursors=getattr(args, "cursors", None),
+        show_legend=getattr(args, "legend", None),
         show_background_tracks=args.background_tracks,
         presentation=preset.canvas.presentation,
     )
