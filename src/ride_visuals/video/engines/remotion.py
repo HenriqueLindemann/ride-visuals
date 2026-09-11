@@ -478,7 +478,7 @@ class RemotionVideoEngine:
             "ActivityOverlay",
             "RouteOverlay",
             "StatsOverlay",
-            "ActivityMinimal",
+            "ActivityMinimalOverlay",
         }:
             raise ValueError(f"Unsupported overlay composition: {composition}")
 

@@ -75,6 +75,7 @@ def _ensure_background_video_duration(
     required_duration: float,
     outputs_dir: Path,
 ) -> Path:
+    import hashlib
     import subprocess
 
     from ride_visuals.video.spec import probe_video
@@ -86,7 +87,9 @@ def _ensure_background_video_duration(
     pad_duration = max(1.0, (required_duration - media.duration_seconds) + 1.0)
     bg_dir = outputs_dir / "backgrounds"
     bg_dir.mkdir(parents=True, exist_ok=True)
-    target_path = bg_dir / f"{video_path.stem}_padded_{int(required_duration)}s.mp4"
+    with video_path.open("rb") as source:
+        digest = hashlib.file_digest(source, "sha256").hexdigest()
+    target_path = bg_dir / f"{digest}_padded_{required_duration!r}s.mp4"
     if target_path.exists():
         media_padded = probe_video(target_path)
         if media_padded.duration_seconds >= required_duration - 1e-3:
@@ -151,19 +154,22 @@ def _build_render_spec(
         title_override = activity_row[0] if activity_row else f"Activity {args.activity_id}"
     activity_name = sanitize_display_text(title_override)
     activity_date = str(activity_row[1]) if activity_row and activity_row[1] else None
+    supports_background = args.video_type in {"clean", "telemetry"} or (
+        args.video_type == "minimal" and args.overlay_format is None
+    )
     background_image = (
         Path(args.background_image)
-        if args.video_type in {"clean", "telemetry", "minimal"} and args.background_image
+        if supports_background and args.background_image
         else None
     )
-    if args.background_video and args.video_type not in {"clean", "telemetry", "minimal"}:
+    if args.background_video and not supports_background:
         print(
             "[Aviso] --background-video se aplica apenas a vídeos clean/telemetry/minimal; "
             "o overlay permanece transparente."
         )
     background_video = (
         Path(args.background_video)
-        if args.video_type in {"clean", "telemetry", "minimal"} and args.background_video
+        if supports_background and args.background_video
         else None
     )
     if background_video is not None:
@@ -239,7 +245,7 @@ def _apply_basemap(
         provider=args.basemap,
         width=preset.canvas.render_width,
         height=preset.canvas.render_height,
-        layout="clean" if args.video_type == "clean" else "telemetry",
+        layout=args.video_type,
         map_detail=args.map_detail,
         show_progress_bar=args.show_progress_bar,
         safe_left_px=safe_left_px,
@@ -278,7 +284,7 @@ def _render_with_engine(
         args.video_type == "minimal" and args.overlay_format is not None
     ):
         comp = (
-            "ActivityMinimal"
+            "ActivityMinimalOverlay"
             if args.video_type == "minimal"
             else OVERLAY_COMPOSITIONS[args.video_type]
         )

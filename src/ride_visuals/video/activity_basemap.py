@@ -102,8 +102,15 @@ def canvas_basemap_bounds(
         top_pad = int(round((150 if vertical else 140) * scale_factor))
         bottom_pad = int(round((75 if show_progress_bar else 48) * scale_factor))
         side_pad = int(round((48 if vertical else 64) * scale_factor))
+    elif layout == "minimal":
+        # Matches ActivityMinimal.tsx's full-canvas route and portrait HUD space.
+        view_w = content_w
+        view_h = height
+        top_pad = (120 if vertical else 48) * scale_factor
+        bottom_pad = (360 if vertical else 48) * scale_factor
+        side_pad = 48 * scale_factor
     else:
-        raise ValueError("Activity basemap layout must be 'telemetry' or 'clean'")
+        raise ValueError("Activity basemap layout must be 'telemetry', 'clean' or 'minimal'")
 
     usable_w = max(view_w - 2 * side_pad, 10)
     usable_h = max(view_h - top_pad - bottom_pad, 10)

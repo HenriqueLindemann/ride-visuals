@@ -67,15 +67,19 @@ def test_activity_basemap_uses_requested_provider_and_detail(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("width", "height", "view_w", "view_h", "padding", "safe_left", "safe_right"),
+    ("width", "height", "view_w", "view_h", "padding", "safe_left", "safe_right", "layout"),
     [
-        (1920, 1080, 1344, 1080, 64, 0, 0),
-        (1080, 1920, 1080, 960, 56, 0, 0),
-        (1920, 1080, 947, 1080, 64, 220, 220),
+        (1920, 1080, 1344, 1080, (64, 64, 64), 0, 0, "telemetry"),
+        (1080, 1920, 1080, 960, (56, 56, 56), 0, 0, "telemetry"),
+        (1920, 1080, 947, 1080, (64, 64, 64), 220, 220, "telemetry"),
+        (1920, 1080, 1920, 1080, (48, 48, 48), 0, 0, "minimal"),
+        (1080, 1920, 1080, 1920, (120, 360, 48), 0, 0, "minimal"),
+        (1920, 1080, 1480, 1080, (48, 48, 48), 220, 220, "minimal"),
+        (3840, 2160, 3840, 2160, (96, 96, 96), 0, 0, "minimal"),
     ],
 )
-def test_full_canvas_basemap_keeps_route_aligned_in_telemetry_panel(
-    width, height, view_w, view_h, padding, safe_left, safe_right
+def test_full_canvas_basemap_keeps_route_aligned(
+    width, height, view_w, view_h, padding, safe_left, safe_right, layout
 ):
     points = [
         {"lon": 7.0, "lat": 49.0},
@@ -86,7 +90,7 @@ def test_full_canvas_basemap_keeps_route_aligned_in_telemetry_panel(
         points,
         width=width,
         height=height,
-        layout="telemetry",
+        layout=layout,
         safe_left_px=safe_left,
         safe_right_px=safe_right,
     )
@@ -101,7 +105,7 @@ def test_full_canvas_basemap_keeps_route_aligned_in_telemetry_panel(
     data_w = max_x - min_x
     data_h = max_y - min_y
 
-    top_pad = bottom_pad = side_pad = padding
+    top_pad, bottom_pad, side_pad = padding
     usable_w = view_w - 2 * side_pad
     usable_h = view_h - top_pad - bottom_pad
     scale = min(usable_w / data_w, usable_h / data_h)

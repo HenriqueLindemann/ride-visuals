@@ -14,6 +14,7 @@ REFERENCE_ACTIVITY_ID = 19666115840
     ("video_type", "expected_method", "extension"),
     [
         ("telemetry", "activity", "mp4"),
+        ("minimal", "activity", "mp4"),
         ("overlay", "overlay_still", "png"),
         ("route-overlay", "overlay_video", "webm"),
         ("stats-overlay", "overlay_video", "webm"),
@@ -110,11 +111,44 @@ def test_reference_ride_reaches_visual_engine_with_stable_spec_and_paths(
     assert calls[0]["renderer_dir"] == reference_cli_workspace.config_path.parent / "renderer"
     if video_type == "telemetry":
         assert render_call["composition"] == "ActivityTelemetry"
+    if video_type == "minimal":
+        assert render_call["composition"] == "ActivityMinimal"
+    if video_type in {"telemetry", "minimal"}:
         assert render_call["keyframes_dir"] == (
             reference_cli_workspace.outputs_dir
             / "videos/keyframes"
             / f"activity_{REFERENCE_ACTIVITY_ID}_frost_en_16_9"
         )
+
+
+@pytest.mark.parametrize("overlay_format", ["png", "webm", "mov"])
+@pytest.mark.parametrize("background_option", ["--background-video", "--background-image"])
+def test_minimal_overlay_uses_transparent_composition_without_background(
+    reference_cli_workspace, monkeypatch, overlay_format, background_option
+):
+    calls = []
+
+    class Engine:
+        def __init__(self, **kwargs):
+            pass
+
+        def render_overlay_still(self, spec, output_path, **kwargs):
+            calls.append((spec, output_path, kwargs))
+            return output_path
+
+        render_overlay_video = render_overlay_still
+
+    monkeypatch.setattr("ride_visuals.video.engines.remotion.RemotionVideoEngine", Engine)
+    main([
+        "video", "minimal", str(REFERENCE_ACTIVITY_ID), "--preview",
+        "--overlay-format", overlay_format,
+        background_option, "unused-media",
+        "--config", str(reference_cli_workspace.config_path),
+    ])
+    spec, output, options = calls[0]
+    assert spec.background is None
+    assert output.suffix == f".{overlay_format}"
+    assert options["composition"] == "ActivityMinimalOverlay"
 
 
 def test_reference_ride_progress_report_matches_canonical_metrics(

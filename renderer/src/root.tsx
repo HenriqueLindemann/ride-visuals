@@ -3,7 +3,7 @@ import {ActivityTelemetry} from './compositions/ActivityTelemetry';
 import {ActivityOverlay} from './compositions/ActivityOverlay';
 import {RouteOverlay, StatsOverlay} from './compositions/MinimalOverlays';
 import {ActivityClean} from './compositions/ActivityClean';
-import {ActivityMinimal} from './compositions/ActivityMinimal';
+import {ActivityMinimal, ActivityMinimalOverlay} from './compositions/ActivityMinimal';
 import {defaultActivitySpec} from './defaults';
 import {activityRenderSpecSchema, type ActivityRenderSpec} from './schema';
 
@@ -17,7 +17,8 @@ const calculateMetadata: CalculateMetadataFunction<ActivityRenderSpec> = ({props
 
 export const RideVisualsRoot = () => (
   <>
-    {[{id: 'RouteOverlay', component: RouteOverlay}, {id: 'StatsOverlay', component: StatsOverlay}].map(({id, component}) => (
+    {[{id: 'RouteOverlay', component: RouteOverlay}, {id: 'StatsOverlay', component: StatsOverlay},
+      {id: 'ActivityMinimalOverlay', component: ActivityMinimalOverlay}].map(({id, component}) => (
       <Composition key={id} id={id} component={component} durationInFrames={180} fps={30}
         width={960} height={320} defaultProps={defaultActivitySpec}
         calculateMetadata={calculateMetadata} schema={activityRenderSpecSchema} />

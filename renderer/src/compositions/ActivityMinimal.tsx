@@ -6,7 +6,11 @@ import {themes} from '../design/tokens';
 import {useActivityTimeline} from '../lib/activityTimeline';
 import type {ActivityRenderSpec} from '../schema';
 
-export const ActivityMinimal = (spec: ActivityRenderSpec) => {
+export const ActivityMinimalOverlay = (spec: ActivityRenderSpec) => (
+  <ActivityMinimal {...spec} transparent />
+);
+
+export const ActivityMinimal = (spec: ActivityRenderSpec & {transparent?: boolean}) => {
   const {width, height} = useVideoConfig();
   const vertical = height > width;
   const scale = vertical ? height / 1920 : height / 1080;
@@ -39,12 +43,14 @@ export const ActivityMinimal = (spec: ActivityRenderSpec) => {
   return (
     <AbsoluteFill
       style={{
-        background: hasBackground ? 'transparent' : theme.canvas,
+        background: spec.transparent || hasBackground ? 'transparent' : theme.canvas,
         color: theme.text,
         fontFamily: FONT_FAMILY,
       }}
     >
-      <BackgroundLayer background={spec.background} presentation={spec.presentation} />
+      {!spec.transparent && (
+        <BackgroundLayer background={spec.background} presentation={spec.presentation} />
+      )}
 
       {/* Floating animated route */}
       <div
