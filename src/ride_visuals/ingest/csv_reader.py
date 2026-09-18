@@ -38,12 +38,22 @@ def parse_flexible_date(s: Any) -> Optional[datetime]:
         mon = PT_MONTHS.get(mon_str.lower()[:3], 1)
         return datetime(int(year), mon, int(day), int(hr), int(mn), int(sc), tzinfo=timezone.utc)
 
-    # Formato EN: "Aug 23, 2024, 7:18:50 AM" ou "23 Aug 2024, 07:18:50"
-    m_en = re.search(r'([a-z]+)\s+(\d{1,2}),?\s+(\d{4}),?\s+(\d{1,2}):(\d{2}):(\d{2})', s, re.IGNORECASE)
+    # Formato EN: "Aug 23, 2024, 7:18:50 PM" ou "23 Aug 2024, 07:18:50"
+    m_en = re.search(
+        r'([a-z]+)\s+(\d{1,2}),?\s+(\d{4}),?\s+(\d{1,2}):(\d{2}):(\d{2})\s*([ap]m)?',
+        s,
+        re.IGNORECASE,
+    )
     if m_en:
-        mon_str, day, year, hr, mn, sc = m_en.groups()
+        mon_str, day, year, hr, mn, sc, meridiem = m_en.groups()
+        hour = int(hr)
+        if meridiem:
+            if meridiem.lower() == "pm" and hour < 12:
+                hour += 12
+            elif meridiem.lower() == "am" and hour == 12:
+                hour = 0
         mon = EN_MONTHS.get(mon_str.lower()[:3], 1)
-        return datetime(int(year), mon, int(day), int(hr), int(mn), int(sc), tzinfo=timezone.utc)
+        return datetime(int(year), mon, int(day), hour, int(mn), int(sc), tzinfo=timezone.utc)
 
     # Formato ISO ou padrão pandas
     try:

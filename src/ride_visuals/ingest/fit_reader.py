@@ -10,11 +10,41 @@ import fitdecode
 from ride_visuals.model.trackpoint import TrackPoint
 
 
-def _semicircles_to_degrees(val: Optional[float]) -> Optional[float]:
+_SEMICIRCLE_TO_DEGREES = 180.0 / (2**31)
+
+
+def _positions_are_semicircles(raw_bytes: bytes) -> bool:
+    """Decide once per file whether coordinates are semicircles or degrees.
+
+    FIT specifies semicircles, but some exporters write degrees. A per-sample
+    threshold misreads a ride crossing the equator or prime meridian, where a
+    genuinely semicircle-encoded coordinate can be small; the largest
+    magnitude in the file disambiguates both encodings reliably.
+    """
+    largest = 0.0
+    with fitdecode.FitReader(io.BytesIO(raw_bytes)) as fit:
+        for frame in fit:
+            if not isinstance(frame, fitdecode.FitDataMessage) or frame.name != "record":
+                continue
+            for field_name in ("position_lat", "position_long"):
+                value = frame.get_value(field_name, fallback=None)
+                if value is not None:
+                    largest = max(largest, abs(float(value)))
+    return largest > 180.0
+
+
+def _semicircles_to_degrees(
+    val: Optional[float], *, semicircles: bool | None = None
+) -> Optional[float]:
     if val is None:
         return None
-    if abs(val) > 180.0:
-        return float(val * (180.0 / (2**31)))
+    if semicircles is None:
+        # Without file context, values that cannot be degrees are assumed to
+        # be semicircles (FIT's native unit); ambiguous near-zero values stay
+        # as-is for backwards compatibility.
+        semicircles = abs(val) > 180.0
+    if semicircles:
+        return float(val * _SEMICIRCLE_TO_DEGREES)
     return float(val)
 
 
@@ -68,6 +98,7 @@ class FITReader:
             "has_power": False,
             "has_cadence": False,
         }
+        semicircles = _positions_are_semicircles(raw_bytes)
 
         with fitdecode.FitReader(io.BytesIO(raw_bytes)) as fit:
             for frame in fit:
@@ -83,8 +114,8 @@ class FITReader:
                     if lat_raw is None or lon_raw is None or ts is None:
                         continue
 
-                    lat = _semicircles_to_degrees(lat_raw)
-                    lon = _semicircles_to_degrees(lon_raw)
+                    lat = _semicircles_to_degrees(lat_raw, semicircles=semicircles)
+                    lon = _semicircles_to_degrees(lon_raw, semicircles=semicircles)
                     if lat is None or lon is None or abs(lat) > 90 or abs(lon) > 180:
                         continue
 

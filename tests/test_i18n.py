@@ -23,3 +23,15 @@ def test_unknown_locale_is_explicit():
     with pytest.raises(ValueError, match="Unsupported locale"):
         normalize_locale("de-DE")
 
+
+def test_every_generator_defaults_to_the_project_locale() -> None:
+    import inspect
+
+    from ride_visuals.analytics.dashboard import AnalyticsDashboardGenerator
+    from ride_visuals.analytics.season_timeline import SeasonTimelineGenerator
+    from ride_visuals.i18n import DEFAULT_LOCALE
+    from ride_visuals.maps.generator import MapGenerator
+
+    for generator in (AnalyticsDashboardGenerator, SeasonTimelineGenerator, MapGenerator):
+        assert inspect.signature(generator).parameters["locale"].default == DEFAULT_LOCALE
+

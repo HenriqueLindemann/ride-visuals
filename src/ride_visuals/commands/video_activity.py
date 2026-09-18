@@ -193,6 +193,13 @@ def _build_render_spec(
         raise ValueError(
             "A georeferenced basemap cannot be blurred because scaling it would misalign the route"
         )
+    # The minimal layout is map-first: faint future routes are opt-in, while
+    # clean and telemetry keep their existing always-on default.
+    show_background_route = (
+        args.video_type != "minimal"
+        if args.background_tracks is None
+        else args.background_tracks
+    )
     return ActivityRenderSpec.from_parquet(
         parquet_path,
         activity_id=args.activity_id,
@@ -214,7 +221,7 @@ def _build_render_spec(
         background_blur_px=args.background_blur,
         background_dim=args.background_dim,
         show_progress_bar=args.show_progress_bar,
-        show_background_route=True if args.background_tracks is None else args.background_tracks,
+        show_background_route=show_background_route,
         presentation=preset.canvas.presentation,
     )
 

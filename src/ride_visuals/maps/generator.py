@@ -16,7 +16,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from ride_visuals.design import EFFORT_COLORS, MONTH_ROUTE_COLORS, get_theme, route_color
-from ride_visuals.i18n import Translator
+from ride_visuals.i18n import DEFAULT_LOCALE, Translator
 from ride_visuals.maps.projection import (
     compute_map_viewport,
     expand_viewport_to_canvas,
@@ -41,7 +41,7 @@ class MapGenerator:
                  catalog_db_path: Path,
                  streams_dir: Path,
                  outputs_dir: Path,
-                 locale: str = "pt-BR",
+                 locale: str = DEFAULT_LOCALE,
                  theme: str = "midnight",
                  selection: Optional[ActivitySelection] = None):
         self.catalog_db_path = Path(catalog_db_path)

@@ -19,7 +19,9 @@ class MediaValidator:
 
         ffprobe_bin = shutil.which("ffprobe")
         if not ffprobe_bin:
-            return {"valid": True, "warning": "ffprobe não disponível para validação profunda."}
+            # Never report an unvalidated file as valid: callers read geometry
+            # fields that an ffprobe-less check cannot provide.
+            return {"valid": False, "error": "ffprobe não disponível para validar o vídeo."}
 
         cmd = [
             ffprobe_bin,

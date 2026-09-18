@@ -48,11 +48,18 @@ export const createI18n = (locale: Locale) => ({
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals,
     }).format(value),
-  date: (value: string) =>
-    new Intl.DateTimeFormat(locale, {
+  date: (value: string) => {
+    // Python sends the activity calendar date as an ISO prefix (the catalog
+    // timestamp rendered in the database session timezone). Format that date
+    // directly instead of shifting it through a UTC instant, which would show
+    // the previous day for rides started just after local midnight.
+    const calendarDate = /^(\d{4}-\d{2}-\d{2})/.exec(value)?.[1];
+    const parsed = calendarDate ? new Date(`${calendarDate}T00:00:00Z`) : new Date(value);
+    return new Intl.DateTimeFormat(locale, {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
       timeZone: 'UTC',
-    }).format(new Date(value)),
+    }).format(parsed);
+  },
 });

@@ -18,6 +18,12 @@ def test_reference_fit_preserves_the_showcase_activity(reference_activity_dir: P
     assert not metadata["has_power"]
     assert points[0].distance_m == 0.0
     assert points[-1].distance_m == 138_714.12
+    # Kaiserslautern → Koblenz: a file misdecoded as degrees would drift far
+    # from this range or collapse onto the prime meridian.
+    assert 49.0 < points[0].lat < 51.0
+    assert 7.0 < points[0].lon < 8.0
+    assert 49.0 < points[-1].lat < 51.0
+    assert 7.0 < points[-1].lon < 8.0
 
 
 def test_reference_render_spec_remains_stable(reference_activity_dir: Path) -> None:

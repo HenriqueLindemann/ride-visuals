@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from ride_visuals.design import EFFORT_COLORS, get_theme
-from ride_visuals.i18n import Translator
+from ride_visuals.i18n import DEFAULT_LOCALE, Translator
 from ride_visuals.selection import ActivitySelection
 from ride_visuals.analytics.progress import SeasonAnalytics
 
@@ -21,7 +21,7 @@ class AnalyticsDashboardGenerator:
     """Generate a high-resolution dashboard using the shared visual system."""
 
     def __init__(self, catalog_db_path: Path, streams_dir: Path, outputs_dir: Path,
-                 *, locale: str = "pt-BR", theme: str = "midnight",
+                 *, locale: str = DEFAULT_LOCALE, theme: str = "midnight",
                  selection: ActivitySelection | None = None):
         self.catalog_db_path = Path(catalog_db_path)
         self.streams_dir = Path(streams_dir)

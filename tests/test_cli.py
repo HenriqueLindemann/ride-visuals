@@ -17,8 +17,9 @@ from ride_visuals.commands.options import (
     VIDEO_ASPECTS,
     VIDEO_TYPES,
 )
-from ride_visuals.commands.validation import discover_media
+from ride_visuals.commands.validation import discover_media, final_video_paths
 from ride_visuals.maps.tiles import TILE_PROVIDERS
+from ride_visuals.selection import ActivitySelection
 
 
 def _command_parser(command: str):
@@ -248,6 +249,20 @@ def test_collection_dispatch_preserves_output_and_keyframe_options(
     assert render["height"] == 1920
     assert render["show_progress_bar"] is False
     assert render["show_background_tracks"] is None
+    if not minimal:
+        # `make validate --final-set` discovers this exact canonical name; the
+        # dispatch above runs with --preview, so compare against its suffix.
+        expected_final = final_video_paths(
+            reference_cli_workspace.outputs_dir,
+            ActivitySelection(),
+            motion="chronological",
+            style="grade",
+            basemap="dark",
+            locale="en",
+        )
+        assert render["output_mp4_path"].name == expected_final[1].name.replace(
+            ".mp4", "_preview.mp4"
+        )
 
 
 @pytest.mark.parametrize("configured,explicit,expected", [

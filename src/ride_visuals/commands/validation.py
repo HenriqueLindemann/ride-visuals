@@ -9,6 +9,7 @@ from typing import Any
 
 from ride_visuals.commands.common import RuntimeConfig, add_selection_arguments
 from ride_visuals.commands.options import COLLECTION_MOTIONS, COLLECTION_STYLES
+from ride_visuals.i18n import DEFAULT_LOCALE
 from ride_visuals.selection import ActivitySelection
 
 
@@ -23,22 +24,24 @@ class MediaFiles:
         return len(self.mp4) + len(self.alpha_videos) + len(self.alpha_stills)
 
 
-def final_video_paths(
+def final_video_paths(  # noqa: PLR0913 - every naming tag must stay explicit
     outputs_dir: Path,
     selection: ActivitySelection,
     *,
     motion: str,
     style: str,
     basemap: str,
+    locale: str = DEFAULT_LOCALE,
 ) -> list[Path]:
     """Return the exact videos produced by the canonical final workflow."""
     slug = selection.slug()
     basemap_tag = "" if basemap == "plain" else f"_{basemap}"
+    locale_tag = locale.lower().replace("-", "_")
     return [
         outputs_dir
         / "videos"
         / "collection"
-        / f"collection_{slug}_{motion}_{style}{basemap_tag}_{aspect}.mp4"
+        / f"collection_{slug}_{motion}_{style}{basemap_tag}_{aspect}_{locale_tag}.mp4"
         for aspect in ("16_9", "9_16")
     ] + [
         outputs_dir / "videos" / kind / f"{kind}_{slug}_{aspect}.mp4"
@@ -137,6 +140,7 @@ def run(args: argparse.Namespace) -> None:
                     motion=args.motion,
                     style=args.style,
                     basemap=args.basemap,
+                    locale=runtime.locale,
                 )
             ),
             alpha_videos=(),

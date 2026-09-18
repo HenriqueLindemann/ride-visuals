@@ -14,7 +14,7 @@ import pandas as pd
 from PIL import Image
 
 from ride_visuals.design import get_theme
-from ride_visuals.i18n import Translator
+from ride_visuals.i18n import DEFAULT_LOCALE, Translator
 from ride_visuals.selection import ActivitySelection
 
 
@@ -22,7 +22,7 @@ class SeasonTimelineGenerator:
     """Render heterogeneous telemetry on a shared calendar without mixing units."""
 
     def __init__(self, catalog_db_path: Path, outputs_dir: Path, *,
-                 locale: str = "pt-BR", theme: str = "midnight",
+                 locale: str = DEFAULT_LOCALE, theme: str = "midnight",
                  selection: ActivitySelection | None = None):
         self.catalog_db_path = Path(catalog_db_path)
         self.outputs_dir = Path(outputs_dir)

@@ -160,3 +160,54 @@ def test_expanded_map_never_crosses_distance_counter(aspect, shape):
     ImageDraw.Draw(mask).line(projection.tracks[0].pixel_points, fill=1, width=round(10 * scale))
     counter = layout.telemetry_rect
     assert mask.crop((counter.x0, counter.y0, counter.x1, counter.y1)).getbbox() is None
+
+
+def test_distance_counter_draws_the_smallest_font_it_actually_tested(monkeypatch):
+    """A rejected size must never be the one that ends up on the canvas."""
+    import ride_visuals.video.collection_minimal as collection_minimal
+    from ride_visuals.design import MIDNIGHT
+    from ride_visuals.i18n import Translator
+    from ride_visuals.video.layout import Rect, VideoPartitionLayout
+
+    original_get_font = collection_minimal.FontManager.get_font
+    requested: list[tuple[int, bool]] = []
+
+    class SizedFont:
+        def __init__(self, font, size):
+            self._font = font
+            self.size = size
+
+        def getlength(self, text):
+            if text == "km":
+                return 1.0
+            return float(self.size) * 10.0 if self.size > 1 else 1.0
+
+        def __getattr__(self, name):
+            return getattr(self._font, name)
+
+    def fake_get_font(size, bold=False):
+        requested.append((size, bold))
+        return SizedFont(original_get_font(size, bold), size)
+
+    monkeypatch.setattr(collection_minimal.FontManager, "get_font", fake_get_font)
+    image = Image.new("RGB", (320, 320), MIDNIGHT.canvas)
+    layout = VideoPartitionLayout(
+        320,
+        320,
+        "minimal",
+        Rect(0, 0, 320, 200),
+        Rect(310, 200, 10, 100),
+    )
+
+    collection_minimal.draw_minimal_distance(
+        image,
+        layout,
+        123456.0,
+        123456.0,
+        i18n=Translator("en"),
+        theme=MIDNIGHT,
+        has_basemap=False,
+    )
+
+    number_sizes = [size for size, bold in requested if bold]
+    assert number_sizes[-1] == 1

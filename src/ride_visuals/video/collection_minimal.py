@@ -92,11 +92,12 @@ def draw_minimal_distance(
     gap = round(12 * scale)
     unit_width = unit_font.getlength("km")
     # Fit against the final total, so typography never jumps as digits accumulate.
+    number_font = FontManager.get_font(size, bold=True)
     while size > 1:
-        number_font = FontManager.get_font(size, bold=True)
         if number_font.getlength(i18n.number(total_distance_km, 1)) + gap + unit_width <= box.w:
             break
         size -= 1
+        number_font = FontManager.get_font(size, bold=True)
     baseline = box.y0 + round(118 * scale)
     unit_x = box.x1 - unit_width
     layer = Image.new("RGBA", image.size)

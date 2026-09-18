@@ -113,12 +113,47 @@ def test_reference_ride_reaches_visual_engine_with_stable_spec_and_paths(
         assert render_call["composition"] == "ActivityTelemetry"
     if video_type == "minimal":
         assert render_call["composition"] == "ActivityMinimal"
+    # Minimal is map-first: future routes stay hidden unless requested.
+    assert spec.show_background_route is (video_type != "minimal")
     if video_type in {"telemetry", "minimal"}:
         assert render_call["keyframes_dir"] == (
             reference_cli_workspace.outputs_dir
             / "videos/keyframes"
             / f"activity_{REFERENCE_ACTIVITY_ID}_frost_en_16_9"
         )
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected"),
+    [(None, False), ("--background-tracks", True), ("--no-background-tracks", False)],
+)
+def test_minimal_background_route_toggle(
+    reference_cli_workspace,
+    monkeypatch: pytest.MonkeyPatch,
+    flag: str | None,
+    expected: bool,
+) -> None:
+    specs = []
+
+    class Engine:
+        def __init__(self, **kwargs):
+            pass
+
+        def render_activity(self, spec, output_path, **kwargs):
+            specs.append(spec)
+            return output_path, []
+
+    monkeypatch.setattr("ride_visuals.video.engines.remotion.RemotionVideoEngine", Engine)
+    argv = [
+        "video", "minimal", str(REFERENCE_ACTIVITY_ID), "--preview",
+        "--config", str(reference_cli_workspace.config_path),
+    ]
+    if flag is not None:
+        argv.append(flag)
+
+    main(argv)
+
+    assert specs[0].show_background_route is expected
 
 
 @pytest.mark.parametrize("overlay_format", ["png", "webm", "mov"])

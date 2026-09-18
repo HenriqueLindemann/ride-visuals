@@ -85,3 +85,26 @@ def test_video_still_rejects_non_aac_audio(tmp_path: Path, monkeypatch) -> None:
 
     assert result["valid"] is False
     assert "audio track must be AAC when present" in result["violations"]
+
+
+def test_missing_ffprobe_marks_the_video_invalid(tmp_path: Path, monkeypatch) -> None:
+    output = tmp_path / "movie.mp4"
+    output.write_bytes(b"data")
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+
+    result = MediaValidator.validate_video(output)
+
+    assert result["valid"] is False
+    assert "ffprobe" in result["error"]
+
+
+def test_reporting_missing_ffprobe_does_not_raise_key_error(tmp_path: Path, monkeypatch, capsys) -> None:
+    from ride_visuals.commands.validation import MediaFiles, _validate_media
+
+    output = tmp_path / "movie.mp4"
+    output.write_bytes(b"data")
+    media = MediaFiles(mp4=(output,), alpha_videos=(), alpha_stills=())
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+
+    assert _validate_media(media, MediaValidator) is False
+    assert "FALHA" in capsys.readouterr().out
