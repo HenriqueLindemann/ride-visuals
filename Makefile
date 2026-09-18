@@ -9,17 +9,22 @@ VIDEO_BASEMAP ?= dark
 TELEMETRY_BASEMAP ?= plain
 MOTION ?= chronological
 STYLE ?= density
+ASPECT ?= 16:9
+MINIMAL ?=
+ACTIVITY_TYPE ?= telemetry
 
 .PHONY: help install check ingest audit preview-collection preview-activity \
-	final final-assets final-reports final-maps final-videos final-activity validate
+	final final-assets final-reports final-maps final-videos final-visuals \
+	final-activity validate
 
 help:
 	@echo 'make install'
 	@echo 'make check'
 	@echo 'make audit SCOPE="--start-date 2024-02-01 --end-date 2024-12-31"'
-	@echo 'make preview-collection SCOPE="--year 2024 --month 2"'
-	@echo 'make preview-activity ACTIVITY_ID=<id>'
+	@echo 'make preview-collection MOTION=elapsed MINIMAL=1 SCOPE="--year 2024 --month 2"'
+	@echo 'make preview-activity ACTIVITY_ID=<id> ACTIVITY_TYPE=telemetry'
 	@echo 'make --jobs=6 final'
+	@echo 'make final-visuals'
 	@echo 'make final-activity ACTIVITY_ID=<id>'
 
 install:
@@ -48,11 +53,13 @@ ingest:
 
 preview-collection:
 	$(RUN) video collection --preview --motion $(MOTION) --style $(STYLE) \
-		--basemap $(VIDEO_BASEMAP) --aspect 16:9 $(CONFIG_ARG) $(SCOPE)
+		--basemap $(VIDEO_BASEMAP) --aspect $(ASPECT) $(if $(MINIMAL),--minimal) \
+		$(CONFIG_ARG) $(SCOPE)
 
 preview-activity:
 	@test -n "$(ACTIVITY_ID)" || (echo 'ACTIVITY_ID is required' && exit 2)
-	$(RUN) video telemetry $(ACTIVITY_ID) --preview --basemap $(TELEMETRY_BASEMAP) --aspect 16:9 $(CONFIG_ARG)
+	$(RUN) video $(ACTIVITY_TYPE) $(ACTIVITY_ID) --preview --basemap $(TELEMETRY_BASEMAP) \
+		--aspect $(ASPECT) $(CONFIG_ARG)
 
 final: check
 	$(MAKE) ingest
@@ -60,7 +67,9 @@ final: check
 	$(MAKE) final-assets
 	$(MAKE) validate
 
-final-assets: final-reports final-maps final-videos
+final-assets: final-reports final-visuals
+
+final-visuals: final-maps final-videos
 
 final-reports:
 	$(RUN) report progress $(CONFIG_ARG) $(SCOPE)
