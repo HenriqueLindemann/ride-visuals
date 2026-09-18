@@ -8,6 +8,7 @@ This directory holds the images and GIFs used by the root `README.md`, plus
 | File | Shows | Rendered from |
 | --- | --- | --- |
 | `collection-minimal.gif` | Hero: season accumulating in real elapsed time, minimal layout, density palette, plain canvas | `video collection --minimal --motion elapsed --style density --aspect 16:9` |
+| `collection-chronological.gif` | Section preview: routes accumulating in date order, full layout, speed palette, dark basemap | `video collection --motion chronological --style speed --basemap dark --aspect 16:9` |
 | `activity-telemetry.png` | Full ride telemetry over a satellite basemap, mid-ride frame | `video telemetry 19666115840 --basemap satellite --aspect 16:9` |
 | `activity-overlay.png` | Combined transparent overlay (route + telemetry) | `video overlay 19949741255 --overlay-format png --aspect 16:9` |
 | `activity-overlay-stats.gif` | Animated statistics overlay, composited for display | `video stats-overlay 19949741255 --overlay-format webm --aspect 16:9` |

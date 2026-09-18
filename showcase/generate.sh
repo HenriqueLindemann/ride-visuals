@@ -111,12 +111,15 @@ PY
 }
 
 # Composite an alpha video over the neutral surface, then convert to GIF.
+# The explicit libvpx-vp9 decoder is required: ffmpeg's default VP9 decoder
+# ignores WebM alpha and would flatten the transparent background to black.
 stats_gif() {
   local source="$1" destination="$2" size="$3"
   local temp
   temp="$(mktemp --suffix=.mp4)"
   ffmpeg -y -v error -f lavfi -i "color=c=0x161616:s=${size}:r=$GIF_FPS" \
-    -i "$source" -filter_complex "[0:v][1:v]overlay=shortest=1,format=yuv420p" \
+    -c:v libvpx-vp9 -i "$source" \
+    -filter_complex "[0:v][1:v]overlay=shortest=1,format=yuv420p" \
     -c:v libx264 -crf 18 "$temp"
   gif "$temp" "$destination" "${size%%x*}"
   rm -f "$temp"
@@ -141,6 +144,12 @@ collection() {
     --basemap plain --aspect 16:9 "${SCOPE[@]}"
   gif "$collection_dir/collection_${SLUG}_elapsed_density_16_9_minimal_${LOCALE_TAG}.mp4" \
     "$SHOWCASE/collection-minimal.gif"
+
+  log "Collection: season preview (chronological, speed, dark)"
+  render video collection --motion chronological --style speed \
+    --basemap dark --aspect 16:9 "${SCOPE[@]}"
+  gif "$collection_dir/collection_${SLUG}_chronological_speed_dark_16_9_${LOCALE_TAG}.mp4" \
+    "$SHOWCASE/collection-chronological.gif"
 }
 
 # --- Ride films --------------------------------------------------------------
