@@ -1,4 +1,4 @@
-"""Cálculo de zonas de frequência cardíaca e tempo sob esforço."""
+"""Heart-rate zone computation and time under effort."""
 
 from dataclasses import dataclass
 from typing import Dict
@@ -7,12 +7,12 @@ import numpy as np
 
 @dataclass
 class HRZoneProfile:
-    """Perfil de zonas cardíacas do ciclista."""
+    """Cyclist heart-rate zone profile."""
     resting_hr: float = 60.0
     max_hr: float = 190.0
     lthr: float = 170.0
 
-    # Zonas [min_bpm, max_bpm]
+    # Zones [min_bpm, max_bpm]
     z1_recovery: (float, float) = (100.0, 131.0)
     z2_aerobic: (float, float) = (132.0, 149.0)
     z3_tempo: (float, float) = (150.0, 164.0)

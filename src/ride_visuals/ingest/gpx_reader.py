@@ -1,4 +1,4 @@
-"""Leitor lossless de arquivos GPX (.gpx / .gpx.gz) preservando extensões Garmin."""
+"""Lossless reader for GPX files (.gpx / .gpx.gz) preserving Garmin extensions."""
 
 import gzip
 import xml.etree.ElementTree as ET
@@ -12,7 +12,7 @@ from ride_visuals.model.trackpoint import TrackPoint
 
 
 class GPXReader:
-    """Extrai trackpoints de arquivos GPX preservando extensões de telemetria."""
+    """Extract trackpoints from GPX files while preserving telemetry extensions."""
 
     @staticmethod
     def _strip_ns(tag: str) -> str:
@@ -22,7 +22,7 @@ class GPXReader:
     def read_gpx(cls, file_path: Path) -> Tuple[List[TrackPoint], Dict[str, Any]]:
         file_path = Path(file_path)
         if not file_path.exists():
-            raise FileNotFoundError(f"Arquivo GPX não encontrado: {file_path}")
+            raise FileNotFoundError(f"GPX file not found: {file_path}")
 
         raw_bytes = file_path.read_bytes()
         if file_path.name.endswith(".gz") or raw_bytes[:2] == b"\x1f\x8b":
@@ -37,11 +37,11 @@ class GPXReader:
             "has_cadence": False,
         }
 
-        # Parse via XML etree para extração direta e segura de extensões
+        # Parse via XML etree for direct, safe extraction of extensions
         try:
             root = ET.fromstring(raw_bytes)
         except Exception:
-            # Fallback usando gpxpy
+            # Fallback using gpxpy
             gpx = gpxpy.parse(raw_bytes.decode("utf-8", errors="replace"))
             for track in gpx.tracks:
                 for seg in track.segments:
@@ -67,7 +67,7 @@ class GPXReader:
                         ))
             return points, metadata
 
-        # Iterar sobre todos os trkpt
+        # Iterate over every trkpt
         for pt in root.iter():
             if cls._strip_ns(pt.tag) != "trkpt":
                 continue

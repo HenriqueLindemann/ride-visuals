@@ -1,4 +1,4 @@
-"""Auditoria e validação profunda de dados e procedência."""
+"""In-depth data and provenance auditing and validation."""
 
 from pathlib import Path
 from typing import Dict, Any
@@ -8,7 +8,7 @@ from ride_visuals.selection import ActivitySelection
 
 
 class ActivityAuditor:
-    """Realiza auditoria de integridade, procedência e cobertura métrica."""
+    """Run integrity, provenance, and metric coverage audits."""
 
     def __init__(self, catalog_db_path: Path, streams_dir: Path,
                  selection: ActivitySelection | None = None):
@@ -18,7 +18,7 @@ class ActivityAuditor:
 
     def run_audit(self) -> Dict[str, Any]:
         if not self.catalog_db_path.exists():
-            raise FileNotFoundError(f"Catálogo DuckDB não encontrado: {self.catalog_db_path}")
+            raise FileNotFoundError(f"DuckDB catalog not found: {self.catalog_db_path}")
 
         where, parameters = self.selection.sql()
         con = duckdb.connect(str(self.catalog_db_path), read_only=True)
@@ -44,7 +44,7 @@ class ActivityAuditor:
         temp_stream_count = df_activities["has_temp_stream"].sum()
         watts_stream_count = df_activities["has_watts_stream"].sum()
 
-        # Auditoria detalhada por stream em Parquet
+        # Detailed per-stream audit in Parquet
         stream_audits = []
         for _, row in df_activities.iterrows():
             act_id = row["id"]

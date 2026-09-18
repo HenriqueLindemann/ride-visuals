@@ -1,6 +1,6 @@
 [app]
 locale = "en"
-#or pt-BR
+# or pt-BR
 
 [video]
 theme = "midnight"
@@ -9,6 +9,7 @@ theme = "midnight"
 # Empty lists select every calendar year and month. CLI flags override these.
 years = []
 months = []
+# Export language aliases: Strava writes "Ride" in English and "Pedalada" in pt-BR.
 activity_types = ["Ride", "Pedalada"]
 # Uncomment either boundary for an inclusive interval.
 # start_date = "2024-02-01"

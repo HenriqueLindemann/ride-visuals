@@ -1,4 +1,4 @@
-"""Modelo e schema de trackpoints e séries temporais (nível stream/ponto)."""
+"""Trackpoint and time-series model and schema (stream/point level)."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -8,7 +8,7 @@ import pyarrow as pa
 
 @dataclass
 class TrackPoint:
-    """Um ponto de telemetria com procedência explícita."""
+    """One telemetry point with explicit provenance."""
     timestamp: datetime
     lat: float
     lon: float
@@ -27,7 +27,7 @@ class TrackPoint:
     quality_flags: str = "ok"           # 'ok', 'interpolated', 'gps_glitch'
 
 
-# Schema estrito do Apache Arrow / Parquet para serialização sem perdas
+# Strict Apache Arrow / Parquet schema for lossless serialization
 STREAM_ARROW_SCHEMA = pa.schema([
     ("timestamp", pa.timestamp("ms", tz="UTC")),
     ("lat", pa.float64()),

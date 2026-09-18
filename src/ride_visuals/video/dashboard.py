@@ -1,4 +1,4 @@
-"""Design sóbrio, minimalista e telemetria com gráficos de rastro / cometa (sparklines)."""
+"""Sober, minimalist design and telemetry with trace / comet charts (sparklines)."""
 
 from typing import Optional, Sequence
 import numpy as np
@@ -8,7 +8,7 @@ from ride_visuals.video.fonts import FontManager
 
 
 class DashboardPainter:
-    """Desenha painéis de telemetria refinados com sparklines estáveis e sem oscilações bruscas."""
+    """Draw refined telemetry panels with stable, jitter-free sparklines."""
 
     @staticmethod
     def draw_header(draw: ImageDraw.Draw,
@@ -19,7 +19,7 @@ class DashboardPainter:
                     is_mobile: bool = False,
                     scale: int = 1,
                     theme: VisualTheme = MIDNIGHT) -> int:
-        """Cabeçalho sóbrio, limpo e sem redundâncias visuais."""
+        """Sober, clean header without visual redundancies."""
         tag = badge or eyebrow
         if is_mobile:
             f_eyebrow = FontManager.get_font(16 * scale, bold=True)
@@ -68,7 +68,7 @@ class DashboardPainter:
                        max_val: Optional[float] = None,
                        scale: int = 1,
                        theme: VisualTheme = MIDNIGHT):
-        """Desenha o rastro com escala fixa e amortecimento suave (sem oscilação ou flicker)."""
+        """Draw the trace with a fixed scale and smooth damping (no wobble or flicker)."""
         valid_vals = recent_values[~np.isnan(recent_values)]
         draw.line([(sx, sy), (sx, sy + sh), (sx + sw, sy + sh)], fill=theme.border, width=scale)
         if len(valid_vals) == 0:
@@ -131,7 +131,7 @@ class DashboardPainter:
             val_y = y + 32 * scale
             spark_w = int(w * 0.42)
 
-        # Rótulo
+        # Label
         draw.text((x + pad_x, lbl_y), label.upper(), fill=theme.text_muted, font=f_label)
 
         # Valor
@@ -143,7 +143,7 @@ class DashboardPainter:
             draw.text((x + pad_x + val_w + 8 * scale, val_y + (10 if is_mobile else 8) * scale),
                       unit, fill=theme.text_muted, font=f_unit)
 
-        # Sparkline trail se fornecido
+        # Sparkline trail when provided
         if recent_trail is not None and len(recent_trail) > 1:
             spark_x = x + w - spark_w - pad_x
             spark_y = y + 14 * scale
@@ -218,7 +218,7 @@ class DashboardPainter:
                           color: str | None = None,
                           scale: int = 1,
                           theme: VisualTheme = MIDNIGHT):
-        """Barra de progresso fina e elegante."""
+        """Thin, elegant progress bar."""
         line_y = y + max(0, h // 2 - scale)
         draw.rectangle((x, line_y, x + w, line_y + 2 * scale), fill=theme.border)
         fill_w = max(int(w * min(max(pct, 0.0), 1.0)), 2 * scale)

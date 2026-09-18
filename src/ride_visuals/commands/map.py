@@ -11,34 +11,34 @@ from ride_visuals.commands.options import LOCALES, MAP_DETAILS, MAP_ROUTE_STYLES
 def register(subparsers: argparse._SubParsersAction) -> None:
     from ride_visuals.maps.tiles import TILE_PROVIDERS
 
-    parser = subparsers.add_parser("map", help="Gera mapas cartográficos e heatmaps")
-    parser.add_argument("map_type", choices=["overview", "heatmap", "effort"], help="Tipo de mapa")
+    parser = subparsers.add_parser("map", help="Render cartographic maps and heatmaps")
+    parser.add_argument("map_type", choices=["overview", "heatmap", "effort"], help="Map type")
     add_selection_arguments(parser)
     parser.add_argument(
         "--basemap",
         choices=["plain", *TILE_PROVIDERS],
         default="dark",
-        help="Provedor de mapa base",
+        help="Basemap provider",
     )
-    parser.add_argument("--dpi", type=int, default=300, help="Resolução DPI da imagem")
+    parser.add_argument("--dpi", type=int, default=300, help="Image resolution in DPI")
     parser.add_argument(
         "--map-detail",
         choices=MAP_DETAILS,
         default="standard",
-        help="Tiles padrão ou uma camada extra de resolução antes do downsample",
+        help="Standard tiles or an extra resolution layer before downsampling",
     )
     parser.add_argument(
         "--route-style",
         choices=MAP_ROUTE_STYLES,
         default="orange",
-        help="Paleta aplicada somente aos traçados",
+        help="Palette applied only to the route traces",
     )
-    parser.add_argument("--locale", choices=LOCALES, help="Idioma do conteúdo visual")
-    parser.add_argument("--theme", choices=THEMES, help="Tema editorial compartilhado")
-    parser.add_argument("--catalog-db", type=str, help="Caminho para o DuckDB de catálogo")
-    parser.add_argument("--streams-dir", type=str, help="Caminho para pasta de Parquet streams")
-    parser.add_argument("--outputs-dir", type=str, help="Caminho para pasta de saídas")
-    parser.add_argument("--config", type=str, help="Caminho para config/config.toml")
+    parser.add_argument("--locale", choices=LOCALES, help="Visual language for generated media")
+    parser.add_argument("--theme", choices=THEMES, help="Shared editorial theme")
+    parser.add_argument("--catalog-db", type=str, help="Path to the catalog DuckDB")
+    parser.add_argument("--streams-dir", type=str, help="Path to the Parquet streams directory")
+    parser.add_argument("--outputs-dir", type=str, help="Path to the outputs directory")
+    parser.add_argument("--config", type=str, help="Path to config/config.toml")
     parser.set_defaults(func=run)
 
 
@@ -58,7 +58,7 @@ def run(args: argparse.Namespace) -> None:
 
     if args.map_type == "overview":
         print(
-            f"[Mapa] Visão geral ({runtime.selection.describe()}, {args.dpi} DPI, "
+            f"[Map] Overview ({runtime.selection.describe()}, {args.dpi} DPI, "
             f"basemap: {args.basemap})..."
         )
         output = generator.render_overview(
@@ -68,7 +68,7 @@ def run(args: argparse.Namespace) -> None:
             map_detail=args.map_detail,
         )
     elif args.map_type == "heatmap":
-        print(f"[Mapa] Densidade ({runtime.selection.describe()}, basemap: {args.basemap})...")
+        print(f"[Map] Density ({runtime.selection.describe()}, basemap: {args.basemap})...")
         output = generator.render_heatmap(
             dpi=args.dpi,
             basemap=args.basemap,
@@ -76,10 +76,10 @@ def run(args: argparse.Namespace) -> None:
             map_detail=args.map_detail,
         )
     else:
-        print(f"[Mapa] Gerando mapa do espectro cardiovascular (Z1 a Z5, basemap: {args.basemap})...")
+        print(f"[Map] Rendering heart-rate effort map (Z1 to Z5, basemap: {args.basemap})...")
         output = generator.render_effort_map(
             dpi=args.dpi,
             basemap=args.basemap,
             map_detail=args.map_detail,
         )
-    print(f"[Mapa] Salvo com sucesso em: {output}")
+    print(f"[Map] Saved successfully to: {output}")

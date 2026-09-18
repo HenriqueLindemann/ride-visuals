@@ -80,7 +80,7 @@ def stage_background_video(
             os.replace(temporary, staged)
     finally:
         temporary.unlink(missing_ok=True)
-    print(f"[Background] Vídeo de fundo preparado: backgrounds/{staged_name}")
+    print(f"[Background] Background video prepared: backgrounds/{staged_name}")
     return replace(spec, background=replace(background, src=f"backgrounds/{staged_name}"))
 
 
@@ -530,6 +530,6 @@ class RemotionVideoEngine:
                 return
             if attempt < retries:
                 print(
-                    f"[Remotion] {operation} falhou; repetindo uma vez com o mesmo perfil estável..."
+                    f"[Remotion] {operation} failed; retrying once with the same stable profile..."
                 )
         raise RuntimeError(f"{operation} failed with exit code {result.returncode}")

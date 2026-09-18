@@ -1,4 +1,4 @@
-"""Leitor lossless de arquivos TCX (.tcx / .tcx.gz) preservando HR, velocidade e potência estimada."""
+"""Lossless reader for TCX files (.tcx / .tcx.gz) preserving HR, speed, and estimated power."""
 
 import gzip
 import xml.etree.ElementTree as ET
@@ -11,7 +11,7 @@ from ride_visuals.model.trackpoint import TrackPoint
 
 
 class TCXReader:
-    """Extrai trackpoints e metadados de arquivos TCX sem perda de telemetria."""
+    """Extract trackpoints and metadata from TCX files without losing telemetry."""
 
     @staticmethod
     def _strip_ns(tag: str) -> str:
@@ -21,7 +21,7 @@ class TCXReader:
     def read_tcx(cls, file_path: Path) -> Tuple[List[TrackPoint], Dict[str, Any]]:
         file_path = Path(file_path)
         if not file_path.exists():
-            raise FileNotFoundError(f"Arquivo TCX não encontrado: {file_path}")
+            raise FileNotFoundError(f"TCX file not found: {file_path}")
 
         raw_bytes = file_path.read_bytes()
         if file_path.name.endswith(".gz") or raw_bytes[:2] == b"\x1f\x8b":
@@ -42,10 +42,10 @@ class TCXReader:
         try:
             root = ET.fromstring(raw_bytes)
         except Exception as e:
-            # Fallback para parsing tolerante
-            raise ValueError(f"Falha ao interpretar XML TCX em {file_path.name}: {e}")
+            # Tolerant parsing fallback
+            raise ValueError(f"Failed to parse TCX XML in {file_path.name}: {e}")
 
-        # Iterar sobre todos os Trackpoints
+        # Iterate over every Trackpoint
         for tp in root.iter():
             if cls._strip_ns(tp.tag) != "Trackpoint":
                 continue
@@ -160,7 +160,7 @@ class TCXReader:
             if watts_elem is not None and watts_elem.text:
                 try:
                     watts = float(watts_elem.text.strip())
-                    # Watts em TCX sem medidor de potência confirmado são estimados pela plataforma de origem
+                    # TCX watts without a confirmed power meter are estimated by the source platform
                     prov_pwr = "provider_estimated"
                     metadata["has_power"] = True
                 except ValueError:

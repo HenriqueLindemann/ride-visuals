@@ -1,4 +1,4 @@
-"""Testes unitários para ingestão de arquivos FIT."""
+"""Unit tests for FIT file ingestion."""
 
 import gzip
 import unittest

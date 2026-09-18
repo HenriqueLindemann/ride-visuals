@@ -1,4 +1,4 @@
-"""Gerador de vídeos de coleção completa com Supersampling Anti-Aliasing 2x (SSAA)."""
+"""Full-collection video generator with 2x Supersampling Anti-Aliasing (SSAA)."""
 
 import math
 from pathlib import Path
@@ -186,13 +186,13 @@ class CollectionVideoRenderer:
 
         tracks = self.load_all_collection_tracks()
         if not tracks:
-            raise ValueError("Nenhuma rota carregada para renderização de coleção.")
+            raise ValueError("No routes loaded for collection rendering.")
         if basemap not in {"plain", *TILE_PROVIDERS}:
-            raise ValueError(f"Basemap não suportado: {basemap}")
+            raise ValueError(f"Unsupported basemap: {basemap}")
         if motion not in SUPPORTED_MOTIONS:
-            raise ValueError(f"Motion não suportado: {motion}")
+            raise ValueError(f"Unsupported motion: {motion}")
         if style not in {"orange", "density", "monochrome", "monthly", *DATA_STYLE_SPECS}:
-            raise ValueError(f"Estilo de rota não suportado: {style}")
+            raise ValueError(f"Unsupported route style: {style}")
         if map_detail not in {"standard", "high"}:
             raise ValueError("Map detail must be standard or high")
 
@@ -335,14 +335,14 @@ class CollectionVideoRenderer:
                     img.paste(basemap_layer, (0, 0))
                 draw = ImageDraw.Draw(img)
 
-                # 1. Traçado de fundo: contexto futuro permitido, sempre neutro.
+                # 1. Background trace: future context allowed, always neutral.
                 if effective_show_bg:
                     for pt_data in projected_tracks:
                         pts = pt_data.pixel_points
                         if len(pts) >= 2:
                             draw.line(pts, fill=self.theme.route_inactive, width=2 * ui)
 
-                # 2. Animação de acordo com o Motion
+                # 2. Animation according to the motion mode
                 ease_t = smoothstep(t_norm)
                 finished_count = 0
                 cursor_elapsed = 0.0

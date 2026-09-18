@@ -1,4 +1,4 @@
-"""Módulos de vídeo e layout particionado."""
+"""Video modules and partitioned layout."""
 
 from ride_visuals.video.layout import VideoPartitionLayout, Rect
 from ride_visuals.video.progress_movie import ProgressMovieRenderer

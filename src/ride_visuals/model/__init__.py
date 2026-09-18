@@ -1,4 +1,4 @@
-"""Módulos de modelo de dados."""
+"""Data model modules."""
 
 from ride_visuals.model.activity import ActivitySummary
 from ride_visuals.model.trackpoint import TrackPoint, STREAM_ARROW_SCHEMA

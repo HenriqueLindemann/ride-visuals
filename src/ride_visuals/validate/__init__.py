@@ -1,4 +1,4 @@
-"""Módulos de validação e auditoria."""
+"""Validation and audit modules."""
 
 from ride_visuals.validate.audit import ActivityAuditor
 

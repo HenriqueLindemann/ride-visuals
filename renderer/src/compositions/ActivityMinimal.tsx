@@ -3,6 +3,7 @@ import {BackgroundLayer} from '../components/BackgroundLayer';
 import {RouteMap} from '../components/RouteMap';
 import {FONT_FAMILY, landscapeSafeInsets} from '../design/layout';
 import {themes} from '../design/tokens';
+import {createI18n} from '../i18n/messages';
 import {useActivityTimeline} from '../lib/activityTimeline';
 import type {ActivityRenderSpec} from '../schema';
 
@@ -15,7 +16,7 @@ export const ActivityMinimal = (spec: ActivityRenderSpec & {transparent?: boolea
   const vertical = height > width;
   const scale = vertical ? height / 1920 : height / 1080;
   const theme = themes[spec.theme];
-  const pt = spec.locale === 'pt-BR';
+  const {t} = createI18n(spec.locale);
   const hasBackground = spec.background !== null;
   const safeInsets = landscapeSafeInsets(spec.presentation);
 
@@ -103,7 +104,7 @@ export const ActivityMinimal = (spec: ActivityRenderSpec & {transparent?: boolea
               marginBottom: Math.round(4 * scale),
             }}
           >
-            {pt ? 'VELOCIDADE' : 'SPEED'}
+            {t('minimalSpeed')}
           </div>
           <div style={{display: 'flex', alignItems: 'baseline', gap: Math.round(10 * scale)}}>
             <span
@@ -141,7 +142,7 @@ export const ActivityMinimal = (spec: ActivityRenderSpec & {transparent?: boolea
               marginBottom: Math.round(4 * scale),
             }}
           >
-            {pt ? 'DISTÂNCIA' : 'DISTANCE'}
+            {t('minimalDistance')}
           </div>
           <div style={{display: 'flex', alignItems: 'baseline', gap: Math.round(10 * scale)}}>
             <span

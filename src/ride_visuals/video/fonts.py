@@ -9,7 +9,7 @@ FONT_REGULAR_PATH = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
 
 
 class FontManager:
-    """Carrega fontes TrueType com cache por tamanho."""
+    """Load TrueType fonts with a per-size cache."""
 
     _cache = {}
 

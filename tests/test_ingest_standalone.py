@@ -1,4 +1,4 @@
-"""Testes para importação de arquivos FIT avulsos na coleção."""
+"""Tests for importing standalone FIT files into the collection."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ SESSION = {
 
 @pytest.fixture
 def export_dir(tmp_path: Path) -> Path:
-    """Export Strava mínimo (pt-BR) com uma atividade existente."""
+    """Minimal Strava export (pt-BR) with one existing activity."""
     export = tmp_path / "bulk_download" / "export_1"
     (export / "activities").mkdir(parents=True)
     with (export / "activities.csv").open("w", newline="", encoding="utf-8") as f:
@@ -87,7 +87,7 @@ def fit_file(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def fake_session(monkeypatch: pytest.MonkeyPatch):
-    """Substitui a leitura de session por metadados fixos."""
+    """Replace session reading with fixed metadata."""
 
     def _set(**overrides):
         monkeypatch.setattr(
@@ -134,7 +134,7 @@ def test_import_appends_row_and_copies_file(
     assert row["Frequência cardíaca média"] == "137"
     assert row["Nome do arquivo"] == f"activities/{expected_id}.fit"
 
-    # A linha nova precisa ser legível pelo CSVActivityReader do pipeline.
+    # The new row must be readable by the pipeline's CSVActivityReader.
     records = CSVActivityReader(export_dir / "activities.csv").read_activities()
     new_records = [r for r in records if r["id"] == expected_id]
     assert len(new_records) == 1
@@ -149,7 +149,7 @@ def test_import_detects_duplicate_start_time(
     importer = StandaloneFitImporter(bulk_dir=export_dir.parent)
     assert importer.import_files([fit_file])[0].status == "imported"
 
-    # Mesmo treino a 30s de diferença (outro dispositivo) deve ser duplicata.
+    # The same workout 30s apart (another device) must be a duplicate.
     near = export_dir.parent / "Kalmit_Weinstraße.fit"
     near.write_bytes(b"FIT-DUMMY-2")
     fake_session(start_time=SESSION["start_time"] + timedelta(seconds=30))

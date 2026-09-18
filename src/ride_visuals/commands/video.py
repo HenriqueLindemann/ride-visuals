@@ -47,63 +47,63 @@ class VideoCommandContext:
 def register(subparsers: argparse._SubParsersAction) -> None:
     from ride_visuals.maps.tiles import TILE_PROVIDERS
 
-    parser = subparsers.add_parser("video", help="Renderiza vídeos de rotas, progresso e coleções")
+    parser = subparsers.add_parser("video", help="Render route, progress, and collection videos")
     parser.add_argument(
         "video_type",
         choices=VIDEO_TYPES,
-        help="Tipo de vídeo ou overlay",
+        help="Video or overlay type",
     )
     parser.add_argument(
         "activity_id",
         type=int,
         nargs="?",
         default=0,
-        help="ID da atividade (para clean/telemetry/overlay)",
+        help="Activity ID (for clean/telemetry/overlay)",
     )
     parser.add_argument(
         "--motion",
         choices=COLLECTION_MOTIONS,
         default="chronological",
         help=(
-            "Cinemática da coleção; simultaneous/elapsed alinham as largadas e preservam a duração real "
-            "de cada rota"
+            "Collection kinematics; simultaneous/elapsed align start times and preserve the real "
+            "duration of each ride"
         ),
     )
     parser.add_argument(
         "--style",
         choices=COLLECTION_STYLES,
         default="orange",
-        help="Paleta aplicada somente aos traçados",
+        help="Palette applied only to the route traces",
     )
     parser.add_argument(
         "--basemap",
         choices=["plain", *TILE_PROVIDERS],
         default="plain",
-        help="Fundo georreferenciado para vídeos de coleção ou atividade",
+        help="Georeferenced basemap for collection or activity videos",
     )
     parser.add_argument(
         "--map-detail",
         choices=MAP_DETAILS,
         default="standard",
-        help="Tiles padrão ou uma camada extra de resolução antes do downsample",
+        help="Standard tiles or an extra resolution layer before downsampling",
     )
     parser.add_argument(
-        "--preview", action="store_true", help="Renderiza versão curta/preview rápido"
+        "--preview", action="store_true", help="Render a short preview version"
     )
     parser.add_argument(
         "--no-keyframes",
         action="store_true",
-        help="Não extrai frames de inspeção 0/50/100",
+        help="Do not extract 0/50/100 inspection frames",
     )
     layout_group = parser.add_mutually_exclusive_group()
     layout_group.add_argument(
-        "--clean", action="store_true", help="Renderiza coleção sem painel de telemetria"
+        "--clean", action="store_true", help="Render the collection without the telemetry panel"
     )
     layout_group.add_argument(
         "--minimal",
         action="store_true",
         default=False,
-        help="Visualização minimalista: coleção com distância; atividade com velocidade e distância",
+        help="Minimal layout: collection with distance; activity with speed and distance",
     )
     for option in ("cursors", "legend"):
         parser.add_argument(
@@ -115,18 +115,18 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         choices=VIDEO_ASPECTS,
         default="16:9",
         help=(
-            "Canvas do vídeo: paisagem, vertical, Instagram Story horizontal "
-            "(gire o telefone) ou UHD 3840x2160"
+            "Video canvas: landscape, vertical, horizontal Instagram Story "
+            "(rotate the phone) or UHD 3840x2160"
         ),
     )
     parser.add_argument(
         "--engine",
         choices=["auto", "remotion"],
         default="auto",
-        help="Motor visual para atividades e overlays",
+        help="Visual engine for activities and overlays",
     )
     parser.add_argument("--locale", choices=LOCALES, help="Visual language: en or pt-BR (default: en; configurable in [app].locale)")
-    parser.add_argument("--theme", choices=THEMES, help="Tema visual compartilhado")
+    parser.add_argument("--theme", choices=THEMES, help="Shared visual theme")
     parser.add_argument(
         "--title",
         help="Override the title of an individual activity (an empty string hides the title)",
@@ -135,14 +135,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     background_group.add_argument(
         "--background-image",
         type=str,
-        help="Imagem JPEG/PNG/WebP usada atrás da atividade (incompatível com --basemap)",
+        help="JPEG/PNG/WebP image used behind the activity (incompatible with --basemap)",
     )
     background_group.add_argument(
         "--background-video",
         type=str,
         help=(
-            "Vídeo renderizado por baixo da UI da atividade, com o próprio áudio no "
-            "MP4 final (clean/telemetry; incompatível com --basemap e --background-image)"
+            "Video rendered behind the activity UI, with its own audio in the "
+            "final MP4 (clean/telemetry; incompatible with --basemap and --background-image)"
         ),
     )
     parser.add_argument(
@@ -150,19 +150,19 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         action=argparse.BooleanOptionalAction,
         dest="background_video_audio",
         default=True,
-        help="Mantém o áudio original do --background-video no vídeo entregue",
+        help="Keep the original audio from --background-video in the delivered video",
     )
     parser.add_argument(
         "--background-blur",
         type=float,
         default=0.0,
-        help="Desfoque do fundo em pixels (0–100)",
+        help="Background blur in pixels (0–100)",
     )
     parser.add_argument(
         "--background-dim",
         type=float,
         default=0.35,
-        help="Escurecimento do fundo (0–1)",
+        help="Background dimming (0–1)",
     )
     parser.add_argument(
         "--progress-bar",
@@ -182,15 +182,15 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--overlay-format",
         choices=OVERLAY_FORMATS,
         default=None,
-        help="PNG estático, WebM alpha ou ProRes 4444 MOV (novos overlays: WebM; overlay: PNG)",
+        help="Static PNG, alpha WebM, or ProRes 4444 MOV (new overlays: WebM; overlay: PNG)",
     )
-    parser.add_argument("--config", type=str, help="Caminho para config/config.toml")
+    parser.add_argument("--config", type=str, help="Path to config/config.toml")
     add_selection_arguments(parser)
     parser.set_defaults(func=run)
 
 
 def run(args: argparse.Namespace) -> None:
-    """Renderiza vídeos com ou sem telemetria, filme de progresso e coleções completas."""
+    """Render videos with or without telemetry, progress movies, and full collections."""
     if getattr(args, "minimal", False) and args.video_type == "telemetry":
         args.video_type = "minimal"
     context = VideoCommandContext.from_args(args)

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ride_visuals.i18n import DEFAULT_LOCALE
-from ride_visuals.selection import ActivitySelection
+from ride_visuals.selection import DEFAULT_ACTIVITY_TYPES, ActivitySelection
 
 DEFAULT_CONFIG_PATH = Path("config/config.toml")
 
@@ -50,23 +50,23 @@ def add_selection_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def print_ingest_stats(stats: dict[str, Any]) -> None:
-    """Imprime o resumo padronizado de uma execução de ingestão."""
+    """Print the standardized summary of an ingestion run."""
     print("\n==================================================")
-    print(" Ingestão Concluída com Sucesso!")
+    print(" Ingestion completed successfully!")
     print("==================================================")
-    print(f"  Atividades no recorte:        {stats['total_scoped']}")
-    print(f"  Atividades salvas:            {stats['ingested_activities']}")
-    print(f"  Total de pontos de telemetria:{stats['total_points']:,}")
+    print(f"  Activities in scope:          {stats['total_scoped']}")
+    print(f"  Activities saved:             {stats['ingested_activities']}")
+    print(f"  Total telemetry points:       {stats['total_points']:,}")
     print(
-        "  Arquivos originais:           "
+        "  Original files:               "
         f"{stats['fit_count']} FIT · {stats['tcx_count']} TCX · {stats['gpx_count']} GPX"
     )
-    print(f"  Streams com Frequência Card.: {stats['with_hr_stream']}/{stats['ingested_activities']}")
-    print(f"  Streams com Velocidade expl.: {stats['with_speed_stream']}/{stats['ingested_activities']}")
-    print(f"  Streams com Temperatura:      {stats['with_temp_stream']}/{stats['ingested_activities']}")
-    print(f"  Streams com Watts estimados:  {stats['with_watts_stream']}/{stats['ingested_activities']}")
-    print(f"  Distância total acumulada:    {stats['total_distance_m'] / 1000.0:.1f} km")
-    print(f"  Altimetria acumulada:         {stats['total_elevation_m']:.0f} m")
+    print(f"  Streams with heart rate:      {stats['with_hr_stream']}/{stats['ingested_activities']}")
+    print(f"  Streams with measured speed:  {stats['with_speed_stream']}/{stats['ingested_activities']}")
+    print(f"  Streams with temperature:     {stats['with_temp_stream']}/{stats['ingested_activities']}")
+    print(f"  Streams with estimated watts: {stats['with_watts_stream']}/{stats['ingested_activities']}")
+    print(f"  Total distance:               {stats['total_distance_m'] / 1000.0:.1f} km")
+    print(f"  Total elevation gain:         {stats['total_elevation_m']:.0f} m")
     print("==================================================")
 
 
@@ -111,6 +111,6 @@ class RuntimeConfig:
             activity_types=(
                 activity_types
                 if activity_types is not None
-                else configured_selection.get("activity_types", ["Ride", "Pedalada"])
+                else configured_selection.get("activity_types", list(DEFAULT_ACTIVITY_TYPES))
             ),
         )

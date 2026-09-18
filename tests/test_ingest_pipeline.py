@@ -91,7 +91,7 @@ def test_write_catalog_upserts_and_preserves_existing_activities(tmp_path: Path)
 
 
 def test_write_catalog_upserts_into_legacy_table_without_primary_key(tmp_path: Path):
-    """Catálogos criados por versões antigas não têm PRIMARY KEY em activities."""
+    """Catalogs created by older versions have no PRIMARY KEY on activities."""
     db_path = tmp_path / "catalog.duckdb"
     streams_dir = tmp_path / "streams"
     pipeline = IngestPipeline(

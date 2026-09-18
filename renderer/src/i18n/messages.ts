@@ -19,6 +19,10 @@ const messages = {
     averageTemperature: 'Avg temperature',
     averagePower: 'Avg power',
     progress: 'Route progress',
+    minimalSpeed: 'SPEED',
+    minimalDistance: 'DISTANCE',
+    minimalHeartRate: 'HEART RATE',
+    minimalElevation: 'ELEVATION',
   },
   'pt-BR': {
     speed: 'Velocidade',
@@ -38,6 +42,10 @@ const messages = {
     averageTemperature: 'Temp. média',
     averagePower: 'Potência média',
     progress: 'Progresso da rota',
+    minimalSpeed: 'VELOCIDADE',
+    minimalDistance: 'DISTÂNCIA',
+    minimalHeartRate: 'FREQUÊNCIA',
+    minimalElevation: 'ALTIMETRIA',
   },
 } as const;
 

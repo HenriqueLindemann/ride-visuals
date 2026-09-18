@@ -1,4 +1,4 @@
-"""Leitor lossless de arquivos FIT (.fit / .fit.gz) usando fitdecode."""
+"""Lossless reader for FIT files (.fit / .fit.gz) using fitdecode."""
 
 import gzip
 import io
@@ -49,18 +49,18 @@ def _semicircles_to_degrees(
 
 
 class FITReader:
-    """Extrai trackpoints e metadados de arquivos FIT sem perda de telemetria."""
+    """Extract trackpoints and metadata from FIT files without losing telemetry."""
 
     @staticmethod
     def read_session_metadata(file_path: Path) -> Dict[str, Any]:
-        """Extrai apenas os campos da mensagem session de um arquivo FIT.
+        """Extract only the session message fields from a FIT file.
 
-        Leitura leve para pré-visualização e importação avulsa: não processa
-        os records de telemetria.
+        Lightweight read for previews and standalone imports: it does not
+        process telemetry records.
         """
         file_path = Path(file_path)
         if not file_path.exists():
-            raise FileNotFoundError(f"Arquivo FIT não encontrado: {file_path}")
+            raise FileNotFoundError(f"FIT file not found: {file_path}")
 
         raw_bytes = file_path.read_bytes()
         if file_path.name.endswith(".gz") or raw_bytes[:2] == b"\x1f\x8b":
@@ -82,7 +82,7 @@ class FITReader:
     def read_fit(file_path: Path) -> Tuple[List[TrackPoint], Dict[str, Any]]:
         file_path = Path(file_path)
         if not file_path.exists():
-            raise FileNotFoundError(f"Arquivo FIT não encontrado: {file_path}")
+            raise FileNotFoundError(f"FIT file not found: {file_path}")
 
         raw_bytes = file_path.read_bytes()
         if file_path.name.endswith(".gz") or raw_bytes[:2] == b"\x1f\x8b":
@@ -110,7 +110,7 @@ class FITReader:
                     lon_raw = frame.get_value("position_long", fallback=None)
                     ts = frame.get_value("timestamp", fallback=None)
 
-                    # Se não houver posição geográfica, ignoramos o ponto no traçado GPS
+                    # Without a geographic position, skip the point in the GPS trace
                     if lat_raw is None or lon_raw is None or ts is None:
                         continue
 
@@ -133,7 +133,7 @@ class FITReader:
                     if dist is not None:
                         dist = float(dist)
 
-                    # Velocidade: prefere enhanced_speed, depois speed (em m/s)
+                    # Speed: prefer enhanced_speed, then speed (in m/s)
                     spd = frame.get_value("enhanced_speed", fallback=None)
                     if spd is None:
                         spd = frame.get_value("speed", fallback=None)
@@ -143,13 +143,13 @@ class FITReader:
                         prov_spd = "measured"
                         metadata["has_speed"] = True
 
-                    # Frequência Cardíaca
+                    # Heart rate
                     hr = frame.get_value("heart_rate", fallback=None)
                     if hr is not None:
                         hr = float(hr)
                         metadata["has_hr"] = True
 
-                    # Potência
+                    # Power
                     pwr = frame.get_value("power", fallback=None)
                     prov_pwr = "none"
                     if pwr is not None:
@@ -157,7 +157,7 @@ class FITReader:
                         prov_pwr = "measured"
                         metadata["has_power"] = True
 
-                    # Cadência
+                    # Cadence
                     cad = frame.get_value("cadence", fallback=None)
                     if cad is not None:
                         cad = float(cad)

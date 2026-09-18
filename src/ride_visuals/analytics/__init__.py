@@ -1,4 +1,4 @@
-"""Módulos de análise esportiva e performance."""
+"""Sports analytics and performance modules."""
 
 from ride_visuals.analytics.zones import HRZoneProfile
 from ride_visuals.analytics.trimp import TRIMPAnalyzer

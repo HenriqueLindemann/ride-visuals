@@ -1,4 +1,4 @@
-"""Pipeline central de ingestão lossless para DuckDB e Parquet."""
+"""Central lossless ingestion pipeline for DuckDB and Parquet."""
 
 import hashlib
 from pathlib import Path
@@ -16,7 +16,7 @@ from ride_visuals.ingest.fit_reader import FITReader
 from ride_visuals.ingest.tcx_reader import TCXReader
 from ride_visuals.ingest.gpx_reader import GPXReader
 from ride_visuals.ingest.metrics import enrich_trackpoints
-from ride_visuals.selection import ActivitySelection
+from ride_visuals.selection import DEFAULT_ACTIVITY_TYPES, ActivitySelection
 
 
 
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS activities (
 
 
 def compute_file_sha256(path: Path) -> str:
-    """Calcula o hash SHA256 de um arquivo em disco."""
+    """Compute the SHA256 hash of a file on disk."""
     hasher = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
@@ -62,7 +62,7 @@ def compute_file_sha256(path: Path) -> str:
 
 
 def find_export_root(bulk_dir: Path) -> Tuple[Path, Path]:
-    """Localiza o activities.csv e a pasta activities/ no bulk download."""
+    """Locate activities.csv and the activities/ directory in the bulk download."""
     bulk_dir = Path(bulk_dir)
     candidates = list(bulk_dir.glob("export_*")) + [bulk_dir]
     for c in candidates:
@@ -71,7 +71,7 @@ def find_export_root(bulk_dir: Path) -> Tuple[Path, Path]:
         if csv_cand.exists() and act_cand.exists():
             return csv_cand, act_cand
 
-    # Busca recursiva
+    # Recursive search
     for csv_cand in bulk_dir.rglob("activities.csv"):
         act_cand = csv_cand.parent / "activities"
         if act_cand.exists():
@@ -81,7 +81,7 @@ def find_export_root(bulk_dir: Path) -> Tuple[Path, Path]:
 
 
 class IngestPipeline:
-    """Orquestrador de ingestão lossless."""
+    """Lossless ingestion orchestrator."""
 
     def __init__(self,
                  bulk_dir: Path,
@@ -95,7 +95,7 @@ class IngestPipeline:
         self.catalog_db_path = Path(catalog_db_path)
         self.streams_dir = Path(streams_dir)
         self.selection = selection or ActivitySelection()
-        self.activity_types = set(activity_types or ["Ride", "Pedalada"])
+        self.activity_types = set(activity_types or DEFAULT_ACTIVITY_TYPES)
         self.clean = clean
         self.only_ids = only_ids
 
@@ -103,11 +103,11 @@ class IngestPipeline:
         self.streams_dir.mkdir(parents=True, exist_ok=True)
 
     def _find_export_root(self) -> Tuple[Path, Path]:
-        """Localiza o activities.csv e a pasta activities/ no bulk download."""
+        """Locate activities.csv and the activities/ directory in the bulk download."""
         return find_export_root(self.bulk_dir)
 
     def run_ingest(self) -> Dict[str, Any]:
-        """Executa a ingestão completa com auditoria e procedência."""
+        """Run the full ingestion with auditing and provenance."""
         # Resolve and parse the source before removing any prior outputs. A
         # missing or malformed export must never turn --clean into data loss.
         csv_file, act_dir = self._find_export_root()
@@ -129,7 +129,7 @@ class IngestPipeline:
                 con.execute("DROP TABLE IF EXISTS activities")
                 con.close()
 
-        # Mapear arquivos da pasta activities
+        # Map files from the activities folder
         file_map = {f.name: f for f in act_dir.glob("*") if f.is_file() and not f.name.startswith(".")}
 
         activities: List[ActivitySummary] = []
@@ -159,14 +159,14 @@ class IngestPipeline:
             if base_fname in file_map:
                 target_file = file_map[base_fname]
             else:
-                # Tentar encontrar por ID
+                # Try to find by ID
                 for k, v in file_map.items():
                     if str(act_id) in k:
                         target_file = v
                         break
 
             if not target_file or not target_file.exists():
-                print(f"[Aviso] Arquivo de atividade não encontrado para ID {act_id}: {base_fname}")
+                print(f"[Warning] Activity file not found for ID {act_id}: {base_fname}")
                 continue
 
             file_hash = compute_file_sha256(target_file)
@@ -190,17 +190,17 @@ class IngestPipeline:
                 stats["gpx_count"] += 1
 
             if not points:
-                print(f"[Aviso] Nenhum ponto GPS extraído de {target_file.name}")
+                print(f"[Warning] No GPS points extracted from {target_file.name}")
                 continue
 
-            # Enriquecer métricas de telemetria
+            # Enrich telemetry metrics
             enriched_pts = enrich_trackpoints(points)
 
-            # Gravar stream Parquet
+            # Write the Parquet stream
             parquet_path = self.streams_dir / f"{act_id}.parquet"
             self._write_stream_parquet(enriched_pts, parquet_path)
 
-            # Verificar streams disponíveis
+            # Check available streams
             has_hr = any(p.heart_rate_bpm is not None for p in enriched_pts)
             has_spd = any(p.speed_mps is not None for p in enriched_pts)
             has_tmp = any(p.temperature_c is not None for p in enriched_pts)
@@ -251,13 +251,13 @@ class IngestPipeline:
             )
             activities.append(activity_summary)
 
-        # Salvar catálogo consolidado no DuckDB (upsert mantendo dados históricos)
+        # Save the consolidated catalog to DuckDB (upsert preserving historical data)
         self._write_catalog_duckdb(activities)
 
         return stats
 
     def _write_stream_parquet(self, points: List[TrackPoint], path: Path):
-        """Salva a série de pontos de uma atividade em Parquet de alta performance."""
+        """Write one activity's point series to a high-performance Parquet file."""
         records = {
             "timestamp": [int(p.timestamp.timestamp() * 1000) for p in points],
             "lat": [p.lat for p in points],
@@ -282,16 +282,16 @@ class IngestPipeline:
         pq.write_table(table, path, compression="zstd")
 
     def _write_catalog_duckdb(self, activities: List[ActivitySummary]):
-        """Persiste a tabela de catálogo de atividades no DuckDB de forma incremental."""
+        """Persist the activity catalog table to DuckDB incrementally."""
         con = duckdb.connect(str(self.catalog_db_path))
         con.execute(ACTIVITIES_TABLE_SCHEMA_SQL)
         if activities:
             dicts = [a.to_dict() for a in activities]
             df = pd.DataFrame(dicts)
             df["start_date"] = pd.to_datetime(df["start_date"], utc=True)
-            # Upsert por DELETE + INSERT: funciona tanto em catálogos criados
-            # com PRIMARY KEY quanto em catálogos legados sem constraint
-            # (INSERT OR REPLACE exige UNIQUE/PRIMARY KEY na tabela).
+            # Upsert via DELETE + INSERT: works for catalogs created with a
+            # PRIMARY KEY and for legacy catalogs without the constraint
+            # (INSERT OR REPLACE requires UNIQUE/PRIMARY KEY on the table).
             con.execute("BEGIN TRANSACTION")
             con.execute("DELETE FROM activities WHERE id IN (SELECT id FROM df)")
             con.execute("INSERT INTO activities BY NAME SELECT * FROM df")

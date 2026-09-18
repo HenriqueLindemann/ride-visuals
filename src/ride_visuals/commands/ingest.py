@@ -9,43 +9,43 @@ from ride_visuals.selection import ActivitySelection
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
-    parser = subparsers.add_parser("ingest", help="Ingestão lossless de atividades")
+    parser = subparsers.add_parser("ingest", help="Lossless ingestion of activities")
     add_selection_arguments(parser)
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Ingere todas as atividades do arquivo ignorando filtros temporais",
+        help="Ingest every activity in the export, ignoring time filters",
     )
     parser.add_argument(
         "--clean",
         action="store_true",
-        help="Limpa o catálogo DuckDB e streams antes de iniciar a ingestão",
+        help="Wipe the DuckDB catalog and streams before ingesting",
     )
     parser.add_argument(
         "--activity-type",
         action="append",
         help="Activity type to ingest; repeat to select several",
     )
-    parser.add_argument("--bulk-dir", type=str, help="Caminho para o diretório bulk_download")
-    parser.add_argument("--catalog-db", type=str, help="Caminho para o DuckDB de catálogo")
-    parser.add_argument("--streams-dir", type=str, help="Caminho para pasta de Parquet streams")
-    parser.add_argument("--config", type=str, help="Caminho para config/config.toml")
+    parser.add_argument("--bulk-dir", type=str, help="Path to the bulk_download directory")
+    parser.add_argument("--catalog-db", type=str, help="Path to the catalog DuckDB")
+    parser.add_argument("--streams-dir", type=str, help="Path to the Parquet streams directory")
+    parser.add_argument("--config", type=str, help="Path to config/config.toml")
     parser.set_defaults(func=run)
 
 
 def run(args: argparse.Namespace) -> None:
-    """Executa a ingestão lossless de dados para DuckDB + Parquet."""
+    """Run lossless ingestion into DuckDB + Parquet."""
     from ride_visuals.ingest.pipeline import IngestPipeline
 
     runtime = RuntimeConfig.from_args(args)
     selection = ActivitySelection() if args.all else runtime.selection
 
-    print(f"[Ingestão] Seleção: {selection.describe()}")
-    print(f"  Fonte: {runtime.bulk_dir}")
-    print(f"  Catálogo DuckDB: {runtime.catalog_db}")
-    print(f"  Streams Parquet: {runtime.streams_dir}")
+    print(f"[Ingest] Selection: {selection.describe()}")
+    print(f"  Source: {runtime.bulk_dir}")
+    print(f"  DuckDB catalog: {runtime.catalog_db}")
+    print(f"  Parquet streams: {runtime.streams_dir}")
     if args.clean:
-        print("  Modo: Limpeza total e reconstrução (--clean)")
+        print("  Mode: full wipe and rebuild (--clean)")
 
     pipeline = IngestPipeline(
         bulk_dir=runtime.bulk_dir,

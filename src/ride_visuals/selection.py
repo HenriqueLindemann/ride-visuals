@@ -7,6 +7,15 @@ from datetime import date, datetime, time, timezone
 from typing import Iterable
 
 
+DEFAULT_ACTIVITY_TYPES: tuple[str, ...] = ("Ride", "Pedalada")
+"""Default activity types used by ingestion and selection filters.
+
+Strava exports store activity types in the export language: ``Ride`` in
+English and ``Pedalada`` in pt-BR. Both raw values are accepted so the
+pipeline stays compatible with either export without translating user data.
+"""
+
+
 def parse_date(value: str | date | datetime | None, *, end: bool = False) -> datetime | None:
     """Parse an ISO date or timestamp and normalize it to UTC."""
     if value is None or value == "":

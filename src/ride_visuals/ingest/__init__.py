@@ -1,4 +1,4 @@
-"""Módulos de ingestão de dados."""
+"""Data ingestion modules."""
 
 from ride_visuals.ingest.csv_reader import CSVActivityReader
 from ride_visuals.ingest.fit_reader import FITReader

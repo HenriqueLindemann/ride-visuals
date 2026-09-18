@@ -3,6 +3,7 @@ import {AbsoluteFill, useVideoConfig} from 'remotion';
 import {RouteMap} from '../components/RouteMap';
 import {FONT_FAMILY} from '../design/layout';
 import {themes} from '../design/tokens';
+import {createI18n} from '../i18n/messages';
 import {useActivityTimeline} from '../lib/activityTimeline';
 import type {ActivityRenderSpec, TelemetryPoint} from '../schema';
 
@@ -68,7 +69,7 @@ export const StatsOverlay = (spec: ActivityRenderSpec) => {
   // A soft halo separates text from footage without outlining the glyphs.
   // Keep it on text containers so it never affects the elevation trace.
   const textShadow = `0 1px 3px ${theme.canvas}99, 0 0 8px ${theme.canvas}40`;
-  const pt = spec.locale === 'pt-BR';
+  const {t} = createI18n(spec.locale);
   const format = (value: number | null, digits = 0) => value === null ? '—' :
     value.toLocaleString(spec.locale, {minimumFractionDigits: digits, maximumFractionDigits: digits});
   const hasHeartRate = spec.points.some((p) => p.heartRateBpm !== null);
@@ -85,9 +86,9 @@ export const StatsOverlay = (spec: ActivityRenderSpec) => {
     };
   }, [spec.points, spec.locale]);
   const metrics = [
-    {label: pt ? 'VELOCIDADE' : 'SPEED', value: format(point.speed3MinKmh ?? point.speedKmh, 1), unit: 'km/h' as const},
-    {label: pt ? 'DISTÂNCIA' : 'DISTANCE', value: format(point.distanceKm, 1), unit: 'km' as const},
-    ...(hasHeartRate ? [{label: pt ? 'FREQUÊNCIA' : 'HEART RATE', value: format(point.heartRateBpm), unit: 'bpm' as const}] : []),
+    {label: t('minimalSpeed'), value: format(point.speed3MinKmh ?? point.speedKmh, 1), unit: 'km/h' as const},
+    {label: t('minimalDistance'), value: format(point.distanceKm, 1), unit: 'km' as const},
+    ...(hasHeartRate ? [{label: t('minimalHeartRate'), value: format(point.heartRateBpm), unit: 'bpm' as const}] : []),
   ];
   return <AbsoluteFill style={{fontFamily: FONT_FAMILY, color: theme.text, padding: 24,
     boxSizing: 'border-box', display: 'flex', gap: 24, justifyContent: 'center'}}>
@@ -106,7 +107,7 @@ export const StatsOverlay = (spec: ActivityRenderSpec) => {
     {hasElevation ? <div>
       <div style={{display: 'flex', justifyContent: 'space-between', fontSize: 13,
         letterSpacing: 2, color: theme.textSecondary, marginBottom: 12, textShadow}}>
-        <span>{pt ? 'ALTIMETRIA' : 'ELEVATION'}</span>
+        <span>{t('minimalElevation')}</span>
         <span style={{letterSpacing: 0, fontVariantNumeric: 'tabular-nums'}}>{format(point.altitudeM)} m</span>
       </div>
       <div style={{height: vertical ? 100 : 88}}>

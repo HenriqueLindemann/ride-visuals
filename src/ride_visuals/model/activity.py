@@ -1,4 +1,4 @@
-"""Modelo de dados de atividades consolidadas (nível atividade)."""
+"""Consolidated activity data model (activity level)."""
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any
 
 @dataclass
 class ActivitySummary:
-    """Metadados e resumo consolidado de uma atividade no catálogo."""
+    """Metadata and consolidated summary of one activity in the catalog."""
     id: int
     name: str
     start_date: datetime

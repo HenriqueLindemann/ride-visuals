@@ -1,15 +1,15 @@
-"""Detecção de subidas significativas e cálculo de VAM (Vertical Ascent Meters/hour)."""
+"""Detection of significant climbs and VAM (Vertical Ascent Meters/hour) computation."""
 
 from typing import Dict, List, Any
 import numpy as np
 
 
 class ClimbAnalyzer:
-    """Identifica trechos de subida contínua e calcula velocidade de ascensão vertical (VAM)."""
+    """Identify continuous climbing segments and compute vertical ascent speed (VAM)."""
 
     @staticmethod
     def calculate_climb_vam(altitudes: np.ndarray, timestamps_sec: np.ndarray, min_gain_m: float = 30.0) -> List[Dict[str, Any]]:
-        """Identifica segmentos de subida e calcula VAM (m/h)."""
+        """Identify climbing segments and compute VAM (m/h)."""
         valid = ~np.isnan(altitudes)
         if np.sum(valid) < 20:
             return []

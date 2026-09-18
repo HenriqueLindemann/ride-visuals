@@ -1,4 +1,4 @@
-"""Testes unitários para regras de layout particionado e ausência de colisão."""
+"""Unit tests for partitioned layout rules and collision avoidance."""
 
 import unittest
 import numpy as np
@@ -49,19 +49,19 @@ class TestVideoLayout(unittest.TestCase):
 
     def test_projected_route_stays_within_map_rect(self):
         layout = VideoPartitionLayout.create(1920, 1080, mode="16:9")
-        # Simular coordenadas geográficas de uma rota
+        # Simulate geographic coordinates of a route
         xs = np.linspace(100000, 200000, 50)
         ys = np.linspace(500000, 600000, 50)
 
         px, py = layout.project_route_to_map(xs, ys)
 
-        # Todos os pontos de pixel devem estar estritamente dentro de map_rect
+        # Every pixel point must be strictly inside map_rect
         self.assertTrue(np.all(px >= layout.map_rect.x0))
         self.assertTrue(np.all(px <= layout.map_rect.x1))
         self.assertTrue(np.all(py >= layout.map_rect.y0))
         self.assertTrue(np.all(py <= layout.map_rect.y1))
 
-        # Nenhum ponto pode invadir telemetry_rect
+        # No point may intrude into telemetry_rect
         self.assertTrue(np.all(px < layout.telemetry_rect.x0))
 
 

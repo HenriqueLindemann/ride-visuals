@@ -63,7 +63,7 @@ def discover_media(target_dir: Path) -> MediaFiles:
 
 
 def _failure_details(result: dict[str, Any]) -> str:
-    return result.get("error") or "; ".join(result.get("violations", [])) or "Inválido"
+    return result.get("error") or "; ".join(result.get("violations", [])) or "Invalid"
 
 
 def _validate_media(media: MediaFiles, validator: Any) -> bool:
@@ -77,7 +77,7 @@ def _validate_media(media: MediaFiles, validator: Any) -> bool:
                 f"{result['audio_codec']}, faststart: {result['has_faststart']}"
             )
         else:
-            print(f"  [FALHA] {video.name:<45} -> {_failure_details(result)}")
+            print(f"  [FAIL] {video.name:<45} -> {_failure_details(result)}")
             all_valid = False
 
     for video in media.alpha_videos:
@@ -85,20 +85,20 @@ def _validate_media(media: MediaFiles, validator: Any) -> bool:
         if result.get("valid"):
             print(
                 f"  [OK] {video.name:<45} -> {result['width']}x{result['height']}, "
-                f"{result['duration_s']}s, alpha: sim"
+                f"{result['duration_s']}s, alpha: yes"
             )
         else:
-            print(f"  [FALHA] {video.name:<45} -> {_failure_details(result)}")
+            print(f"  [FAIL] {video.name:<45} -> {_failure_details(result)}")
             all_valid = False
 
     for still in media.alpha_stills:
         result = validator.validate_transparent_still(still)
         if result.get("valid"):
             print(
-                f"  [OK] {still.name:<45} -> {result['width']}x{result['height']}, alpha: sim"
+                f"  [OK] {still.name:<45} -> {result['width']}x{result['height']}, alpha: yes"
             )
         else:
-            print(f"  [FALHA] {still.name:<45} -> {_failure_details(result)}")
+            print(f"  [FAIL] {still.name:<45} -> {_failure_details(result)}")
             all_valid = False
     return all_valid
 
@@ -106,13 +106,13 @@ def _validate_media(media: MediaFiles, validator: Any) -> bool:
 def register(subparsers: argparse._SubParsersAction) -> None:
     from ride_visuals.maps.tiles import TILE_PROVIDERS
 
-    parser = subparsers.add_parser("validate", help="Valida arquivos de vídeo e mídia")
-    parser.add_argument("target_dir", type=str, nargs="?", help="Diretório alvo")
-    parser.add_argument("--config", type=str, help="Caminho para config/config.toml")
+    parser = subparsers.add_parser("validate", help="Validate video and media files")
+    parser.add_argument("target_dir", type=str, nargs="?", help="Target directory")
+    parser.add_argument("--config", type=str, help="Path to config/config.toml")
     parser.add_argument(
         "--final-set",
         action="store_true",
-        help="Valida somente as seis saídas canônicas do recorte",
+        help="Validate only the six canonical outputs for the selection",
     )
     parser.add_argument("--motion", choices=COLLECTION_MOTIONS, default="chronological")
     parser.add_argument("--style", choices=COLLECTION_STYLES, default="heart_rate")
@@ -122,13 +122,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> None:
-    """Valida saídas de vídeo e arquivos gerados em outputs/."""
+    """Validate video outputs and generated files under outputs/."""
     from ride_visuals.validate.media_validator import MediaValidator
 
     runtime = RuntimeConfig.from_args(args)
     target_dir = Path(args.target_dir or runtime.outputs_dir)
     if not target_dir.exists():
-        print(f"[Erro] Diretório {target_dir} não encontrado.")
+        print(f"[Error] Directory {target_dir} not found.")
         raise SystemExit(1)
 
     if args.final_set:
@@ -148,15 +148,15 @@ def run(args: argparse.Namespace) -> None:
         )
     else:
         media = discover_media(target_dir)
-    print(f"[Validação] Analisando {media.count} mídias finais em {target_dir}...")
+    print(f"[Validation] Checking {media.count} final media files in {target_dir}...")
 
     all_valid = _validate_media(media, MediaValidator)
     print("--------------------------------------------------")
     if all_valid and media.count:
-        print(" Todas as mídias foram validadas e estão conformes com os padrões de saída.")
+        print(" All media files were validated and match the output standards.")
     elif not media.count:
-        print(" Nenhuma mídia encontrada para validação.")
+        print(" No media files found to validate.")
         raise SystemExit(1)
     else:
-        print(" Atenção: Foram encontradas inconsistências nos vídeos.")
+        print(" Warning: inconsistencies were found in the videos.")
         raise SystemExit(1)

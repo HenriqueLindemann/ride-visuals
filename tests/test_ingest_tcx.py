@@ -1,4 +1,4 @@
-"""Testes unitários para ingestão de arquivos TCX."""
+"""Unit tests for TCX file ingestion."""
 
 import gzip
 import tempfile

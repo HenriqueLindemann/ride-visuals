@@ -1,4 +1,4 @@
-"""Cálculo e derivação de métricas de telemetria (distância, velocidade, inclinação, bearing)."""
+"""Computation and derivation of telemetry metrics (distance, speed, grade, bearing)."""
 
 import math
 from typing import List
@@ -7,8 +7,8 @@ from ride_visuals.model.trackpoint import TrackPoint
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calcula a distância ortodrômica em metros entre dois pares (lat, lon) em graus."""
-    R = 6371000.0  # Raio da Terra em metros
+    """Compute the great-circle distance in meters between two (lat, lon) pairs in degrees."""
+    R = 6371000.0  # Earth radius in meters
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
     dlambda = math.radians(lon2 - lon1)
@@ -19,7 +19,7 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 
 
 def calculate_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calcula o rumo (bearing) em graus (0–360) do ponto 1 para o ponto 2."""
+    """Compute the bearing in degrees (0–360) from point 1 to point 2."""
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dlambda = math.radians(lon2 - lon1)
     y = math.sin(dlambda) * math.cos(phi2)
@@ -29,11 +29,11 @@ def calculate_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
 
 
 def enrich_trackpoints(points: List[TrackPoint]) -> List[TrackPoint]:
-    """Enriquece uma lista de trackpoints derivando distância, velocidade, inclinação e rumo."""
+    """Enrich a list of trackpoints by deriving distance, speed, grade, and bearing."""
     if not points:
         return []
 
-    # Ordenar por timestamp
+    # Sort by timestamp
     points.sort(key=lambda p: p.timestamp)
 
     cum_dist = 0.0
@@ -73,13 +73,13 @@ def enrich_trackpoints(points: List[TrackPoint]) -> List[TrackPoint]:
         dt = (pt.timestamp - prev.timestamp).total_seconds()
         d_dist = haversine_distance(prev.lat, prev.lon, pt.lat, pt.lon)
 
-        # Atualizar distância acumulada se não fornecida nativamente
+        # Update cumulative distance when not natively provided
         if pt.distance_m is not None and pt.distance_m >= cum_dist:
             cum_dist = pt.distance_m
         else:
             cum_dist += d_dist
 
-        # Velocidade: preserva medida se existir; caso contrário deriva
+        # Speed: keep the measured value when present; otherwise derive it
         spd = pt.speed_mps
         prov_spd = pt.provenance_speed
         if spd is None or prov_spd == "none":
@@ -90,12 +90,12 @@ def enrich_trackpoints(points: List[TrackPoint]) -> List[TrackPoint]:
                 spd = prev.speed_mps or 0.0
                 prov_spd = "derived"
 
-        # Sanity check para outliers absurdos de velocidade (> 40 m/s ou 144 km/h em ciclismo)
+        # Sanity check for absurd speed outliers (> 40 m/s or 144 km/h while cycling)
         quality = pt.quality_flags
         if spd is not None and spd > 40.0:
             quality = "gps_glitch"
 
-        # Inclinação (%)
+        # Grade (%)
         grade = None
         if pt.altitude is not None and prev.altitude is not None and d_dist > 2.0:
             d_alt = pt.altitude - prev.altitude

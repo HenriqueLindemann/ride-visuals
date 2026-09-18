@@ -107,4 +107,4 @@ def test_reporting_missing_ffprobe_does_not_raise_key_error(tmp_path: Path, monk
     monkeypatch.setattr("shutil.which", lambda _name: None)
 
     assert _validate_media(media, MediaValidator) is False
-    assert "FALHA" in capsys.readouterr().out
+    assert "FAIL" in capsys.readouterr().out

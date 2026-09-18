@@ -45,9 +45,9 @@ def render_timeline(context: VideoCommandContext) -> None:
         keyframes_dir=keyframes,
         presentation=preset.canvas.presentation,
     )
-    print(f"[Vídeo] Timeline unificada gerada: {output}")
+    print(f"[Video] Unified timeline generated: {output}")
     if keyframes:
-        print(f"[Keyframes] Frames 0/50/100 em: {keyframes}")
+        print(f"[Keyframes] Frames 0/50/100 at: {keyframes}")
 
 
 def render_collection(context: VideoCommandContext) -> None:
@@ -71,7 +71,7 @@ def render_collection(context: VideoCommandContext) -> None:
         else None
     )
     print(
-        f"[Vídeo] Coleção {context.selection.describe()} "
+        f"[Video] Collection {context.selection.describe()} "
         f"(motion: {args.motion}, basemap: {args.basemap})..."
     )
     renderer = CollectionVideoRenderer(
@@ -109,9 +109,9 @@ def render_collection(context: VideoCommandContext) -> None:
         show_background_tracks=args.background_tracks,
         presentation=preset.canvas.presentation,
     )
-    print(f"[Vídeo] Coleção gerada com sucesso em: {output_path}")
+    print(f"[Video] Collection generated successfully at: {output_path}")
     if keyframes_dir:
-        print(f"[Keyframes] {len(keyframes)} frames-chave salvos em: {keyframes_dir}")
+        print(f"[Keyframes] {len(keyframes)} keyframes saved to: {keyframes_dir}")
 
 
 def render_progress(context: VideoCommandContext) -> None:
@@ -120,7 +120,7 @@ def render_progress(context: VideoCommandContext) -> None:
 
     args = context.args
     progress_dir = context.outputs_dir / "progress"
-    print(f"[Vídeo] Progresso: {context.selection.describe()}")
+    print(f"[Video] Progress: {context.selection.describe()}")
     renderer = ProgressMovieRenderer(
         context.runtime.catalog_db,
         context.runtime.streams_dir,
@@ -151,6 +151,6 @@ def render_progress(context: VideoCommandContext) -> None:
         keyframes_dir=keyframes_dir,
         presentation=preset.canvas.presentation,
     )
-    print(f"[Vídeo] Filme de progresso gerado com sucesso: {output_file}")
+    print(f"[Video] Progress movie generated successfully: {output_file}")
     if keyframes_dir:
-        print(f"[Keyframes] Frames 0/50/100 em: {keyframes_dir}")
+        print(f"[Keyframes] Frames 0/50/100 at: {keyframes_dir}")

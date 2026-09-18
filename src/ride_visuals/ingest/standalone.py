@@ -1,9 +1,9 @@
-"""Importação de arquivos FIT avulsos (fora do export Strava) para a coleção.
+"""Import standalone FIT files (outside the Strava export) into the collection.
 
-Cada arquivo é copiado para a pasta ``activities/`` do export e registrado
-como uma nova linha no ``activities.csv``, seguindo o mesmo fluxo das
-atividades originais do export. O ID é derivado do horário de início (epoch
-em milissegundos), garantindo unicidade sem colidir com IDs da Strava.
+Each file is copied into the export's ``activities/`` folder and recorded as
+a new row in ``activities.csv``, following the same flow as the export's
+original activities. The ID is derived from the start time (epoch in
+milliseconds), guaranteeing uniqueness without colliding with Strava IDs.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from ride_visuals.ingest.csv_reader import CSVActivityReader
 from ride_visuals.ingest.fit_reader import FITReader
 from ride_visuals.ingest.pipeline import find_export_root
 
-# Esporte do FIT -> rótulo de tipo usado no export pt-BR.
+# FIT sport -> type label used in the pt-BR export.
 SPORT_TYPE_MAP = {
     "cycling": "Pedalada",
     "running": "Corrida",
@@ -28,8 +28,8 @@ SPORT_TYPE_MAP = {
     "swimming": "Natação",
 }
 
-# Tolerância para considerar duas atividades como a mesma (mesmo treino
-# registrado por dispositivos diferentes pode diferir por alguns segundos).
+# Tolerance for treating two activities as the same (the same workout
+# recorded by different devices may differ by a few seconds).
 DUPLICATE_WINDOW_S = 120
 
 STATUS_IMPORTED = "imported"
@@ -39,7 +39,7 @@ STATUS_ERROR = "error"
 
 @dataclass(frozen=True)
 class ImportResult:
-    """Resultado da tentativa de importação de um arquivo FIT avulso."""
+    """Result of one standalone FIT import attempt."""
 
     source: Path
     status: str
@@ -51,7 +51,7 @@ class ImportResult:
 
 
 class StandaloneFitImporter:
-    """Copia FITs avulsos para o export e registra as atividades no activities.csv."""
+    """Copy standalone FIT files into the export and record activities in activities.csv."""
 
     def __init__(
         self,
@@ -69,18 +69,18 @@ class StandaloneFitImporter:
         self.existing: List[Dict[str, Any]] = self.reader.read_activities()
 
     def import_files(self, files: List[Path]) -> List[ImportResult]:
-        """Importa cada arquivo, devolvendo um resultado por arquivo."""
+        """Import every file, returning one result per file."""
         return [self._import_one(Path(f)) for f in files]
 
     def _import_one(self, source: Path) -> ImportResult:
         try:
             session = FITReader.read_session_metadata(source)
-        except Exception as exc:  # arquivo corrompido ou não-FIT
-            return ImportResult(source, STATUS_ERROR, message=f"falha ao ler FIT: {exc}")
+        except Exception as exc:  # corrupted or non-FIT file
+            return ImportResult(source, STATUS_ERROR, message=f"failed to read FIT: {exc}")
 
         start_time = session.get("start_time")
         if not isinstance(start_time, datetime):
-            return ImportResult(source, STATUS_ERROR, message="session.start_time ausente no FIT")
+            return ImportResult(source, STATUS_ERROR, message="session.start_time missing from FIT")
         if start_time.tzinfo is None:
             start_time = start_time.replace(tzinfo=timezone.utc)
         start_time = start_time.astimezone(timezone.utc)
@@ -94,8 +94,8 @@ class StandaloneFitImporter:
                 name=duplicate["name"],
                 start_date=duplicate["start_date"],
                 message=(
-                    f"já existe a atividade {duplicate['id']} “{duplicate['name']}” "
-                    f"iniciando em {duplicate['start_date']:%Y-%m-%d %H:%M:%S} UTC"
+                    f"activity {duplicate['id']} “{duplicate['name']}” already exists "
+                    f"starting at {duplicate['start_date']:%Y-%m-%d %H:%M:%S} UTC"
                 ),
             )
 
@@ -105,7 +105,7 @@ class StandaloneFitImporter:
                 source,
                 STATUS_DUPLICATE,
                 activity_id=act_id,
-                message=f"ID derivado {act_id} já presente no activities.csv",
+                message=f"derived ID {act_id} already present in activities.csv",
             )
 
         sport = str(session.get("sport") or "").lower()
@@ -146,7 +146,7 @@ class StandaloneFitImporter:
         )
 
     def _find_duplicate(self, start_time: datetime) -> Optional[Dict[str, Any]]:
-        """Procura atividade existente começando dentro da janela de tolerância."""
+        """Find an existing activity starting within the tolerance window."""
         for record in self.existing:
             other = record["start_date"]
             if other.tzinfo is None:
@@ -170,7 +170,7 @@ class StandaloneFitImporter:
         start_time: datetime,
         target: Path,
     ) -> Dict[str, str]:
-        """Monta a linha do activities.csv usando as colunas resolvidas do export."""
+        """Build the activities.csv row using the export's resolved columns."""
         resolved = self.reader._col_mapping
         values = {
             "id": str(act_id),
@@ -205,7 +205,7 @@ class StandaloneFitImporter:
 
 
 def _name_from_file(source: Path) -> str:
-    """Nome padrão da atividade derivado do nome do arquivo."""
+    """Default activity name derived from the file name."""
     stem = source.stem
     if stem.lower().endswith(".fit"):
         stem = stem[:-4]
@@ -234,7 +234,7 @@ def _describe_session(
     minutes = remainder // 60
     hr_part = ""
     if session.get("avg_heart_rate") is not None:
-        hr_part = f" · FC {int(session['avg_heart_rate'])}/{int(session.get('max_heart_rate') or 0)}"
+        hr_part = f" · HR {int(session['avg_heart_rate'])}/{int(session.get('max_heart_rate') or 0)}"
     return (
         f"“{name}” ({activity_type}) id {act_id} · "
         f"{distance_km:.1f} km · +{ascent} m · {hours}h{minutes:02d}{hr_part}"

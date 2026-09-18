@@ -1,4 +1,4 @@
-"""Gerenciador e compositor de basemaps raster externos."""
+"""External raster basemap manager and compositor."""
 
 import io
 import math
@@ -45,7 +45,7 @@ TILE_PROVIDERS = {
 
 
 def deg2num(lat_deg: float, lon_deg: float, zoom: int) -> Tuple[float, float]:
-    """Converte coordenadas geográficas para coordenadas de tile fracionárias."""
+    """Convert geographic coordinates to fractional tile coordinates."""
     safe_latitude = max(-WEB_MERCATOR_MAX_LATITUDE, min(WEB_MERCATOR_MAX_LATITUDE, lat_deg))
     lat_rad = math.radians(safe_latitude)
     n = 2.0 ** zoom
@@ -55,7 +55,7 @@ def deg2num(lat_deg: float, lon_deg: float, zoom: int) -> Tuple[float, float]:
 
 
 def num2deg(xtile: float, ytile: float, zoom: int) -> Tuple[float, float]:
-    """Converte coordenadas de tile para coordenadas geográficas."""
+    """Convert tile coordinates to geographic coordinates."""
     n = 2.0 ** zoom
     lon_deg = xtile / n * 360.0 - 180.0
     lat_rad = math.atan(math.sinh(math.pi * (1.0 - 2.0 * ytile / n)))
@@ -64,7 +64,7 @@ def num2deg(xtile: float, ytile: float, zoom: int) -> Tuple[float, float]:
 
 
 class TileManager:
-    """Baixa, gerencia cache e costura tiles para compor o fundo de mapas e vídeos."""
+    """Download, cache, and stitch tiles to compose map and video backgrounds."""
 
     def __init__(self, cache_dir: Path = Path("data/cache/tiles")):
         self.cache_dir = Path(cache_dir)
@@ -74,7 +74,7 @@ class TileManager:
         return TILE_PROVIDERS[provider]["url"].format(z=z, x=x, y=y)
 
     def fetch_tile(self, provider: str, z: int, x: int, y: int) -> Optional[Image.Image]:
-        """Recupera tile do cache ou faz download via HTTP com headers padrão."""
+        """Fetch a tile from cache or download it over HTTP with standard headers."""
         if provider not in TILE_PROVIDERS:
             return None
 
@@ -140,18 +140,18 @@ class TileManager:
                              provider: str = "satellite",
                              dim_pct: float = 0.25,
                              detail_scale: int = 1) -> Image.Image:
-        """Gera uma imagem perfeitamente alinhada com as coordenadas geográficas fornecidas."""
+        """Render an image perfectly aligned with the given geographic coordinates."""
         if provider not in TILE_PROVIDERS or provider == "dark_plain":
             return Image.new("RGB", (target_w, target_h), color="#080c14")
 
-        # 1. Calcular nível de zoom ótimo. High detail deliberately fetches
+        # 1. Compute the optimal zoom level. High detail deliberately fetches
         # one additional zoom level (4x source pixels) before downsampling.
         zoom = self.optimal_zoom(
             min_lon, min_lat, max_lon, max_lat,
             target_w, target_h, detail_scale,
         )
 
-        # 2. Coordenadas de tiles
+        # 2. Tile coordinates
         x0_f, y0_f = deg2num(max_lat, min_lon, zoom)
         x1_f, y1_f = deg2num(min_lat, max_lon, zoom)
 
@@ -190,7 +190,7 @@ class TileManager:
                 f"({fetched_tiles}/{expected_tiles} tiles available)"
             )
 
-        # 4. Recortar exatamente os limites geográficos
+        # 4. Crop exactly to the geographic bounds
         crop_x0 = int((x0_f - t_x0) * 256)
         crop_y0 = int((y0_f - t_y0) * 256)
         crop_x1 = int((x1_f - t_x0) * 256)
@@ -202,7 +202,7 @@ class TileManager:
         cropped = stitched.crop((crop_x0, crop_y0, crop_x0 + crop_w, crop_y0 + crop_h))
         resized = cropped.resize((target_w, target_h), Image.Resampling.LANCZOS)
 
-        # 5. Aplicar escurecimento suave para manter a legibilidade máxima do traçado da atividade
+        # 5. Apply a soft dim to keep the activity trace highly legible
         if dim_pct > 0.0:
             enhancer = ImageEnhance.Brightness(resized)
             resized = enhancer.enhance(1.0 - dim_pct)

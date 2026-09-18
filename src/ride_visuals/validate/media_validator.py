@@ -1,4 +1,4 @@
-"""Validação de arquivos de vídeo MP4 e conformidade com padrões de mídia."""
+"""Validation of MP4 video files and compliance with media standards."""
 
 import json
 import shutil
@@ -9,19 +9,19 @@ from PIL import Image
 
 
 class MediaValidator:
-    """Valida duração, resolução, codecs (H.264; AAC opcional) e flag faststart de vídeos MP4."""
+    """Validate duration, resolution, codecs (H.264; optional AAC), and faststart flag of MP4 videos."""
 
     @staticmethod
     def validate_video(file_path: Path) -> Dict[str, Any]:
         file_path = Path(file_path)
         if not file_path.exists():
-            return {"valid": False, "error": f"Arquivo não encontrado: {file_path}"}
+            return {"valid": False, "error": f"File not found: {file_path}"}
 
         ffprobe_bin = shutil.which("ffprobe")
         if not ffprobe_bin:
             # Never report an unvalidated file as valid: callers read geometry
             # fields that an ffprobe-less check cannot provide.
-            return {"valid": False, "error": "ffprobe não disponível para validar o vídeo."}
+            return {"valid": False, "error": "ffprobe is not available to validate the video."}
 
         cmd = [
             ffprobe_bin,
@@ -36,14 +36,14 @@ class MediaValidator:
             res = subprocess.run(cmd, capture_output=True, text=True, check=True)
             info = json.loads(res.stdout)
         except Exception as e:
-            return {"valid": False, "error": f"Falha ao executar ffprobe: {e}"}
+            return {"valid": False, "error": f"Failed to run ffprobe: {e}"}
 
         streams = info.get("streams", [])
         video_streams = [s for s in streams if s.get("codec_type") == "video"]
         audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
 
         if not video_streams:
-            return {"valid": False, "error": "Nenhum stream de vídeo encontrado."}
+            return {"valid": False, "error": "No video stream found."}
 
         v_stream = video_streams[0]
         v_codec = v_stream.get("codec_name")
@@ -55,8 +55,8 @@ class MediaValidator:
         has_audio = len(audio_streams) > 0
         a_codec = audio_streams[0].get("codec_name") if has_audio else None
 
-        # Checar se moov atom está no início (faststart)
-        # Faststart é padrão se os primeiros 100KB contêm b"moov"
+        # Check whether the moov atom is at the start (faststart)
+        # Faststart is the default when the first 100KB contain b"moov"
         with open(file_path, "rb") as f:
             header_bytes = f.read(102400)
             has_faststart = b"moov" in header_bytes
@@ -110,7 +110,7 @@ class MediaValidator:
                 has_transparency = alpha_extrema[0] < 255
                 width, height = image.size
         except Exception as exc:
-            return {"valid": False, "error": f"Falha ao abrir PNG: {exc}"}
+            return {"valid": False, "error": f"Failed to open PNG: {exc}"}
         supported_dimensions = {(1920, 1080), (1080, 1920), (3840, 2160), (960, 320), (320, 640)}
         if "_preview" in file_path.stem:
             supported_dimensions = supported_dimensions | {(960, 540), (540, 960)}
@@ -131,7 +131,7 @@ class MediaValidator:
         file_path = Path(file_path)
         ffprobe_bin = shutil.which("ffprobe")
         if not ffprobe_bin:
-            return {"valid": False, "error": "ffprobe não disponível."}
+            return {"valid": False, "error": "ffprobe is not available."}
         cmd = [
             ffprobe_bin, "-v", "quiet", "-print_format", "json",
             "-show_format", "-show_streams", str(file_path),
@@ -141,7 +141,7 @@ class MediaValidator:
             info = json.loads(res.stdout)
             stream = next(s for s in info.get("streams", []) if s.get("codec_type") == "video")
         except Exception as exc:
-            return {"valid": False, "error": f"Falha ao executar ffprobe: {exc}"}
+            return {"valid": False, "error": f"Failed to run ffprobe: {exc}"}
 
         codec = stream.get("codec_name")
         pixel_format = stream.get("pix_fmt", "")

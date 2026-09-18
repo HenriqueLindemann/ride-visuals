@@ -1,4 +1,4 @@
-"""Leitor robusto de activities.csv com suporte multi-idioma (PT/EN) e parsing de datas."""
+"""Robust activities.csv reader with multi-language (PT/EN) support and date parsing."""
 
 import re
 from datetime import datetime, timezone
@@ -24,21 +24,21 @@ EN_MONTHS = {
 
 
 def parse_flexible_date(s: Any) -> Optional[datetime]:
-    """Converte strings de data em diversos formatos (PT, EN, ISO) para datetime UTC."""
+    """Convert date strings in various formats (PT, EN, ISO) to a UTC datetime."""
     if s is None or pd.isna(s):
         return None
     s = str(s).strip()
     if not s:
         return None
 
-    # Formato PT: "23 de ago. de 2024, 07:18:50" ou "23 de agosto de 2024 07:18:50"
+    # PT format: "23 de ago. de 2024, 07:18:50" or "23 de agosto de 2024 07:18:50"
     m_pt = re.search(r'(\d{1,2})\s+de\s+([a-zç]+)\.?\s+de\s+(\d{4}),?\s+(\d{1,2}):(\d{2}):(\d{2})', s, re.IGNORECASE)
     if m_pt:
         day, mon_str, year, hr, mn, sc = m_pt.groups()
         mon = PT_MONTHS.get(mon_str.lower()[:3], 1)
         return datetime(int(year), mon, int(day), int(hr), int(mn), int(sc), tzinfo=timezone.utc)
 
-    # Formato EN: "Aug 23, 2024, 7:18:50 PM" ou "23 Aug 2024, 07:18:50"
+    # EN format: "Aug 23, 2024, 7:18:50 PM" or "23 Aug 2024, 07:18:50"
     m_en = re.search(
         r'([a-z]+)\s+(\d{1,2}),?\s+(\d{4}),?\s+(\d{1,2}):(\d{2}):(\d{2})\s*([ap]m)?',
         s,
@@ -55,7 +55,7 @@ def parse_flexible_date(s: Any) -> Optional[datetime]:
         mon = EN_MONTHS.get(mon_str.lower()[:3], 1)
         return datetime(int(year), mon, int(day), hour, int(mn), int(sc), tzinfo=timezone.utc)
 
-    # Formato ISO ou padrão pandas
+    # ISO format or pandas default
     try:
         dt = pd.to_datetime(s, utc=True)
         if pd.notna(dt):
@@ -67,27 +67,27 @@ def parse_flexible_date(s: Any) -> Optional[datetime]:
 
 
 def parse_float_safe(val: Any) -> Optional[float]:
-    """Converte números com vírgula ou ponto decimal para float de forma segura."""
+    """Convert numbers with comma or dot decimal separators to float safely."""
     if val is None or pd.isna(val):
         return None
     s = str(val).strip().replace(" ", "")
     if not s or s.lower() == "nan" or s.lower() == "none":
         return None
     try:
-        # Troca vírgula por ponto
+        # Replace comma with dot
         return float(s.replace(",", "."))
     except ValueError:
         return None
 
 
 def parse_int_safe(val: Any) -> Optional[int]:
-    """Converte inteiros de forma segura."""
+    """Convert integers safely."""
     f = parse_float_safe(val)
     return int(round(f)) if f is not None else None
 
 
 class CSVActivityReader:
-    """Leitor semântico para o activities.csv do export de atividades."""
+    """Semantic reader for the activity export's activities.csv."""
 
     COLUMN_MAPS = {
         "id": ["Activity ID", "ID da atividade", "id"],
@@ -114,7 +114,7 @@ class CSVActivityReader:
     def __init__(self, csv_path: Path):
         self.csv_path = Path(csv_path)
         if not self.csv_path.exists():
-            raise FileNotFoundError(f"Arquivo CSV não encontrado: {csv_path}")
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
         self.df = pd.read_csv(self.csv_path, low_memory=False)
         self._col_mapping = self._resolve_columns()
 
@@ -130,7 +130,7 @@ class CSVActivityReader:
         return resolved
 
     def read_activities(self) -> List[Dict[str, Any]]:
-        """Lê todas as atividades do CSV em dicionários padronizados."""
+        """Read every activity from the CSV into standardized dictionaries."""
         records = []
         for _, row in self.df.iterrows():
             def get_val(canonical: str) -> Any:
@@ -147,12 +147,9 @@ class CSVActivityReader:
                 continue
 
             dist_raw = parse_float_safe(get_val("distance")) or 0.0
-            # activity export em CSV traz distância em metros ou km dependendo do export (geralmente km ou m)
-            # Se menor que 1000 em uma pedalada longa de 50km, pode ser km.
-            # Some localized exports store distance in km while others use meters.
-            # Verificamos pelo contexto do export da conta.
-            # No export de atividades, "Distância" na UI é km, mas no CSV é km (ex: 28,4) ou m (ex: 28400).
-            # Vamos checar se o número é pequeno (< 500) -> assumir km e converter para m, ou vice-versa.
+            # CSV summary distance is in km in some exports and in meters in
+            # others, depending on the export language. Keep the raw value; the
+            # pipeline interprets it as kilometers when no GPS stream is available.
 
             elev_raw = parse_float_safe(get_val("elevation")) or 0.0
             elapsed_raw = parse_int_safe(get_val("elapsed_time")) or 0

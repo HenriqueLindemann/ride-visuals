@@ -29,7 +29,7 @@ from ride_visuals.selection import ActivitySelection
 
 
 class MapGenerator:
-    """Gera visualizações cartográficas de rotas, densidade e gradientes de esforço com basemaps."""
+    """Render cartographic visualizations of routes, density, and effort gradients with basemaps."""
 
     OVERVIEW_CONTENT_RECT = (0.08, 0.06, 0.84, 0.78)
     DENSITY_CONTENT_RECT = (0.08, 0.04, 0.84, 0.80)
@@ -137,7 +137,7 @@ class MapGenerator:
         )
 
     def load_all_tracks(self, month_filter: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Carrega todas as trajetórias do catálogo."""
+        """Load every trajectory from the catalog."""
         con = duckdb.connect(str(self.catalog_db_path), read_only=True)
         where, parameters = self.selection.sql()
         query = f"SELECT id, name, start_date, distance_m, elevation_gain_m FROM activities{where} ORDER BY start_date"
@@ -201,7 +201,7 @@ class MapGenerator:
         """Render the selected routes with a 1:1 map scale."""
         tracks = self.load_all_tracks()
         if not tracks:
-            raise ValueError("Nenhuma rota carregada para o mapa overview.")
+            raise ValueError("No routes loaded for the overview map.")
 
         base_tag = f"_{basemap}" if basemap != "dark" else ""
         style_tag = f"_{route_style}" if route_style != "orange" else ""
@@ -220,7 +220,7 @@ class MapGenerator:
         fig = plt.figure(figsize=(12, 12), facecolor=bg_color)
         ax = fig.add_axes([0.0, 0.0, 1.0, 1.0], facecolor=bg_color)
 
-        # Inserir basemap raster se solicitado
+        # Insert the raster basemap when requested
         if basemap in TILE_PROVIDERS:
             min_lon, min_lat = unproject_mercator(x_min_v, y_min_v)
             max_lon, max_lat = unproject_mercator(x_max_v, y_max_v)
@@ -272,10 +272,10 @@ class MapGenerator:
     def render_heatmap(self, out_path: Optional[Path] = None, month: Optional[str] = None,
                        dpi: int = 300, basemap: str = "dark", route_style: str = "orange",
                        map_detail: str = "standard") -> Path:
-        """Gera um mapa de calor / densidade com ampla separação superior."""
+        """Render a heatmap / density map with generous top separation."""
         tracks = self.load_all_tracks(month_filter=month)
         if not tracks:
-            raise ValueError(f"Nenhuma rota para heatmap (filtro: {month}).")
+            raise ValueError(f"No routes for the heatmap (filter: {month}).")
 
         month_label = f"_{month}" if month else ""
         base_tag = f"_{basemap}" if basemap != "dark" else ""
@@ -337,10 +337,10 @@ class MapGenerator:
 
     def render_effort_map(self, out_path: Optional[Path] = None, dpi: int = 300,
                           basemap: str = "dark", map_detail: str = "standard") -> Path:
-        """Gera o mapa colorido ponto a ponto pelas zonas cardíacas de esforço (Z1 a Z5)."""
+        """Render the map colored point by point by heart-rate effort zones (Z1 to Z5)."""
         tracks = self.load_all_tracks()
         if not tracks:
-            raise ValueError("Nenhuma rota carregada para o mapa de esforço.")
+            raise ValueError("No routes loaded for the effort map.")
 
         base_tag = f"_{basemap}" if basemap != "dark" else ""
         detail_tag = "_map-high" if map_detail == "high" else ""

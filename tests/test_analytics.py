@@ -1,4 +1,4 @@
-"""Testes unitários para cálculos de analytics esportivo."""
+"""Unit tests for sports analytics computations."""
 
 import unittest
 import numpy as np
@@ -16,7 +16,7 @@ from ride_visuals.analytics.climbs import ClimbAnalyzer
 class TestAnalytics(unittest.TestCase):
     def test_hr_zones_distribution(self):
         profile = HRZoneProfile(resting_hr=50, max_hr=190)
-        # 100 segundos em Z2 (140 bpm) e 100 segundos em Z4 (170 bpm)
+        # 100 seconds in Z2 (140 bpm) and 100 seconds in Z4 (170 bpm)
         hrs = np.array([140.0] * 100 + [170.0] * 100)
         dist = profile.calculate_time_in_zones(hrs, dt_seconds=1.0)
 
@@ -53,10 +53,10 @@ class TestAnalytics(unittest.TestCase):
 
         res = DriftAnalyzer.calculate_aerobic_drift(speed, hr, min_points=500)
         self.assertTrue(res["valid"])
-        self.assertGreater(res["drift_pct"], 5.0)  # Houve desacoplamento
+        self.assertGreater(res["drift_pct"], 5.0)  # Decoupling occurred
 
     def test_climb_vam(self):
-        # Subida de 100m em 600s (10 min) -> VAM = (100 / 600) * 3600 = 600 m/h
+        # 100m climb over 600s (10 min) -> VAM = (100 / 600) * 3600 = 600 m/h
         alts = np.linspace(200, 300, 60)
         times = np.linspace(0, 600, 60)
 

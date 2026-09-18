@@ -164,8 +164,8 @@ def _build_render_spec(
     )
     if args.background_video and not supports_background:
         print(
-            "[Aviso] --background-video se aplica apenas a vídeos clean/telemetry/minimal; "
-            "o overlay permanece transparente."
+            "[Warning] --background-video only applies to clean/telemetry/minimal videos; "
+            "the overlay stays transparent."
         )
     background_video = (
         Path(args.background_video)
@@ -244,7 +244,7 @@ def _apply_basemap(
         / "backgrounds"
         / f"activity_{args.activity_id}_{args.basemap}_{args.aspect.replace(':', '_')}.png"
     )
-    print(f"[Basemap] Gerando fundo {args.basemap} georreferenciado...")
+    print(f"[Basemap] Rendering georeferenced {args.basemap} background...")
     safe_left_px, safe_right_px = safe_insets(preset.canvas.presentation)
     render_activity_basemap(
         spec.points,
@@ -296,7 +296,7 @@ def _render_with_engine(
             else OVERLAY_COMPOSITIONS[args.video_type]
         )
         print(
-            f"[Overlay] Renderizando {output_extension.upper()} transparente "
+            f"[Overlay] Rendering transparent {output_extension.upper()} "
             f"(locale: {context.runtime.locale}, theme: {context.runtime.theme})..."
         )
         if output_extension == "png":
@@ -313,11 +313,11 @@ def _render_with_engine(
                 spec_path=paths.spec_path,
                 composition=comp,
             )
-        print(f"[Overlay] Saída transparente gerada: {output}")
+        print(f"[Overlay] Transparent output generated: {output}")
         return
 
     print(
-        f"[Vídeo] Renderizando com engine visual (locale: {context.runtime.locale}, "
+        f"[Video] Rendering with visual engine (locale: {context.runtime.locale}, "
         f"theme: {context.runtime.theme}, preview: {args.preview})..."
     )
     composition = (
@@ -332,9 +332,9 @@ def _render_with_engine(
         keyframes_dir=paths.keyframes_dir,
         composition=composition,
     )
-    print(f"[Vídeo] Gerado: {output}")
+    print(f"[Video] Generated: {output}")
     if paths.keyframes_dir:
-        print(f"[Keyframes] {len(keyframes)} frames em: {paths.keyframes_dir}")
+        print(f"[Keyframes] {len(keyframes)} frames at: {paths.keyframes_dir}")
 
 
 def render_activity(context: VideoCommandContext) -> None:
@@ -344,8 +344,8 @@ def render_activity(context: VideoCommandContext) -> None:
     parquet_path = context.runtime.streams_dir / f"{args.activity_id}.parquet"
     if not parquet_path.exists():
         print(
-            f"[Erro] Stream Parquet para atividade {args.activity_id} "
-            f"não encontrado em {parquet_path}"
+            f"[Error] Parquet stream for activity {args.activity_id} "
+            f"not found at {parquet_path}"
         )
         raise SystemExit(1)
 
@@ -377,7 +377,7 @@ def render_activity(context: VideoCommandContext) -> None:
         )
     engine_name = "remotion" if args.engine == "auto" else args.engine
     if engine_name != "remotion":
-        raise ValueError(f"Engine de atividade não suportado: {engine_name}")
+        raise ValueError(f"Unsupported activity engine: {engine_name}")
 
     paths = _activity_paths(context, output_extension=output_extension)
     spec = _build_render_spec(context, preset, parquet_path)

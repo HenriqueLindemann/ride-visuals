@@ -1,4 +1,4 @@
-"""Testes unitários para derivação de métricas de telemetria."""
+"""Unit tests for telemetry metric derivation."""
 
 import unittest
 from datetime import datetime, timezone, timedelta
@@ -33,7 +33,7 @@ class TestMetrics(unittest.TestCase):
             TrackPoint(
                 timestamp=t0 + timedelta(seconds=10),
                 lat=10.0005,
-                lon=20.0, # deslocamento ~55m para o norte
+                lon=20.0, # ~55m northward displacement
                 altitude=202.0,
             ),
         ]
