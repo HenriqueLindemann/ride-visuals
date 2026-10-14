@@ -226,3 +226,44 @@ def test_pipeline_only_ids_ingests_only_imported(
     ids = [row[0] for row in con.execute("SELECT id FROM activities").fetchall()]
     con.close()
     assert ids == [act_id]
+
+
+def test_import_bootstraps_archive_without_strava_export(
+    tmp_path: Path, fit_file: Path, fake_session
+):
+    fake_session()
+    fresh_bulk = tmp_path / "fresh_bulk"
+    importer = StandaloneFitImporter(bulk_dir=fresh_bulk)
+    results = importer.import_files([fit_file])
+
+    assert len(results) == 1
+    assert results[0].status == "imported"
+    assert results[0].activity_type == "Ride"
+    assert (fresh_bulk / "activities.csv").exists()
+    assert (fresh_bulk / "activities" / f"{results[0].activity_id}.fit").exists()
+
+    records = CSVActivityReader(fresh_bulk / "activities.csv").read_activities()
+    assert len(records) == 1
+    assert records[0]["id"] == results[0].activity_id
+
+
+def test_import_accepts_standalone_gpx_file(export_dir: Path, tmp_path: Path):
+    gpx_file = tmp_path / "Evening_Gravel.gpx"
+    gpx_file.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk><name>Evening Gravel</name><trkseg>
+    <trkpt lat="49.4300" lon="7.7500"><ele>250.0</ele><time>2026-09-01T17:00:00Z</time></trkpt>
+    <trkpt lat="49.4350" lon="7.7550"><ele>280.0</ele><time>2026-09-01T17:02:00Z</time></trkpt>
+  </trkseg></trk>
+</gpx>
+""",
+        encoding="utf-8",
+    )
+    importer = StandaloneFitImporter(bulk_dir=export_dir.parent)
+    results = importer.import_files([gpx_file])
+
+    assert len(results) == 1
+    assert results[0].status == "imported"
+    assert results[0].name == "Evening Gravel"
+    assert (export_dir / "activities" / f"{results[0].activity_id}.gpx").exists()

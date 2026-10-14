@@ -38,7 +38,7 @@ class TestAnalytics(unittest.TestCase):
 
     def test_trimp_calculation(self):
         analyzer = TRIMPAnalyzer(resting_hr=50, max_hr=190, gender="male")
-        # 60 minutos em 150 bpm (delta_hr = (150-50)/(190-50) = 100/140 = 0.714)
+        # 60 minutes at 150 bpm (delta_hr = (150-50)/(190-50) = 100/140 = 0.714)
         hrs = np.array([150.0] * 60)
         trimp = analyzer.calculate_activity_trimp(hrs, duration_min=60.0)
 
@@ -46,8 +46,8 @@ class TestAnalytics(unittest.TestCase):
         self.assertLess(trimp, 180.0)
 
     def test_aerobic_drift(self):
-        # 1a metade: 8 m/s a 140 bpm (eff = 8/140 = 0.0571)
-        # 2a metade: 7 m/s a 145 bpm (eff = 7/145 = 0.0482) -> drift positivo
+        # First half: 8 m/s at 140 bpm (eff = 8/140 = 0.0571)
+        # Second half: 7 m/s at 145 bpm (eff = 7/145 = 0.0482) -> positive drift
         speed = np.array([8.0] * 500 + [7.0] * 500)
         hr = np.array([140.0] * 500 + [145.0] * 500)
 

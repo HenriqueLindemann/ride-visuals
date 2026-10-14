@@ -18,6 +18,26 @@ class TCXReader:
         return tag.split("}", 1)[1] if "}" in tag else tag
 
     @classmethod
+    def read_activity_metadata(cls, file_path: Path) -> Dict[str, Any]:
+        """Extract activity-level metadata (sport, name) from a TCX file."""
+        raw_bytes = Path(file_path).read_bytes()
+        if file_path.name.endswith(".gz") or raw_bytes[:2] == b"\x1f\x8b":
+            raw_bytes = gzip.decompress(raw_bytes)
+        raw_bytes = raw_bytes.lstrip()
+        info: Dict[str, Any] = {}
+        try:
+            root = ET.fromstring(raw_bytes)
+        except Exception:
+            return info
+        for elem in root.iter():
+            tag = cls._strip_ns(elem.tag)
+            if tag == "Activity" and elem.get("Sport") and "sport" not in info:
+                info["sport"] = elem.get("Sport", "").strip()
+            elif tag == "Notes" and elem.text and elem.text.strip() and "name" not in info:
+                info["name"] = elem.text.strip()
+        return info
+
+    @classmethod
     def read_tcx(cls, file_path: Path) -> Tuple[List[TrackPoint], Dict[str, Any]]:
         file_path = Path(file_path)
         if not file_path.exists():

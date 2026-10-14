@@ -57,3 +57,4 @@ renderer/public/backgrounds/
 
 # Local showcase generator
 showcase/*.local.sh
+showcase/film/

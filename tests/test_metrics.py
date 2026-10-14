@@ -17,7 +17,7 @@ class TestMetrics(unittest.TestCase):
         self.assertLess(dist, 120000)
 
         bearing = calculate_bearing(lat1, lon1, lat2, lon2)
-        # Sudoeste ~ 210 a 240 graus
+        # Southwest ~ 210 to 240 degrees
         self.assertGreater(bearing, 200)
         self.assertLess(bearing, 250)
 
@@ -44,7 +44,7 @@ class TestMetrics(unittest.TestCase):
         self.assertGreater(enriched[1].distance_m, 50.0)
         self.assertGreater(enriched[1].speed_mps, 4.0)
         self.assertEqual(enriched[1].provenance_speed, "derived")
-        self.assertAlmostEqual(enriched[1].bearing_deg, 0.0, delta=2.0) # Norte
+        self.assertAlmostEqual(enriched[1].bearing_deg, 0.0, delta=2.0) # North
 
 
 if __name__ == "__main__":

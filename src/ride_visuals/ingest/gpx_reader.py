@@ -19,6 +19,28 @@ class GPXReader:
         return tag.split("}", 1)[1] if "}" in tag else tag
 
     @classmethod
+    def read_activity_metadata(cls, file_path: Path) -> Dict[str, Any]:
+        """Extract activity-level metadata (name, sport) from a GPX file."""
+        raw_bytes = Path(file_path).read_bytes()
+        if file_path.name.endswith(".gz") or raw_bytes[:2] == b"\x1f\x8b":
+            raw_bytes = gzip.decompress(raw_bytes)
+        raw_bytes = raw_bytes.lstrip()
+        info: Dict[str, Any] = {}
+        try:
+            root = ET.fromstring(raw_bytes)
+        except Exception:
+            return info
+        for elem in root.iter():
+            if cls._strip_ns(elem.tag) == "trk":
+                for child in elem:
+                    c_tag = cls._strip_ns(child.tag)
+                    if c_tag == "name" and child.text and child.text.strip():
+                        info.setdefault("name", child.text.strip())
+                    elif c_tag == "type" and child.text and child.text.strip():
+                        info.setdefault("sport", child.text.strip())
+        return info
+
+    @classmethod
     def read_gpx(cls, file_path: Path) -> Tuple[List[TrackPoint], Dict[str, Any]]:
         file_path = Path(file_path)
         if not file_path.exists():

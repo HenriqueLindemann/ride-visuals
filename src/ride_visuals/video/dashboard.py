@@ -134,10 +134,10 @@ class DashboardPainter:
         # Label
         draw.text((x + pad_x, lbl_y), label.upper(), fill=theme.text_muted, font=f_label)
 
-        # Valor
+        # Value
         draw.text((x + pad_x, val_y), value, fill=color or theme.text_primary, font=f_val)
 
-        # Unidade
+        # Unit
         if unit:
             val_w = int(round(f_val.getlength(value)))
             draw.text((x + pad_x + val_w + 8 * scale, val_y + (10 if is_mobile else 8) * scale),

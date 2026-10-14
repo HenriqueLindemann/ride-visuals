@@ -676,7 +676,7 @@ class CollectionVideoRenderer:
                     presentation=presentation,
                 )
 
-                # Salvar keyframe
+                # Save keyframe
                 if keyframes_dir:
                     for pct_label, k_idx in keyframe_indices.items():
                         if frame_idx == k_idx:

@@ -165,7 +165,7 @@ class TileManager:
         stitch_h = num_tiles_y * 256
         stitched = Image.new("RGB", (stitch_w, stitch_h), color="#080c14")
 
-        # 3. Costurar tiles
+        # 3. Stitch tiles
         fetched_tiles = 0
         expected_tiles = num_tiles_x * num_tiles_y
         for tx in range(t_x0, t_x1):

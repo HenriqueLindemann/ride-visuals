@@ -1,9 +1,9 @@
-"""Import standalone FIT files (outside the Strava export) into the collection.
+"""Import standalone activity files (.fit, .tcx, .gpx) into the collection.
 
-Each file is copied into the export's ``activities/`` folder and recorded as
-a new row in ``activities.csv``, following the same flow as the export's
-original activities. The ID is derived from the start time (epoch in
-milliseconds), guaranteeing uniqueness without colliding with Strava IDs.
+Each file is copied into ``activities/`` and recorded as a new row in
+``activities.csv`` (creating both when no Strava export is present). The ID is
+derived from the start time (epoch in milliseconds), guaranteeing uniqueness
+without colliding with Strava IDs.
 """
 
 from __future__ import annotations
@@ -17,16 +17,56 @@ from typing import Any, Dict, List, Optional
 
 from ride_visuals.ingest.csv_reader import CSVActivityReader
 from ride_visuals.ingest.fit_reader import FITReader
-from ride_visuals.ingest.pipeline import find_export_root
+from ride_visuals.ingest.gpx_reader import GPXReader
+from ride_visuals.ingest.metrics import enrich_trackpoints
+from ride_visuals.ingest.pipeline import (
+    ACTIVITY_EXTENSIONS,
+    _strip_activity_suffix,
+    find_export_root,
+    summarize_activity_stream,
+)
+from ride_visuals.ingest.tcx_reader import TCXReader
 
-# FIT sport -> type label used in the pt-BR export.
 SPORT_TYPE_MAP = {
     "cycling": "Pedalada",
+    "biking": "Pedalada",
     "running": "Corrida",
     "walking": "Caminhada",
     "hiking": "Caminhada",
     "swimming": "Natação",
 }
+
+SPORT_TYPE_MAP_EN = {
+    "cycling": "Ride",
+    "biking": "Ride",
+    "running": "Run",
+    "walking": "Walk",
+    "hiking": "Hike",
+    "swimming": "Swim",
+}
+
+DEFAULT_CSV_HEADER = [
+    "Activity ID",
+    "Activity Date",
+    "Activity Name",
+    "Activity Type",
+    "Elapsed Time",
+    "Distance",
+    "Distance.1",
+    "Elevation Gain",
+    "Moving Time",
+    "Max Speed",
+    "Average Speed",
+    "Max Heart Rate",
+    "Average Heart Rate",
+    "Relative Effort",
+    "Max Watts",
+    "Average Watts",
+    "Max Temperature",
+    "Average Temperature",
+    "Activity Gear",
+    "Filename",
+]
 
 # Tolerance for treating two activities as the same (the same workout
 # recorded by different devices may differ by a few seconds).
@@ -39,7 +79,7 @@ STATUS_ERROR = "error"
 
 @dataclass(frozen=True)
 class ImportResult:
-    """Result of one standalone FIT import attempt."""
+    """Result of one standalone activity import attempt."""
 
     source: Path
     status: str
@@ -51,7 +91,7 @@ class ImportResult:
 
 
 class StandaloneFitImporter:
-    """Copy standalone FIT files into the export and record activities in activities.csv."""
+    """Copy standalone activity files (.fit, .tcx, .gpx) into the collection."""
 
     def __init__(
         self,
@@ -61,12 +101,64 @@ class StandaloneFitImporter:
         dry_run: bool = False,
     ):
         self.bulk_dir = Path(bulk_dir)
-        self.csv_file, self.activities_dir = find_export_root(self.bulk_dir)
         self.name = name
         self.activity_type = activity_type
         self.dry_run = dry_run
-        self.reader = CSVActivityReader(self.csv_file)
-        self.existing: List[Dict[str, Any]] = self.reader.read_activities()
+        try:
+            self.csv_file, self.activities_dir = find_export_root(self.bulk_dir)
+            self.reader: Optional[CSVActivityReader] = CSVActivityReader(self.csv_file)
+            self.existing: List[Dict[str, Any]] = self.reader.read_activities()
+        except FileNotFoundError:
+            self.csv_file = self.bulk_dir / "activities.csv"
+            self.activities_dir = self.bulk_dir / "activities"
+            self.existing = []
+            if self.dry_run:
+                self.reader = None
+            else:
+                self.activities_dir.mkdir(parents=True, exist_ok=True)
+                with self.csv_file.open("w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f, lineterminator="\n")
+                    writer.writerow(DEFAULT_CSV_HEADER)
+                self.reader = CSVActivityReader(self.csv_file)
+
+    def _sport_label(self, sport: str) -> str:
+        is_pt = self.reader is not None and "ID da atividade" in self.reader.df.columns
+        mapping = SPORT_TYPE_MAP if is_pt else SPORT_TYPE_MAP_EN
+        return mapping.get(sport, sport.capitalize() or ("Pedalada" if is_pt else "Ride"))
+
+    @staticmethod
+    def _read_metadata(source: Path) -> Dict[str, Any]:
+        lower = source.name.lower()
+        if ".fit" in lower:
+            return FITReader.read_session_metadata(source)
+        if ".tcx" in lower:
+            points, meta = TCXReader.read_tcx(source)
+            meta = {**meta, **TCXReader.read_activity_metadata(source)}
+        elif ".gpx" in lower:
+            points, meta = GPXReader.read_gpx(source)
+            meta = {**meta, **GPXReader.read_activity_metadata(source)}
+        else:
+            return FITReader.read_session_metadata(source)
+
+        if not points:
+            raise ValueError("no GPS points found")
+        enriched = enrich_trackpoints(points)
+        summary = summarize_activity_stream(source, enriched, meta)
+        return {
+            "start_time": summary["start_date"],
+            "sport": meta.get("sport") or "cycling",
+            "name": meta.get("name"),
+            "total_elapsed_time": summary["elapsed_time_s"],
+            "total_timer_time": summary["moving_time_s"],
+            "total_distance": summary["distance_m"],
+            "total_ascent": summary["elevation_gain_m"],
+            "avg_speed": summary["avg_speed_mps"],
+            "max_speed": summary["max_speed_mps"],
+            "avg_heart_rate": summary["avg_heart_rate"],
+            "max_heart_rate": summary["max_heart_rate"],
+            "avg_temperature": summary["temperature_avg"],
+            "max_temperature": summary["temperature_max"],
+        }
 
     def import_files(self, files: List[Path]) -> List[ImportResult]:
         """Import every file, returning one result per file."""
@@ -74,9 +166,9 @@ class StandaloneFitImporter:
 
     def _import_one(self, source: Path) -> ImportResult:
         try:
-            session = FITReader.read_session_metadata(source)
-        except Exception as exc:  # corrupted or non-FIT file
-            return ImportResult(source, STATUS_ERROR, message=f"failed to read FIT: {exc}")
+            session = self._read_metadata(source)
+        except Exception as exc:
+            return ImportResult(source, STATUS_ERROR, message=f"failed to read activity: {exc}")
 
         start_time = session.get("start_time")
         if not isinstance(start_time, datetime):
@@ -109,8 +201,8 @@ class StandaloneFitImporter:
             )
 
         sport = str(session.get("sport") or "").lower()
-        activity_type = self.activity_type or SPORT_TYPE_MAP.get(sport, sport.capitalize() or "Other")
-        name = self.name or _name_from_file(source)
+        activity_type = self.activity_type or self._sport_label(sport)
+        name = self.name or session.get("name") or _name_from_file(source)
 
         if self.dry_run:
             return ImportResult(
@@ -156,7 +248,12 @@ class StandaloneFitImporter:
         return None
 
     def _copy_file(self, source: Path, act_id: int) -> Path:
-        suffix = ".fit.gz" if source.name.lower().endswith(".fit.gz") else ".fit"
+        lower = source.name.lower()
+        suffix = ".fit"
+        for ext in ACTIVITY_EXTENSIONS:
+            if lower.endswith(ext):
+                suffix = ext
+                break
         target = self.activities_dir / f"{act_id}{suffix}"
         shutil.copyfile(source, target)
         return target
@@ -206,9 +303,7 @@ class StandaloneFitImporter:
 
 def _name_from_file(source: Path) -> str:
     """Default activity name derived from the file name."""
-    stem = source.stem
-    if stem.lower().endswith(".fit"):
-        stem = stem[:-4]
+    stem = _strip_activity_suffix(source.name)
     return stem.replace("_", " ").replace("-", " ").strip() or source.name
 
 

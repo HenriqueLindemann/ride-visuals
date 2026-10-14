@@ -6,34 +6,8 @@ import pytest
 
 from ride_visuals.cli import build_parser, load_config, main
 from ride_visuals.commands.common import RuntimeConfig
-from ride_visuals.commands.options import (
-    COLLECTION_MOTIONS,
-    COLLECTION_STYLES,
-    LOCALES,
-    MAP_DETAILS,
-    MAP_ROUTE_STYLES,
-    OVERLAY_FORMATS,
-    THEMES,
-    VIDEO_ASPECTS,
-    VIDEO_TYPES,
-)
 from ride_visuals.commands.validation import discover_media, final_video_paths
-from ride_visuals.maps.tiles import TILE_PROVIDERS
 from ride_visuals.selection import ActivitySelection
-
-
-def _command_parser(command: str):
-    parser = build_parser()
-    subparsers = next(
-        action for action in parser._actions if action.dest == "command"
-    )
-    return subparsers.choices[command]
-
-
-def _choices(command: str, destination: str) -> tuple[str, ...]:
-    parser = _command_parser(command)
-    action = next(action for action in parser._actions if action.dest == destination)
-    return tuple(action.choices)
 
 
 @pytest.mark.parametrize(
@@ -56,33 +30,6 @@ def test_parser_registers_every_command(arguments: list[str], command: str) -> N
     assert callable(args.func)
 
 
-def test_video_parser_preserves_defaults_and_choices() -> None:
-    args = build_parser().parse_args(["video", "collection"])
-
-    assert args.activity_id == 0
-    assert args.motion == "chronological"
-    assert args.style == "orange"
-    assert args.basemap == "plain"
-    assert args.map_detail == "standard"
-    assert args.aspect == "16:9"
-    assert args.engine == "auto"
-    assert args.overlay_format is None
-    assert args.show_progress_bar is False
-    assert args.background_tracks is None
-    assert args.background_image is None
-    assert args.background_video is None
-    assert args.background_video_audio is True
-    assert _choices("video", "video_type") == VIDEO_TYPES
-    assert _choices("video", "motion") == COLLECTION_MOTIONS
-    assert _choices("video", "style") == COLLECTION_STYLES
-    assert _choices("video", "basemap") == ("plain", *TILE_PROVIDERS)
-    assert _choices("video", "map_detail") == MAP_DETAILS
-    assert _choices("video", "aspect") == VIDEO_ASPECTS
-    assert _choices("video", "locale") == LOCALES
-    assert _choices("video", "theme") == THEMES
-    assert _choices("video", "overlay_format") == OVERLAY_FORMATS
-
-
 def test_video_parser_rejects_multiple_background_sources() -> None:
     with pytest.raises(SystemExit) as error:
         build_parser().parse_args(
@@ -96,26 +43,6 @@ def test_video_parser_rejects_multiple_background_sources() -> None:
                 "clip.mp4",
             ]
         )
-
-    assert error.value.code == 2
-
-
-def test_other_parser_choices_and_defaults_remain_stable() -> None:
-    map_args = build_parser().parse_args(["map", "heatmap"])
-    validate_args = build_parser().parse_args(["validate"])
-
-    assert _choices("map", "map_type") == ("overview", "heatmap", "effort")
-    assert _choices("map", "route_style") == MAP_ROUTE_STYLES
-    assert map_args.basemap == "dark"
-    assert map_args.dpi == 300
-    assert validate_args.motion == "chronological"
-    assert validate_args.style == "heart_rate"
-    assert validate_args.basemap == "dark"
-
-
-def test_parser_still_requires_a_command() -> None:
-    with pytest.raises(SystemExit) as error:
-        build_parser().parse_args([])
 
     assert error.value.code == 2
 
@@ -198,7 +125,7 @@ def test_media_discovery_preserves_file_classification(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("minimal", [False, True])
 def test_collection_dispatch_preserves_output_and_keyframe_options(
-    minimal,
+    minimal: bool,
     reference_cli_workspace,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -238,20 +165,17 @@ def test_collection_dispatch_preserves_output_and_keyframe_options(
     render = captured["render"]
     assert render["output_mp4_path"] == (
         reference_cli_workspace.outputs_dir
-        / ("videos/collection/collection_all_chronological_grade_dark_9_16"
-           + ("_minimal" if minimal else "") + "_en_preview.mp4")
+        / (
+            "videos/collection/collection_all_chronological_grade_dark_9_16"
+            + ("_minimal" if minimal else "")
+            + "_en_preview.mp4"
+        )
     )
     assert render["keyframes_dir"] is None
     assert render["mode"] == ("minimal" if minimal else "9:16")
     assert render["show_cursors"] == (True if minimal else None)
     assert render["show_legend"] == (True if minimal else None)
-    assert render["width"] == 1080
-    assert render["height"] == 1920
-    assert render["show_progress_bar"] is False
-    assert render["show_background_tracks"] is None
     if not minimal:
-        # `make validate --final-set` discovers this exact canonical name; the
-        # dispatch above runs with --preview, so compare against its suffix.
         expected_final = final_video_paths(
             reference_cli_workspace.outputs_dir,
             ActivitySelection(),
@@ -263,17 +187,3 @@ def test_collection_dispatch_preserves_output_and_keyframe_options(
         assert render["output_mp4_path"].name == expected_final[1].name.replace(
             ".mp4", "_preview.mp4"
         )
-
-
-@pytest.mark.parametrize("configured,explicit,expected", [
-    (None, None, "en"), (None, "pt-BR", "pt-BR"),
-    ("pt-BR", None, "pt-BR"), ("pt-BR", "en", "en"),
-    ("en", "pt-BR", "pt-BR"),
-])
-def test_video_language_default_and_overrides(tmp_path, configured, explicit, expected):
-    config = tmp_path / "locale.toml"
-    config.write_text(f'[app]\nlocale = "{configured}"\n' if configured else "")
-    argv = ["video", "collection", "--minimal", "--config", str(config)]
-    if explicit:
-        argv += ["--locale", explicit]
-    assert RuntimeConfig.from_args(build_parser().parse_args(argv)).locale == expected

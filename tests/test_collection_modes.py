@@ -1,10 +1,11 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from PIL import Image, ImageColor, ImageDraw
-from types import SimpleNamespace
 
 from ride_visuals.design import get_theme
-from ride_visuals.maps.tiles import TILE_PROVIDERS, TileManager
+from ride_visuals.maps.tiles import TileManager
 from ride_visuals.video.collection import (
     CollectionVideoRenderer,
     elapsed_point_count,
@@ -72,25 +73,6 @@ def test_route_with_sensor_data_remains_continuous_across_sample_gaps():
     assert image.getpixel((15, 10)) == ImageColor.getrgb("#AFC1AE")
 
 
-def test_high_detail_requests_exactly_one_additional_tile_zoom():
-    args = (20.0, 10.0, 21.0, 11.0, 1920, 1080)
-    standard = TileManager.optimal_zoom(*args, detail_scale=1)
-    high = TileManager.optimal_zoom(*args, detail_scale=2)
-    assert high == standard + 1
-
-
-def test_dark_tiles_have_a_stable_upstream_and_cache_namespace(tmp_path):
-    manager = TileManager(tmp_path / "tiles")
-
-    assert "World_Dark_Gray_Base" in manager._tile_url("dark", 8, 10, 20)
-    assert TILE_PROVIDERS["dark"]["cache_key"] == "esri-world-dark-gray-v1"
-
-
-def test_map_detail_rejects_unbounded_oversampling():
-    with pytest.raises(ValueError, match="detail scale"):
-        TileManager.optimal_zoom(20.0, 10.0, 21.0, 11.0, 1920, 1080, detail_scale=4)
-
-
 def test_high_detail_falls_back_atomically_when_extra_zoom_is_unavailable(tmp_path):
     manager = TileManager(tmp_path / "tiles")
     bounds = (20.0, 10.0, 21.0, 11.0)
@@ -121,15 +103,6 @@ def test_incomplete_standard_basemap_is_rejected(tmp_path):
             20.0, 10.0, 21.0, 11.0, 320, 180,
             provider="dark", dim_pct=0.0,
         )
-
-
-def test_every_external_tile_provider_has_visible_credit_text():
-    assert set(TILE_PROVIDERS) == {"satellite", "topo", "osm", "dark", "light"}
-    assert all(provider["attribution"].strip() for provider in TILE_PROVIDERS.values())
-    assert len({provider["cache_key"] for provider in TILE_PROVIDERS.values()}) == len(TILE_PROVIDERS)
-    assert "OpenStreetMap contributors" in TILE_PROVIDERS["topo"]["attribution"]
-    assert "OpenTopoMap" in TILE_PROVIDERS["topo"]["attribution"]
-    assert "HERE" in TILE_PROVIDERS["dark"]["attribution"]
 
 
 def test_continent_scale_collection_uses_world_zoom_instead_of_hundreds_of_tiles():

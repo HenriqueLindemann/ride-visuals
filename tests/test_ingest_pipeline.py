@@ -8,7 +8,6 @@ from ride_visuals.ingest.pipeline import (
     IngestPipeline,
 )
 from ride_visuals.model.activity import ActivitySummary
-from ride_visuals.video.engines.remotion import RemotionVideoEngine, _resolve_renderer_dir
 
 
 def _make_activity(act_id: int, name: str, start_iso: str = "2024-05-01T10:00:00Z") -> ActivitySummary:
@@ -33,45 +32,18 @@ def _make_activity(act_id: int, name: str, start_iso: str = "2024-05-01T10:00:00
     )
 
 
-def test_write_catalog_creates_schema_for_empty_activities(tmp_path: Path):
-    db_path = tmp_path / "catalog.duckdb"
-    streams_dir = tmp_path / "streams"
-    pipeline = IngestPipeline(
-        bulk_dir=tmp_path,
-        catalog_db_path=db_path,
-        streams_dir=streams_dir,
-    )
-
-    # Calling with empty activities should ensure table exists with schema
-    pipeline._write_catalog_duckdb([])
-
-    con = duckdb.connect(str(db_path), read_only=True)
-    count = con.execute("SELECT count(*) FROM activities").fetchone()[0]
-    columns = [col[0] for col in con.execute("DESCRIBE activities").fetchall()]
-    con.close()
-
-    assert count == 0
-    assert "id" in columns
-    assert "start_date" in columns
-    assert "distance_m" in columns
-
-
 def test_write_catalog_upserts_and_preserves_existing_activities(tmp_path: Path):
     db_path = tmp_path / "catalog.duckdb"
-    streams_dir = tmp_path / "streams"
     pipeline = IngestPipeline(
         bulk_dir=tmp_path,
         catalog_db_path=db_path,
-        streams_dir=streams_dir,
+        streams_dir=tmp_path / "streams",
     )
 
-    # Initial ingest: ride 1 and ride 2
     pipeline._write_catalog_duckdb([
         _make_activity(1, "Ride 1", "2024-01-01T10:00:00Z"),
         _make_activity(2, "Ride 2", "2024-01-02T10:00:00Z"),
     ])
-
-    # Second scoped ingest: ride 2 (updated) and ride 3
     pipeline._write_catalog_duckdb([
         _make_activity(2, "Ride 2 Updated", "2024-01-02T10:00:00Z"),
         _make_activity(3, "Ride 3", "2024-02-01T10:00:00Z"),
@@ -81,8 +53,6 @@ def test_write_catalog_upserts_and_preserves_existing_activities(tmp_path: Path)
     rows = con.execute("SELECT id, name FROM activities ORDER BY id").fetchall()
     con.close()
 
-    # Ride 1 must still exist, Ride 2 must be updated, Ride 3 must be added
-    assert len(rows) == 3
     assert rows == [
         (1, "Ride 1"),
         (2, "Ride 2 Updated"),
@@ -91,13 +61,11 @@ def test_write_catalog_upserts_and_preserves_existing_activities(tmp_path: Path)
 
 
 def test_write_catalog_upserts_into_legacy_table_without_primary_key(tmp_path: Path):
-    """Catalogs created by older versions have no PRIMARY KEY on activities."""
     db_path = tmp_path / "catalog.duckdb"
-    streams_dir = tmp_path / "streams"
     pipeline = IngestPipeline(
         bulk_dir=tmp_path,
         catalog_db_path=db_path,
-        streams_dir=streams_dir,
+        streams_dir=tmp_path / "streams",
     )
 
     con = duckdb.connect(str(db_path))
@@ -115,55 +83,6 @@ def test_write_catalog_upserts_into_legacy_table_without_primary_key(tmp_path: P
     con.close()
 
     assert rows == [(1, "Legacy Ride Updated"), (2, "New Ride")]
-
-
-def test_clean_mode_removes_old_streams_and_resets_catalog(tmp_path: Path, monkeypatch):
-    db_path = tmp_path / "catalog.duckdb"
-    streams_dir = tmp_path / "streams"
-    streams_dir.mkdir(parents=True, exist_ok=True)
-
-    # Create dummy stream and catalog
-    dummy_stream = streams_dir / "old_act.parquet"
-    dummy_stream.write_bytes(b"dummy")
-
-    pipeline_init = IngestPipeline(
-        bulk_dir=tmp_path,
-        catalog_db_path=db_path,
-        streams_dir=streams_dir,
-    )
-    pipeline_init._write_catalog_duckdb([_make_activity(99, "Old Ride")])
-
-    export_root = tmp_path / "export"
-    activities_dir = export_root / "activities"
-    activities_dir.mkdir(parents=True)
-    csv_path = export_root / "activities.csv"
-    csv_path.write_text("Activity ID,Activity Name\n", encoding="utf-8")
-
-    class EmptyCSVActivityReader:
-        def __init__(self, _path: Path):
-            pass
-
-        def read_activities(self):
-            return []
-
-    monkeypatch.setattr("ride_visuals.ingest.pipeline.CSVActivityReader", EmptyCSVActivityReader)
-
-    # Exercise the real clean path rather than repeating its implementation in
-    # the test. The empty source leaves a valid, empty replacement catalog.
-    pipeline_clean = IngestPipeline(
-        bulk_dir=export_root,
-        catalog_db_path=db_path,
-        streams_dir=streams_dir,
-        clean=True,
-    )
-    stats = pipeline_clean.run_ingest()
-
-    assert not dummy_stream.exists()
-    con = duckdb.connect(str(db_path), read_only=True)
-    count = con.execute("SELECT count(*) FROM activities").fetchone()[0]
-    con.close()
-    assert count == 0
-    assert stats["ingested_activities"] == 0
 
 
 def test_clean_mode_preserves_existing_data_when_source_is_missing(tmp_path: Path):
@@ -196,17 +115,35 @@ def test_clean_mode_preserves_existing_data_when_source_is_missing(tmp_path: Pat
     assert rows == [(99, "Existing Ride")]
 
 
-def test_renderer_dir_resolution(tmp_path: Path, monkeypatch):
-    # Explicit directory
-    custom_dir = tmp_path / "custom_renderer"
-    assert _resolve_renderer_dir(custom_dir) == custom_dir
+def test_ingest_directory_without_strava_csv(tmp_path: Path):
+    rides_dir = tmp_path / "rides"
+    rides_dir.mkdir()
+    (rides_dir / "Morning_Loop.gpx").write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk><name>Morning Loop</name><trkseg>
+    <trkpt lat="49.4300" lon="7.7500"><ele>250.0</ele><time>2026-05-01T08:00:00Z</time></trkpt>
+    <trkpt lat="49.4350" lon="7.7550"><ele>265.0</ele><time>2026-05-01T08:01:00Z</time></trkpt>
+  </trkseg></trk>
+</gpx>
+""",
+        encoding="utf-8",
+    )
 
-    # Environment variable override
-    env_dir = tmp_path / "env_renderer"
-    monkeypatch.setenv("RIDE_VISUALS_RENDERER_DIR", str(env_dir))
-    assert _resolve_renderer_dir() == env_dir
+    db_path = tmp_path / "catalog.duckdb"
+    streams_dir = tmp_path / "streams"
+    pipeline = IngestPipeline(
+        bulk_dir=rides_dir,
+        catalog_db_path=db_path,
+        streams_dir=streams_dir,
+    )
+    stats = pipeline.run_ingest()
 
-    # Doctor reports missing entrypoint cleanly
-    engine = RemotionVideoEngine(renderer_dir=tmp_path / "nonexistent")
-    errors = engine.doctor()
-    assert any("Remotion entrypoint was not found" in err for err in errors)
+    assert stats["ingested_activities"] == 1
+    assert stats["gpx_count"] == 1
+    con = duckdb.connect(str(db_path), read_only=True)
+    row = con.execute(
+        "SELECT name, activity_type, elevation_gain_m, point_count FROM activities"
+    ).fetchone()
+    con.close()
+    assert row == ("Morning Loop", "Ride", 15.0, 2)

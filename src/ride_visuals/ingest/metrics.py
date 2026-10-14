@@ -100,7 +100,7 @@ def enrich_trackpoints(points: List[TrackPoint]) -> List[TrackPoint]:
         if pt.altitude is not None and prev.altitude is not None and d_dist > 2.0:
             d_alt = pt.altitude - prev.altitude
             grade = (d_alt / d_dist) * 100.0
-            # Limitar a -40% a +40%
+            # Clamp to -40%..+40%
             grade = max(-40.0, min(40.0, grade))
 
         # Bearing

@@ -316,13 +316,13 @@ class RemotionVideoEngine:
         composition: str = "ActivityOverlay",
     ) -> Path:
         """Render a reusable RGBA PNG overlay at a chosen animation frame."""
-        errors = self.doctor()
-        if errors:
-            raise RuntimeError("; ".join(errors))
         self._validate_overlay_composition(composition)
         output = Path(output_path).resolve()
         if output.suffix.lower() != ".png":
             raise ValueError("Transparent still output must use the .png extension")
+        errors = self.doctor()
+        if errors:
+            raise RuntimeError("; ".join(errors))
         output.parent.mkdir(parents=True, exist_ok=True)
         render_spec = replace(spec, output_mode="static-summary") if frame is None else spec
         serialized_spec = render_spec.write(spec_path).resolve()
@@ -378,9 +378,6 @@ class RemotionVideoEngine:
         MP4/H.264 is intentionally excluded because it cannot carry the alpha
         channel required by reusable overlays.
         """
-        errors = self.doctor()
-        if errors:
-            raise RuntimeError("; ".join(errors))
         output = Path(output_path).resolve()
         self._validate_overlay_composition(composition)
         suffix = output.suffix.lower()
@@ -397,6 +394,9 @@ class RemotionVideoEngine:
             ]
         else:
             raise ValueError("Transparent video output must use .webm or .mov")
+        errors = self.doctor()
+        if errors:
+            raise RuntimeError("; ".join(errors))
         output.parent.mkdir(parents=True, exist_ok=True)
         serialized_spec = spec.write(spec_path).resolve()
         remotion_output = (

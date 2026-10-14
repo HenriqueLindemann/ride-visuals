@@ -11,15 +11,18 @@ from ride_visuals.commands.common import RuntimeConfig, print_ingest_stats
 def register(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser(
         "ingest-fit",
-        help="Import standalone FIT files into the collection",
+        help="Import standalone FIT, TCX, or GPX files into the collection",
         description=(
-            "Copy standalone .fit/.fit.gz files into the export and record them "
-            "in activities.csv, then ingest only the new activities. "
-            "Useful for activities recorded outside Strava or downloaded "
-            "individually."
+            "Copy standalone .fit, .tcx, or .gpx files (including .gz) into the "
+            "collection, record them in activities.csv, and ingest only the new "
+            "activities. Works with or without a Strava export."
         ),
     )
-    parser.add_argument("files", nargs="+", help="One or more .fit or .fit.gz files to import")
+    parser.add_argument(
+        "files",
+        nargs="+",
+        help="One or more .fit, .tcx, or .gpx files (or .gz variants) to import",
+    )
     parser.add_argument(
         "--name",
         help="Activity name (default: file name); valid for a single file",

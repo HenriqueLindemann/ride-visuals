@@ -163,7 +163,7 @@ class FITReader:
                         cad = float(cad)
                         metadata["has_cadence"] = True
 
-                    # Temperatura
+                    # Temperature
                     temp = frame.get_value("temperature", fallback=None)
                     prov_tmp = "none"
                     if temp is not None:

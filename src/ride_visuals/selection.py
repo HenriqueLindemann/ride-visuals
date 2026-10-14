@@ -7,13 +7,32 @@ from datetime import date, datetime, time, timezone
 from typing import Iterable
 
 
-DEFAULT_ACTIVITY_TYPES: tuple[str, ...] = ("Ride", "Pedalada")
-"""Default activity types used by ingestion and selection filters.
+DEFAULT_ACTIVITY_TYPES: tuple[str, ...] = (
+    "Ride",
+    "Pedalada",
+    "Salida en bicicleta",
+    "Vuelta ciclista",
+    "Ciclismo",
+    "Bicicleta",
+    "Sortie à vélo",
+    "Vélo",
+    "Radfahrt",
+    "Pedalata",
+    "Giro in bici",
+    "Fietsrit",
+    "Rit",
+    "Cycling",
+    "Biking",
+)
+"""Default activity types used by ingestion and selection filters."""
 
-Strava exports store activity types in the export language: ``Ride`` in
-English and ``Pedalada`` in pt-BR. Both raw values are accepted so the
-pipeline stays compatible with either export without translating user data.
-"""
+
+def expand_activity_types(activity_types: Iterable[str] | None) -> set[str]:
+    """Expand cycling type filters to include localized Ride aliases."""
+    selected = set(activity_types or DEFAULT_ACTIVITY_TYPES)
+    if selected & set(DEFAULT_ACTIVITY_TYPES):
+        selected.update(DEFAULT_ACTIVITY_TYPES)
+    return selected
 
 
 def parse_date(value: str | date | datetime | None, *, end: bool = False) -> datetime | None:

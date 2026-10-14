@@ -8,30 +8,17 @@ Ride Visuals turns cycling activity archives into maps, reports, and animated
 telemetry. It is a small tool born from a personal archive and shared for anyone
 who wants to see their rides differently.
 
-- [What it makes](#what-it-makes)
-- [A collection over time](#a-collection-over-time)
-- [One ride in detail](#one-ride-in-detail)
-- [Start](#start)
-- [Choose what to render](#choose-what-to-render)
-- [Development](#development)
-- [License](#license)
+<p align="center">
+  <a href="#a-collection-over-time">Collection</a> ·
+  <a href="#one-ride-in-detail">One ride</a> ·
+  <a href="#overlays-and-media">Overlays</a> ·
+  <a href="#what-it-makes">What it makes</a> ·
+  <a href="#start">Start</a> ·
+  <a href="#choose-what-to-render">Customize</a> ·
+  <a href="#license">License</a>
+</p>
 
-## What it makes
-
-- **Maps**: overview, density, and heart-rate effort maps at 300 DPI, over
-  plain, dark, satellite, topographic, or OpenStreetMap basemaps
-  (`map overview`, `map heatmap`, `map effort`).
-- **Reports**: progress metrics as JSON, an analytics dashboard, and a season
-  telemetry timeline (`report progress`, `report dashboard`, `report timeline`).
-- **Videos**: a collection accumulating over time, plus progress and season
-  timeline movies in 16:9 and 9:16 (`video collection`, `video progress`,
-  `video timeline`).
-- **Activity renders**: one ride with telemetry, minimal, or clean, and
-  transparent overlays for editing (`video telemetry`, `video minimal`,
-  `video clean`, `video overlay`, `video route-overlay`, `video stats-overlay`).
-
-Everything lands under `outputs/`: maps in `outputs/maps`, reports in
-`outputs/reports`, and videos in `outputs/videos`.
+---
 
 ## A collection over time
 
@@ -39,10 +26,17 @@ Everything lands under `outputs/`: maps in `outputs/maps`, reports in
   <img src="showcase/collection-chronological.gif" alt="Cycling collection accumulating routes in chronological order, colored by speed over a dark basemap">
 </p>
 
+Routes accumulate in **chronological**, **simultaneous** (`elapsed`, aligning
+starts while keeping each ride's real duration), or **comet** motion. Color
+tracks by density, speed, heart rate, altitude, grade, temperature, or month
+over plain, dark, satellite, topographic, or OpenStreetMap basemaps.
+
 ```bash
 make preview-collection MOTION=chronological STYLE=speed \
   VIDEO_BASEMAP=dark SCOPE="--start-date 2026-02-08"
 ```
+
+---
 
 ## One ride in detail
 
@@ -50,71 +44,82 @@ make preview-collection MOTION=chronological STYLE=speed \
   <img src="showcase/activity-telemetry.png" alt="Cycling activity telemetry for a 138.7 km ride">
 </p>
 
-The activity view follows route progress alongside speed, heart rate,
-elevation, grade, temperature, and distance.
+The activity view follows route progress alongside live speed, heart rate,
+elevation profile, grade, temperature, and distance.
 
 ```bash
 make preview-activity ACTIVITY_ID=<activity-id> TELEMETRY_BASEMAP=satellite
 ```
 
-### A reusable overlay
+---
+
+## Overlays and media
+
+### Transparent route and summary
 
 <p align="center">
   <img src="showcase/activity-overlay.png" alt="A transparent overlay for a 127.5 km ride to the Kalmit">
 </p>
 
-The same route and summary can be exported as a transparent PNG, alpha WebM,
-or ProRes 4444 MOV for another layout or editing workflow.
+Export the route and summary as a transparent PNG, alpha WebM, or ProRes 4444
+MOV for external layouts and editing timelines:
 
 ```bash
-ride-visuals video overlay <activity-id> --overlay-format png --aspect 16:9 \
-  --config config/config.toml
+ride-visuals video overlay <activity-id> --overlay-format png --aspect 16:9
 ```
 
-### Separate overlays
-
-An orange route drawn on transparency, plus minimal speed, distance, heart rate
-and elevation. Export both with the same preview setting and align their first
-frames in your editor to keep them synchronized.
-
-```bash
-ride-visuals video route-overlay <activity-id> --overlay-format mov
-ride-visuals video stats-overlay <activity-id> --aspect 16:9 --overlay-format mov
-ride-visuals video stats-overlay <activity-id> --aspect 9:16 --overlay-format mov
-```
+### Separate route and statistics layers
 
 <p align="center">
   <img src="showcase/activity-overlay-stats.gif" alt="Animated statistics overlay">
 </p>
 
-### Telemetry over media
+Render the route trace and the telemetry strip as independent alpha layers and
+align their first frames in your video editor:
+
+```bash
+ride-visuals video route-overlay <activity-id> --overlay-format mov
+ride-visuals video stats-overlay <activity-id> --aspect 16:9 --overlay-format mov
+```
+
+### Telemetry over photos or video
 
 <p align="center">
-  <img src="showcase/activity-overlay-motion.gif" alt="Moving telemetry for a 71.7 km climbing ride over its finish photo">
+  <img src="showcase/activity-overlay-motion.gif" width="360" alt="Moving telemetry for a 71.7 km climbing ride over its finish photo">
 </p>
 
-The overlay can also move. Render it over a photo or fully transparent, in
-vertical or landscape.
+Composite moving telemetry directly over a photo or video clip (preserving its
+audio unless `--no-background-video-audio` is passed):
 
 ```bash
 ride-visuals video telemetry <activity-id> --background-image photo.jpg \
-  --background-blur 0 --background-dim 0.18 --aspect 9:16 \
-  --title "" --config config/config.toml
-```
+  --background-blur 0 --background-dim 0.18 --aspect 9:16 --title ""
 
-A video can also be used as the background, with its audio preserved. It must
-cover the full render (15 s for final activity videos).
-
-```bash
 ride-visuals video telemetry <activity-id> --background-video clip.mp4 \
-  --background-dim 0.2 --aspect instagram --config config/config.toml
+  --background-dim 0.2 --aspect instagram
 ```
 
-Pass `--no-background-video-audio` when only the clip's visuals should be used.
+---
+
+## What it makes
+
+| Output | Commands | Destination |
+| --- | --- | --- |
+| **Maps** | `map overview`, `map heatmap`, `map effort` (300 DPI) | `outputs/maps/` |
+| **Collection videos** | `video collection`, `video progress`, `video timeline` | `outputs/videos/` |
+| **Activity renders** | `video telemetry`, `video minimal`, `video clean`, `video overlay`, `video route-overlay`, `video stats-overlay` | `outputs/videos/` |
+| **Reports** | `report progress`, `report dashboard`, `report timeline` | `outputs/reports/` |
+
+The project as a whole is an active work in progress, and the reporting views in
+particular are still in early shape.
+
+---
 
 ## Start
 
-You need Python 3.11+, FFmpeg, Node.js, and npm.
+### 1. Install
+
+Requires Python 3.11+, FFmpeg, Node.js, and npm.
 
 ```bash
 python -m venv .venv
@@ -124,78 +129,62 @@ npm --prefix renderer ci --no-bin-links
 cp config/config.example.toml config/config.toml
 ```
 
-If your archive comes from Strava, request it with
-[Exporting Your Data and Bulk Export](https://support.strava.com/en-us/articles/15401919-exporting-your-data-and-bulk-export).
-Place `activities.csv` and its `activities/` directory under `bulk_download/`.
+### 2. Add your rides
 
-Rides recorded outside Strava, or downloaded individually as `.fit` files, can
-be added to the collection with `ingest-fit`. The file is copied into the
-export, registered in `activities.csv`, and ingested.
+Ride Visuals works with standalone GPS files or with a Strava archive:
 
-```bash
-ride-visuals ingest-fit ~/Downloads/Kalmit_Weinstraße.fit --config config/config.toml
-```
+- **Without Strava (`.fit`, `.tcx`, `.gpx`)**: place your activity files
+  directly inside `bulk_download/` (compressed `.gz` files are supported), or
+  import individual files into the collection:
+  ```bash
+  ride-visuals ingest-fit ~/Downloads/Kalmit_Weinstraße.fit
+  ```
+- **From a Strava bulk export**: request your archive via
+  [Exporting Your Data and Bulk Export](https://support.strava.com/en-us/articles/15401919-exporting-your-data-and-bulk-export)
+  and place `activities.csv` and `activities/` under `bulk_download/`. Exports
+  in English, Portuguese, Spanish, French, German, Italian, and Dutch are
+  recognized out of the box.
 
-With the archive in place, generate the complete output set:
+### 3. Render
+
+Generate the full collection (catalog ingestion, reports, maps, and 16:9 + 9:16
+collection videos):
 
 ```bash
 make --jobs=6 final
 ```
 
-This ingests the archive into a persistent catalog and streams, then creates
-three reports, three maps, and the collection, progress, and timeline videos in
-both 16:9 and 9:16. Individual activity media needs an ID and is generated
-separately:
+Render a single activity by its ID:
 
 ```bash
 make final-activity ACTIVITY_ID=<activity-id>
 ```
 
+---
+
 ## Choose what to render
 
-Set defaults in `config/config.toml` or pass flags on the command line;
-`--preview` renders a short version before committing to a full one.
+Set defaults in `config/config.toml` or pass flags on the command line. Add
+`--preview` to render a short draft before committing to a full render.
 
-### A period
+- **Period**: filter inclusively with `--start-date`, `--end-date`, `--year`,
+  and `--month`. Rebuild the catalog from scratch with
+  `ride-visuals ingest --clean --all`.
+  ```bash
+  make preview-collection SCOPE="--year 2025 --month 4"
+  make final SCOPE="--start-date 2024-02-01 --end-date 2024-12-31"
+  ```
+- **Collection layout**: pass `--minimal` for a map-first canvas showing only
+  accumulated distance, or `--clean` to hide the panel. Add `--cursors`,
+  `--legend`, or `--background-tracks` for additional context.
+  ```bash
+  ride-visuals video collection --motion elapsed --style altitude --basemap topo
+  ```
+- **Canvas, language, and theme**: render in `16:9`, `9:16`, `4k` (3840×2160),
+  or `instagram` (1080×1920 Story with safe-area margins). Choose `--locale en`
+  or `--locale pt-BR`, and `--theme midnight` or `--theme frost`.
 
-Set dates, years, or months in the config, or pass them directly:
-
-```bash
-make preview-collection SCOPE="--year 2025 --month 4"
-make final SCOPE="--start-date 2024-02-01 --end-date 2024-12-31"
-```
-
-Filters are inclusive and combine with each other. With no filter, every
-catalogued activity is used. Use `ride-visuals ingest --clean --all` to rebuild
-the catalog from scratch.
-
-### Shape the collection
-
-Collection videos support chronological, simultaneous, and comet motion.
-Simultaneous aligns starts and preserves each ride’s real elapsed time, so
-shorter rides finish first; `elapsed` is an alias. Routes can be colored by
-heart rate, temperature, altitude, speed, grade, month, or a fixed palette,
-over plain, dark, satellite, topographic, or OpenStreetMap backgrounds.
-
-```bash
-ride-visuals video collection --motion elapsed --style altitude --basemap topo \
-  --config config/config.toml
-```
-
-Add `--minimal` for a map-first video with only accumulated distance, or
-`--clean` to hide the panel. `--cursors`, `--legend`, and `--background-tracks`
-show more detail.
-
-### Canvas, language, and theme
-
-Videos render in 16:9, 9:16, 4K (3840×2160), or Instagram Story (authored in
-16:9, delivered as a 1080×1920 Story with text kept in the safe areas).
-Generated media is English by default; use `--locale pt-BR` for Portuguese.
-Themes are `midnight` (the default) and `frost`. Set both with `--theme` and
-`--locale`, or in `config/config.toml`.
-
-Run `ride-visuals --help` for individual maps, reports, videos, and activity
-overlays.
+Run `ride-visuals --help` for all commands and options.
 
 ## Development
 
@@ -203,9 +192,9 @@ overlays.
 make check
 ```
 
-`make check` runs linting, tests, and the renderer typecheck. `make help` lists
-the common workflows. The README assets are regenerated by
-`showcase/generate.sh`; see [showcase/README.md](showcase/README.md).
+`make check` runs environment diagnostics, linting, Python and renderer tests,
+and typechecking. The showcase assets are regenerated by `showcase/generate.sh`;
+see [showcase/README.md](showcase/README.md).
 
 ## License
 

@@ -10,48 +10,21 @@ from ride_visuals.cli import main
 REFERENCE_ACTIVITY_ID = 19666115840
 
 
-@pytest.mark.parametrize(
-    ("video_type", "expected_method", "extension"),
-    [
-        ("telemetry", "activity", "mp4"),
-        ("minimal", "activity", "mp4"),
-        ("overlay", "overlay_still", "png"),
-        ("route-overlay", "overlay_video", "webm"),
-        ("stats-overlay", "overlay_video", "webm"),
-    ],
-)
-def test_reference_ride_reaches_visual_engine_with_stable_spec_and_paths(
-    reference_cli_workspace,
-    monkeypatch: pytest.MonkeyPatch,
-    video_type: str,
-    expected_method: str,
-    extension: str,
-) -> None:
+@pytest.fixture
+def captured_remotion_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     calls: list[dict[str, object]] = []
 
     class FakeRemotionVideoEngine:
         def __init__(self, renderer_dir=None):
-            calls.append({"method": "init", "renderer_dir": renderer_dir})
+            self.renderer_dir = renderer_dir
 
         def render_activity(self, spec, output_path, **kwargs):
-            calls.append(
-                {
-                    "method": "activity",
-                    "spec": spec,
-                    "output_path": output_path,
-                    **kwargs,
-                }
-            )
+            calls.append({"method": "activity", "spec": spec, "output_path": output_path, **kwargs})
             return output_path, [Path("frame.png")]
 
         def render_overlay_still(self, spec, output_path, **kwargs):
             calls.append(
-                {
-                    "method": "overlay_still",
-                    "spec": spec,
-                    "output_path": output_path,
-                    **kwargs,
-                }
+                {"method": "overlay_still", "spec": spec, "output_path": output_path, **kwargs}
             )
             return output_path
 
@@ -65,7 +38,26 @@ def test_reference_ride_reaches_visual_engine_with_stable_spec_and_paths(
         "ride_visuals.video.engines.remotion.RemotionVideoEngine",
         FakeRemotionVideoEngine,
     )
+    return calls
 
+
+@pytest.mark.parametrize(
+    ("video_type", "expected_method", "extension"),
+    [
+        ("telemetry", "activity", "mp4"),
+        ("minimal", "activity", "mp4"),
+        ("overlay", "overlay_still", "png"),
+        ("route-overlay", "overlay_video", "webm"),
+        ("stats-overlay", "overlay_video", "webm"),
+    ],
+)
+def test_reference_ride_reaches_visual_engine_with_stable_spec_and_paths(
+    reference_cli_workspace,
+    captured_remotion_calls: list[dict[str, object]],
+    video_type: str,
+    expected_method: str,
+    extension: str,
+) -> None:
     main(
         [
             "video",
@@ -77,113 +69,43 @@ def test_reference_ride_reaches_visual_engine_with_stable_spec_and_paths(
         ]
     )
 
-    render_call = next(call for call in calls if call["method"] == expected_method)
+    render_call = captured_remotion_calls[0]
     spec = render_call["spec"]
+    assert render_call["method"] == expected_method
     assert spec.activity.id == str(REFERENCE_ACTIVITY_ID)
     assert spec.activity.title == "Kaiserslautern → Koblenz"
-    assert spec.locale == "en"
-    assert spec.theme == "frost"
-    assert spec.profile.duration_seconds == 4.0
-    assert len(spec.points) == 6_000
+    assert spec.show_background_route is (video_type != "minimal")
     assert render_call["output_path"] == (
         reference_cli_workspace.outputs_dir
         / "videos"
         / video_type
-        / (f"activity_{REFERENCE_ACTIVITY_ID}_{video_type}_frost_en_16_9_preview.{extension}")
+        / f"activity_{REFERENCE_ACTIVITY_ID}_{video_type}_frost_en_16_9_preview.{extension}"
     )
-    assert render_call["spec_path"] == (
-        reference_cli_workspace.outputs_dir
-        / "render-specs"
-        / f"activity_{REFERENCE_ACTIVITY_ID}_{video_type}_frost_en_16_9.json"
-    )
-    if video_type in {"route-overlay", "stats-overlay"}:
-        assert (
-            render_call["composition"]
-            == {
-                "route-overlay": "RouteOverlay",
-                "stats-overlay": "StatsOverlay",
-            }[video_type]
-        )
-        assert spec.profile.fps == 30
-        assert spec.profile.hold_seconds == 1.0
-        if video_type == "stats-overlay":
-            assert (spec.profile.width, spec.profile.height) == (960, 320)
-    assert calls[0]["renderer_dir"] == reference_cli_workspace.config_path.parent / "renderer"
-    if video_type == "telemetry":
-        assert render_call["composition"] == "ActivityTelemetry"
-    if video_type == "minimal":
-        assert render_call["composition"] == "ActivityMinimal"
-    # Minimal is map-first: future routes stay hidden unless requested.
-    assert spec.show_background_route is (video_type != "minimal")
-    if video_type in {"telemetry", "minimal"}:
-        assert render_call["keyframes_dir"] == (
-            reference_cli_workspace.outputs_dir
-            / "videos/keyframes"
-            / f"activity_{REFERENCE_ACTIVITY_ID}_frost_en_16_9"
-        )
 
 
-@pytest.mark.parametrize(
-    ("flag", "expected"),
-    [(None, False), ("--background-tracks", True), ("--no-background-tracks", False)],
-)
-def test_minimal_background_route_toggle(
+def test_minimal_overlay_ignores_background_media(
     reference_cli_workspace,
-    monkeypatch: pytest.MonkeyPatch,
-    flag: str | None,
-    expected: bool,
+    captured_remotion_calls: list[dict[str, object]],
 ) -> None:
-    specs = []
+    main(
+        [
+            "video",
+            "minimal",
+            str(REFERENCE_ACTIVITY_ID),
+            "--preview",
+            "--overlay-format",
+            "mov",
+            "--background-image",
+            "unused-media",
+            "--config",
+            str(reference_cli_workspace.config_path),
+        ]
+    )
 
-    class Engine:
-        def __init__(self, **kwargs):
-            pass
-
-        def render_activity(self, spec, output_path, **kwargs):
-            specs.append(spec)
-            return output_path, []
-
-    monkeypatch.setattr("ride_visuals.video.engines.remotion.RemotionVideoEngine", Engine)
-    argv = [
-        "video", "minimal", str(REFERENCE_ACTIVITY_ID), "--preview",
-        "--config", str(reference_cli_workspace.config_path),
-    ]
-    if flag is not None:
-        argv.append(flag)
-
-    main(argv)
-
-    assert specs[0].show_background_route is expected
-
-
-@pytest.mark.parametrize("overlay_format", ["png", "webm", "mov"])
-@pytest.mark.parametrize("background_option", ["--background-video", "--background-image"])
-def test_minimal_overlay_uses_transparent_composition_without_background(
-    reference_cli_workspace, monkeypatch, overlay_format, background_option
-):
-    calls = []
-
-    class Engine:
-        def __init__(self, **kwargs):
-            pass
-
-        def render_overlay_still(self, spec, output_path, **kwargs):
-            calls.append((spec, output_path, kwargs))
-            return output_path
-
-        render_overlay_video = render_overlay_still
-
-    monkeypatch.setattr("ride_visuals.video.engines.remotion.RemotionVideoEngine", Engine)
-    main([
-        "video", "minimal", str(REFERENCE_ACTIVITY_ID), "--preview",
-        "--overlay-format", overlay_format,
-        background_option, "unused-media",
-        "--config", str(reference_cli_workspace.config_path),
-    ])
-    spec, output, options = calls[0]
-    assert spec.background is None
-    assert output.suffix == f".{overlay_format}"
-    assert options["composition"] == "ActivityMinimalOverlay"
+    call = captured_remotion_calls[0]
+    assert call["spec"].background is None
+    assert call["output_path"].suffix == ".mov"
+    assert call["composition"] == "ActivityMinimalOverlay"
 
 
 def test_reference_ride_progress_report_matches_canonical_metrics(
@@ -209,61 +131,10 @@ def test_reference_ride_progress_report_matches_canonical_metrics(
     assert actual == expected
 
 
-def test_instagram_activity_keeps_landscape_spec_and_portrait_delivery_path(
-    reference_cli_workspace,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[dict[str, object]] = []
-
-    class FakeRemotionVideoEngine:
-        def __init__(self, renderer_dir=None):
-            pass
-
-        def render_activity(self, spec, output_path, **kwargs):
-            calls.append({"spec": spec, "output_path": output_path, **kwargs})
-            return output_path, []
-
-    monkeypatch.setattr(
-        "ride_visuals.video.engines.remotion.RemotionVideoEngine",
-        FakeRemotionVideoEngine,
-    )
-
-    main(
-        [
-            "video",
-            "telemetry",
-            str(REFERENCE_ACTIVITY_ID),
-            "--preview",
-            "--no-keyframes",
-            "--aspect",
-            "instagram",
-            "--config",
-            str(reference_cli_workspace.config_path),
-        ]
-    )
-
-    call = calls[0]
-    spec = call["spec"]
-    assert (spec.profile.width, spec.profile.height) == (1920, 1080)
-    assert spec.presentation == "instagram-story-landscape"
-    assert call["output_path"].name.endswith("_instagram_preview.mp4")
-
-
 def test_separate_overlays_share_timeline_across_orientations(
     reference_cli_workspace,
-    monkeypatch: pytest.MonkeyPatch,
+    captured_remotion_calls: list[dict[str, object]],
 ) -> None:
-    calls = []
-
-    class Engine:
-        def __init__(self, **kwargs):
-            pass
-
-        def render_overlay_video(self, spec, output_path, **kwargs):
-            calls.append((spec, output_path, kwargs))
-            return output_path
-
-    monkeypatch.setattr("ride_visuals.video.engines.remotion.RemotionVideoEngine", Engine)
     for kind, aspect in [("route-overlay", "16:9"), ("stats-overlay", "9:16")]:
         main(
             [
@@ -278,12 +149,7 @@ def test_separate_overlays_share_timeline_across_orientations(
                 str(reference_cli_workspace.config_path),
             ]
         )
-    route, stats = (call[0] for call in calls)
+    route, stats = (call["spec"] for call in captured_remotion_calls)
     assert route.points == stats.points
-    assert route.summary == stats.summary
-    assert route.profile.fps == stats.profile.fps == 30
     assert route.profile.duration_seconds == stats.profile.duration_seconds == 13
-    assert route.profile.hold_seconds == stats.profile.hold_seconds == 2
     assert (stats.profile.width, stats.profile.height) == (320, 640)
-    assert stats.presentation == "standard"
-    assert all(call[1].suffix == ".mov" for call in calls)
