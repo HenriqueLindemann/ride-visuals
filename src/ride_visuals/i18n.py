@@ -20,6 +20,37 @@ _MONTHS_SHORT = {
     "pt-BR": ("JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"),
 }
 
+_MONTHS_FULL = {
+    "en": (
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ),
+    "pt-BR": (
+        "janeiro",
+        "fevereiro",
+        "março",
+        "abril",
+        "maio",
+        "junho",
+        "julho",
+        "agosto",
+        "setembro",
+        "outubro",
+        "novembro",
+        "dezembro",
+    ),
+}
+
 
 _MESSAGES: dict[str, dict[str, str]] = {
     "en": {
@@ -130,6 +161,21 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "unit.rides": "rides",
         "video.season_summary": "{distance} km · {ascent} m · {count} activities",
         "video.season_title": "{count} rides",
+        "scene3d.distance": "Distance",
+        "scene3d.ascent": "Elevation gain",
+        "scene3d.moving_time": "Moving time",
+        "scene3d.max_altitude": "Max altitude",
+        "scene3d.rides": "Rides",
+        "scene3d.rides_kicker": "{count} rides · {distance} km",
+        "scene3d.stretch.counter": "Combined distance",
+        "scene3d.stretch.reach": "End to end, they reach {place}.",
+        "scene3d.stretch.toward": "{distance} km toward {place}.",
+        "scene3d.stretch.earth_laps": "{laps} times around the Earth.",
+        "scene3d.stretch.earth_pct": "{pct}% of the way around the Earth.",
+        "scene3d.stretch.earth_word": "Earth",
+        "scene3d.stretch.fallback": "{distance} km laid end to end.",
+        "scene3d.strata.kicker": "{count} rides · {start} — {end}",
+        "scene3d.strata.rides": "{count} rides",
     },
     "pt-BR": {
         "activity.default": "Atividade",
@@ -239,6 +285,21 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "unit.rides": "pedaladas",
         "video.season_summary": "{distance} km · {ascent} m · {count} atividades",
         "video.season_title": "{count} pedaladas",
+        "scene3d.distance": "Distância",
+        "scene3d.ascent": "Subida",
+        "scene3d.moving_time": "Em movimento",
+        "scene3d.max_altitude": "Altitude máx.",
+        "scene3d.rides": "Voltas",
+        "scene3d.rides_kicker": "{count} voltas · {distance} km",
+        "scene3d.stretch.counter": "Voltas somadas",
+        "scene3d.stretch.reach": "Somadas, chegam a {place}.",
+        "scene3d.stretch.toward": "{distance} km rumo a {place}.",
+        "scene3d.stretch.earth_laps": "{laps} voltas ao redor da Terra.",
+        "scene3d.stretch.earth_pct": "{pct}% da volta ao redor da Terra.",
+        "scene3d.stretch.earth_word": "Terra",
+        "scene3d.stretch.fallback": "{distance} km em linha reta.",
+        "scene3d.strata.kicker": "{count} voltas · {start} — {end}",
+        "scene3d.strata.rides": "{count} voltas",
     },
 }
 
@@ -305,3 +366,8 @@ class Translator:
     def month_short(self, value: date | datetime) -> str:
         """Return a stable, uppercase short month label for chart axes."""
         return _MONTHS_SHORT[self.locale][value.month - 1]
+
+    def month_name(self, month: int, year: int | None = None) -> str:
+        """Return a localized month name, optionally followed by the year."""
+        name = _MONTHS_FULL[self.locale][month - 1]
+        return f"{name} {year}" if year is not None else name

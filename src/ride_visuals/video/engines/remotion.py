@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PIL import Image
 
@@ -20,6 +22,9 @@ from ride_visuals.video.instagram import (
     present_frame,
 )
 from ride_visuals.video.spec import ActivityRenderSpec, BackgroundSpec
+
+if TYPE_CHECKING:
+    from ride_visuals.scene3d.spec import SceneSpec
 
 
 def _resolve_renderer_dir(renderer_dir: Path | None = None) -> Path:
@@ -472,6 +477,101 @@ class RemotionVideoEngine:
             raise RuntimeError(f"Transparent video failed validation: {validation}")
         return output
 
+    def render_scene3d(
+        self,
+        spec: SceneSpec,
+        output_path: Path,
+        *,
+        spec_url: str,
+        scale: int = 1,
+        keyframes_dir: Path | None = None,
+        concurrency: int = 4,
+    ) -> tuple[Path, list[Path]]:
+        """Render the ``Scene3D`` composition served by a local ``TileServer``."""
+        from ride_visuals.scene3d.tiles import stage_scene3d_assets
+
+        errors = self.doctor()
+        if errors:
+            raise RuntimeError("; ".join(errors))
+        stage_scene3d_assets(self.renderer_dir)
+
+        output = Path(output_path).resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        video_only = output.with_name(f".{output.stem}.remotion.mp4")
+        assert self.node is not None
+
+        props_json = json.dumps(
+            {
+                "specUrl": spec_url,
+                "width": spec.width,
+                "height": spec.height,
+                "fps": spec.fps,
+                "durationInFrames": spec.frames,
+            },
+            separators=(",", ":"),
+        )
+        render_command = [
+            self.node,
+            str(self.cli),
+            "render",
+            str(self.entrypoint),
+            "Scene3D",
+            str(video_only.resolve()),
+            "--props",
+            props_json,
+            "--gl",
+            "angle",
+            "--codec",
+            "h264",
+            "--crf",
+            "18",
+            "--pixel-format",
+            "yuv420p",
+            "--color-space",
+            "bt709",
+            "--concurrency",
+            str(concurrency),
+            "--timeout",
+            "120000",
+            "--overwrite",
+            "--log",
+            "error",
+            *self._browser_args(),
+        ]
+        if scale > 1:
+            render_command.extend(["--scale", str(scale)])
+
+        mux_command = [
+            self.ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(video_only),
+            "-map",
+            "0:v:0",
+            "-an",
+            "-c:v",
+            "copy",
+            "-movflags",
+            "+faststart",
+            str(output),
+        ]
+        try:
+            self._run(render_command, "Remotion 3D scene render", retries=1)
+            self._run(mux_command, "3D scene media normalization")
+        finally:
+            video_only.unlink(missing_ok=True)
+
+        total_seconds = spec.frames / spec.fps
+        validation = MediaValidator.validate_video(output, expected_duration_s=total_seconds)
+        if not validation.get("valid") or validation.get("has_faststart") is not True:
+            raise RuntimeError(f"Rendered 3D video failed validation: {validation}")
+
+        keyframes = self._extract_keyframes_by_duration(output, total_seconds, spec.fps, keyframes_dir)
+        return output, keyframes
+
     @staticmethod
     def _validate_overlay_composition(composition: str) -> None:
         if composition not in {
@@ -493,12 +593,21 @@ class RemotionVideoEngine:
         spec: ActivityRenderSpec,
         destination: Path | None,
     ) -> list[Path]:
+        total = spec.profile.duration_seconds + spec.profile.hold_seconds
+        return self._extract_keyframes_by_duration(video, total, spec.profile.fps, destination)
+
+    def _extract_keyframes_by_duration(
+        self,
+        video: Path,
+        total_seconds: float,
+        fps: int,
+        destination: Path | None,
+    ) -> list[Path]:
         if destination is None:
             return []
         destination = Path(destination).resolve()
         destination.mkdir(parents=True, exist_ok=True)
-        total = spec.profile.duration_seconds + spec.profile.hold_seconds
-        times = (0.0, total * 0.5, max(0.0, total - 1.0 / spec.profile.fps))
+        times = (0.0, total_seconds * 0.5, max(0.0, total_seconds - 1.0 / fps))
         paths: list[Path] = []
         for label, timestamp in zip(("00", "50", "100"), times, strict=True):
             frame = destination / f"keyframe_{label}pct.png"

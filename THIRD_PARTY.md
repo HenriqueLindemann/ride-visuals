@@ -11,6 +11,10 @@ Ride Visuals is AGPL-3.0-only. The components below keep their own terms.
   `LICENSE_EXCEPTION` permits combining Ride Visuals with Remotion but grants no
   rights to Remotion itself.
 - React and React DOM use MIT, TypeScript uses Apache-2.0, and Zod uses MIT.
+- The 3D scenes use [MapLibre GL JS](https://github.com/maplibre/maplibre-gl-js)
+  (BSD-3-Clause) and [maplibre-contour](https://github.com/onthegomap/maplibre-contour)
+  (BSD-3-Clause). Text is set in [Geist](https://github.com/vercel/geist-font)
+  (SIL Open Font License 1.1), copied from `node_modules` at render time.
 - `renderer/package-lock.json` records the complete Node dependency tree.
 
 ## Python and local tools
@@ -29,6 +33,21 @@ Optional raster maps use services operated by
 Provider attribution is embedded in each output and names the contributors of
 the selected composite map. Provider copyright, database, and service terms
 apply separately.
+
+The 3D scenes use:
+
+- [Mapzen Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) on AWS
+  Open Data for elevation (SRTM, GMTED2010, ETOPO1, EU-DEM, and national
+  datasets; see their [attribution list](https://github.com/tilezen/joerd/blob/master/docs/attribution.md)).
+- [OpenFreeMap](https://openfreemap.org) vector tiles: © OpenMapTiles,
+  © OpenStreetMap contributors (ODbL 1.0).
+- [Esri World Imagery](https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9)
+  for `--look satellite`, under Esri's own terms of use.
+- [GeoNames](https://www.geonames.org/) `cities15000` (CC BY 4.0) to name where
+  a ride starts, and [Natural Earth](https://www.naturalearthdata.com/)
+  populated places (public domain) for destinations.
+
+Each output's `.credits.txt` sidecar lists exactly the sources it used.
 
 This source repository does not include third-party packages, FFmpeg, fonts,
 map tiles, or generated media.

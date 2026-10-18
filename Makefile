@@ -12,10 +12,13 @@ STYLE ?= density
 ASPECT ?= 16:9
 MINIMAL ?=
 ACTIVITY_TYPE ?= telemetry
+LOOK ?= carbon
+PERIOD ?= auto
+LOCALE ?=
 
 .PHONY: help install check ingest audit preview-collection preview-activity \
 	final final-assets final-reports final-maps final-videos final-visuals \
-	final-activity validate
+	final-activity validate preview-flyover preview-stretch preview-strata
 
 help:
 	@echo 'make install'
@@ -26,6 +29,9 @@ help:
 	@echo 'make --jobs=6 final'
 	@echo 'make final-visuals'
 	@echo 'make final-activity ACTIVITY_ID=<id>'
+	@echo 'make preview-flyover ACTIVITY_ID=<id> LOOK=satellite'
+	@echo 'make preview-stretch SCOPE="--year 2026"'
+	@echo 'make preview-strata SCOPE="--year 2026" PERIOD=month'
 
 install:
 	$(PYTHON) -m pip install -e '.[dev]'
@@ -99,3 +105,16 @@ final-activity:
 
 validate:
 	$(RUN) validate --final-set --motion $(MOTION) --style $(STYLE) --basemap $(VIDEO_BASEMAP) $(CONFIG_ARG) $(SCOPE)
+
+preview-flyover:
+	@test -n "$(ACTIVITY_ID)" || (echo 'ACTIVITY_ID is required' && exit 2)
+	$(RUN) video flyover $(ACTIVITY_ID) --preview --look $(LOOK) --aspect $(ASPECT) \
+		$(if $(LOCALE),--locale $(LOCALE)) $(CONFIG_ARG)
+
+preview-stretch:
+	$(RUN) video stretch --preview --look $(LOOK) --aspect $(ASPECT) \
+		$(if $(LOCALE),--locale $(LOCALE)) $(CONFIG_ARG) $(SCOPE)
+
+preview-strata:
+	$(RUN) video strata --preview --period $(PERIOD) --look $(LOOK) --aspect $(ASPECT) \
+		$(if $(LOCALE),--locale $(LOCALE)) $(CONFIG_ARG) $(SCOPE)

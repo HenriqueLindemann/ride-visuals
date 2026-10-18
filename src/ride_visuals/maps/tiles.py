@@ -8,6 +8,7 @@ from typing import Optional, Tuple
 from PIL import Image, ImageEnhance
 
 from ride_visuals.maps.projection import WEB_MERCATOR_MAX_LATITUDE
+from ride_visuals.credits import on_screen_line
 
 
 TILE_PROVIDERS = {
@@ -15,33 +16,42 @@ TILE_PROVIDERS = {
         "url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         "ext": "jpg",
         "cache_key": "esri-world-imagery-v1",
-        "attribution": "Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+        "sources": ("esri-world-imagery",),
     },
     "topo": {
         "url": "https://tile.opentopomap.org/{z}/{x}/{y}.png",
         "ext": "png",
         "cache_key": "opentopomap-v1",
-        "attribution": "Map data: © OpenStreetMap contributors · DEM: SRTM, Sonny · Map style: © OpenTopoMap (CC-BY-SA)",
+        "sources": ("opentopomap",),
     },
     "osm": {
         "url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
         "ext": "png",
         "cache_key": "openstreetmap-standard-v1",
-        "attribution": "© OpenStreetMap contributors",
+        "sources": ("openstreetmap",),
     },
     "dark": {
         "url": "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
         "ext": "png",
         "cache_key": "esri-world-dark-gray-v1",
-        "attribution": "Esri, HERE, Garmin, © OpenStreetMap contributors, and the GIS User Community",
+        "sources": ("esri-dark-gray",),
     },
     "light": {
         "url": "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
         "ext": "png",
         "cache_key": "esri-world-light-gray-v1",
-        "attribution": "Esri, HERE, Garmin, © OpenStreetMap contributors, and the GIS User Community",
+        "sources": ("esri-light-gray",),
     },
 }
+# The short on-screen line of each provider, derived from its credited sources.
+for _provider in TILE_PROVIDERS.values():
+    _provider["attribution"] = on_screen_line(_provider["sources"])
+
+
+def basemap_sources(basemap: str) -> tuple[str, ...]:
+    """Credited data sources behind a basemap choice ("plain" has none)."""
+    provider = TILE_PROVIDERS.get(basemap)
+    return tuple(provider["sources"]) if provider else ()
 
 
 def deg2num(lat_deg: float, lon_deg: float, zoom: int) -> Tuple[float, float]:

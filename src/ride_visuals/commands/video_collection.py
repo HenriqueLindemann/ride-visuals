@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ride_visuals.commands.video import VideoCommandContext
+
+
+def _write_credits(output: Path, basemap: str) -> None:
+    from ride_visuals.credits import write_credits
+    from ride_visuals.maps.tiles import basemap_sources
+
+    credits = write_credits(output, basemap_sources(basemap))
+    if credits:
+        print(f"[Credits] {credits}")
 
 
 def render_timeline(context: VideoCommandContext) -> None:
@@ -108,8 +118,10 @@ def render_collection(context: VideoCommandContext) -> None:
         show_legend=getattr(args, "legend", None),
         show_background_tracks=args.background_tracks,
         presentation=preset.canvas.presentation,
+        credits_on_screen=args.credits_on_screen,
     )
     print(f"[Video] Collection generated successfully at: {output_path}")
+    _write_credits(output_path, args.basemap)
     if keyframes_dir:
         print(f"[Keyframes] {len(keyframes)} keyframes saved to: {keyframes_dir}")
 

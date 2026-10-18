@@ -264,7 +264,9 @@ def _apply_basemap(
             background_file,
             blur_px=0.0,
             dim=args.background_dim,
-            attribution=TILE_PROVIDERS[args.basemap]["attribution"],
+            attribution=(
+                TILE_PROVIDERS[args.basemap]["attribution"] if args.credits_on_screen else None
+            ),
             attribution_bottom_px=(
                 preset.canvas.render_height - int(round(preset.canvas.render_height * 0.50)) + 8
                 if (
@@ -383,3 +385,10 @@ def render_activity(context: VideoCommandContext) -> None:
     spec = _build_render_spec(context, preset, parquet_path)
     spec = _apply_basemap(context, preset, spec)
     _render_with_engine(context, spec, paths, output_extension)
+
+    from ride_visuals.credits import write_credits
+    from ride_visuals.maps.tiles import basemap_sources
+
+    credits = write_credits(paths.output_file, basemap_sources(args.basemap))
+    if credits:
+        print(f"[Credits] {credits}")

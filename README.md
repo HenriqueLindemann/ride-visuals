@@ -12,6 +12,7 @@ who wants to see their rides differently.
   <a href="#a-collection-over-time">Collection</a> ·
   <a href="#one-ride-in-detail">One ride</a> ·
   <a href="#overlays-and-media">Overlays</a> ·
+  <a href="#in-3d">3D</a> ·
   <a href="#what-it-makes">What it makes</a> ·
   <a href="#start">Start</a> ·
   <a href="#choose-what-to-render">Customize</a> ·
@@ -101,12 +102,47 @@ ride-visuals video telemetry <activity-id> --background-video clip.mp4 \
 
 ---
 
+## In 3D
+
+Three cinematic scenes render real terrain with MapLibre GL inside Remotion.
+Tiles are fetched on demand and cached under `data/cache/tiles/`, so the same
+commands work for rides anywhere in the world (relief is ~30 m globally, finer
+where national elevation models exist).
+
+- **`video flyover <id>`**: one ride from above, then down into the relief.
+  The chase camera reads ahead along the route, the relief is exaggerated to
+  the scale of the view and swells over the featured climbs, and the hardest
+  climb is shown from the side. At the end the camera comes down level beside
+  the ride and the route straightens into its own elevation profile.
+- **`video stretch`**: every ride of a selection laid end to end along a great
+  circle from home, out onto the globe: each ride is used up along its own road
+  while the line grows by the same distance (eastward, or `--toward "Lisbon"` /
+  `--toward "38.72,-9.14"` to aim at a place).
+- **`video strata`**: rides stacked as floors by month or year
+  (`--period auto|month|year`) over the home region.
+
+```bash
+make preview-flyover ACTIVITY_ID=<activity-id>
+ride-visuals video stretch --year 2026 --look satellite
+ride-visuals video strata --year 2026 --period month --aspect 9:16
+```
+
+`--look carbon` (default) is a near-black map with relief shading and contour
+lines; `--look satellite` mixes in Esri imagery. 3D renders are slow (a 30 s
+preview takes several minutes); `--aspect 4k` renders 1920×1080 at scale 2.
+To work on a scene in Remotion Studio, run `ride-visuals tiles serve --spec
+outputs/render-specs/<scene>.json` and open the `Scene3D` composition with
+`specUrl` set to `http://127.0.0.1:8790/files/latest.json`.
+
+---
+
 ## What it makes
 
 | Output | Commands | Destination |
 | --- | --- | --- |
 | **Maps** | `map overview`, `map heatmap`, `map effort` (300 DPI) | `outputs/maps/` |
 | **Collection videos** | `video collection`, `video progress`, `video timeline` | `outputs/videos/` |
+| **3D scenes** | `video flyover`, `video stretch`, `video strata` | `outputs/videos/` |
 | **Activity renders** | `video telemetry`, `video minimal`, `video clean`, `video overlay`, `video route-overlay`, `video stats-overlay` | `outputs/videos/` |
 | **Reports** | `report progress`, `report dashboard`, `report timeline` | `outputs/reports/` |
 
@@ -183,6 +219,12 @@ Set defaults in `config/config.toml` or pass flags on the command line. Add
 - **Canvas, language, and theme**: render in `16:9`, `9:16`, `4k` (3840×2160),
   or `instagram` (1080×1920 Story with safe-area margins). Choose `--locale en`
   or `--locale pt-BR`, and `--theme midnight` or `--theme frost`.
+
+- **Credits for publishing**: every map and video gets a
+  `<name>.credits.txt` next to it that lists the map, terrain, imagery, and
+  place-name sources with their licenses, ready to paste into a video
+  description. Frames stay clean by default; pass `--credits-on-screen` to
+  also draw a short attribution line.
 
 Run `ride-visuals --help` for all commands and options.
 

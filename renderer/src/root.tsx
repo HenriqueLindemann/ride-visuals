@@ -5,6 +5,8 @@ import {RouteOverlay, StatsOverlay} from './compositions/MinimalOverlays';
 import {ActivityClean} from './compositions/ActivityClean';
 import {ActivityMinimal, ActivityMinimalOverlay} from './compositions/ActivityMinimal';
 import {defaultActivitySpec} from './defaults';
+import {Scene3D} from './scene3d/Scene3D';
+import {type SceneInput, sceneInputSchema} from './scene3d/schema';
 import {activityRenderSpecSchema, type ActivityRenderSpec} from './schema';
 
 const calculateMetadata: CalculateMetadataFunction<ActivityRenderSpec> = ({props}) => ({
@@ -12,6 +14,22 @@ const calculateMetadata: CalculateMetadataFunction<ActivityRenderSpec> = ({props
   height: props.profile.height,
   fps: props.profile.fps,
   durationInFrames: Math.round((props.profile.duration_seconds + props.profile.hold_seconds) * props.profile.fps),
+  props,
+});
+
+const defaultSceneInput: SceneInput = {
+  specUrl: 'http://127.0.0.1:8790/files/latest.json',
+  width: 1920,
+  height: 1080,
+  fps: 30,
+  durationInFrames: 900,
+};
+
+const calculateSceneMetadata: CalculateMetadataFunction<SceneInput> = ({props}) => ({
+  width: props.width,
+  height: props.height,
+  fps: props.fps,
+  durationInFrames: props.durationInFrames,
   props,
 });
 
@@ -69,6 +87,17 @@ export const RideVisualsRoot = () => (
       }}
       calculateMetadata={calculateMetadata}
       schema={activityRenderSpecSchema}
+    />
+    <Composition
+      id="Scene3D"
+      component={Scene3D}
+      durationInFrames={defaultSceneInput.durationInFrames}
+      fps={defaultSceneInput.fps}
+      width={defaultSceneInput.width}
+      height={defaultSceneInput.height}
+      defaultProps={defaultSceneInput}
+      calculateMetadata={calculateSceneMetadata}
+      schema={sceneInputSchema}
     />
   </>
 );

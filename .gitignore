@@ -24,6 +24,7 @@ token*.json
 
 # Local agent metadata
 AGENTS.md
+PROMPT.md
 .agents/
 .codex/
 
@@ -45,6 +46,7 @@ renderer/out/
 renderer/build/
 renderer/.remotion/
 renderer/public/backgrounds/
+renderer/public/scene3d/
 /.cache/
 /.remotion/
 
@@ -58,3 +60,4 @@ renderer/public/backgrounds/
 # Local showcase generator
 showcase/*.local.sh
 showcase/film/
+alemanha-2026/

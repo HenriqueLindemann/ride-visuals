@@ -172,7 +172,8 @@ class CollectionVideoRenderer:
                           show_background_tracks: Optional[bool] = None,
                           presentation: str = "standard",
                           show_cursors: Optional[bool] = None,
-                          show_legend: Optional[bool] = None) -> Tuple[Path, List[Path]]:
+                          show_legend: Optional[bool] = None,
+                          credits_on_screen: bool = False) -> Tuple[Path, List[Path]]:
         output_mp4_path = Path(output_mp4_path)
         output_mp4_path.parent.mkdir(parents=True, exist_ok=True)
         if keyframes_dir:
@@ -180,6 +181,8 @@ class CollectionVideoRenderer:
             keyframes_dir.mkdir(parents=True, exist_ok=True)
 
         minimal = mode == "minimal"
+        # Credits always go to a sidecar file; the on-map line is opt-in.
+        draw_credits = basemap != "plain" and credits_on_screen
         effective_show_bg = (style != "density" and not minimal) if show_background_tracks is None else show_background_tracks
         effective_cursors = not minimal if show_cursors is None else show_cursors
         effective_legend = not minimal if show_legend is None else show_legend
@@ -304,7 +307,7 @@ class CollectionVideoRenderer:
         map_legend_box = (
             choose_map_legend_box(
                 projected_tracks, layout, scale=ui, wide=map_legend_wide,
-                has_attribution=basemap != "plain",
+                has_attribution=draw_credits,
             )
             if style in DATA_STYLE_SPECS and effective_legend else None
         )
@@ -574,7 +577,7 @@ class CollectionVideoRenderer:
                         scale=ui, wide=map_legend_wide,
                     )
 
-                if basemap != "plain":
+                if draw_credits:
                     attribution = TILE_PROVIDERS[basemap]["attribution"]
                     font_size = max(10 * sc, 10 * ui)
                     attribution_font = FontManager.get_font(font_size)

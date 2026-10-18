@@ -12,7 +12,7 @@ class MediaValidator:
     """Validate duration, resolution, codecs (H.264; optional AAC), and faststart flag of MP4 videos."""
 
     @staticmethod
-    def validate_video(file_path: Path) -> Dict[str, Any]:
+    def validate_video(file_path: Path, *, expected_duration_s: float | None = None) -> Dict[str, Any]:
         file_path = Path(file_path)
         if not file_path.exists():
             return {"valid": False, "error": f"File not found: {file_path}"}
@@ -72,12 +72,18 @@ class MediaValidator:
         if (width, height) not in supported_canvases:
             violations.append("canvas must use a canonical project preset")
 
+        is_scene3d = bool({"flyover", "stretch", "strata"}.intersection(file_path.parts)) or file_path.stem.startswith(
+            ("flyover_", "stretch_", "strata_")
+        )
         if duration <= 0.5:
             violations.append("duration is empty")
-        elif "_preview" not in file_path.stem and abs(duration - 15.0) > 0.15:
-            violations.append("final MP4 must be 15 seconds")
-        elif "_preview" in file_path.stem and duration > 10.15:
-            violations.append("preview must be at most 10 seconds")
+        elif expected_duration_s is not None and abs(duration - expected_duration_s) > 0.25:
+            violations.append(f"video duration must match expected {expected_duration_s:.2f}s")
+        elif expected_duration_s is None and not is_scene3d:
+            if "_preview" not in file_path.stem and abs(duration - 15.0) > 0.15:
+                violations.append("final MP4 must be 15 seconds")
+            elif "_preview" in file_path.stem and duration > 10.15:
+                violations.append("preview must be at most 10 seconds")
         if has_audio and a_codec != "aac":
             violations.append("audio track must be AAC when present")
         if not has_faststart:

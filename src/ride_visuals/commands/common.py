@@ -49,6 +49,19 @@ def add_selection_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_credits_argument(parser: argparse.ArgumentParser) -> None:
+    """Opt-in on-screen map credits; a credits sidecar is always written."""
+    parser.add_argument(
+        "--credits-on-screen",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Also draw the short map-data attribution on the media "
+            "(a <name>.credits.txt sidecar is always written next to the output)"
+        ),
+    )
+
+
 def print_ingest_stats(stats: dict[str, Any]) -> None:
     """Print the standardized summary of an ingestion run."""
     print("\n==================================================")

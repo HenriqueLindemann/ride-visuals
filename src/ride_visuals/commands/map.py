@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import argparse
 
-from ride_visuals.commands.common import RuntimeConfig, add_selection_arguments
+from ride_visuals.commands.common import (
+    RuntimeConfig,
+    add_credits_argument,
+    add_selection_arguments,
+)
 from ride_visuals.commands.options import LOCALES, MAP_DETAILS, MAP_ROUTE_STYLES, THEMES
 
 
@@ -38,13 +42,16 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument("--catalog-db", type=str, help="Path to the catalog DuckDB")
     parser.add_argument("--streams-dir", type=str, help="Path to the Parquet streams directory")
     parser.add_argument("--outputs-dir", type=str, help="Path to the outputs directory")
+    add_credits_argument(parser)
     parser.add_argument("--config", type=str, help="Path to config/config.toml")
     parser.set_defaults(func=run)
 
 
 def run(args: argparse.Namespace) -> None:
     """Render maps for the selected activities."""
+    from ride_visuals.credits import write_credits
     from ride_visuals.maps.generator import MapGenerator
+    from ride_visuals.maps.tiles import basemap_sources
 
     runtime = RuntimeConfig.from_args(args)
     generator = MapGenerator(
@@ -54,6 +61,7 @@ def run(args: argparse.Namespace) -> None:
         locale=runtime.locale,
         theme=runtime.theme,
         selection=runtime.selection,
+        credits_on_screen=args.credits_on_screen,
     )
 
     if args.map_type == "overview":
@@ -83,3 +91,6 @@ def run(args: argparse.Namespace) -> None:
             map_detail=args.map_detail,
         )
     print(f"[Map] Saved successfully to: {output}")
+    credits = write_credits(output, basemap_sources(args.basemap))
+    if credits:
+        print(f"[Credits] {credits}")

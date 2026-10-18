@@ -9,6 +9,9 @@
   },
   "dependencies": {
     "@remotion/cli": "4.0.515",
+    "geist": "1.7.0",
+    "maplibre-contour": "0.1.1",
+    "maplibre-gl": "6.11.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "remotion": "4.0.515",

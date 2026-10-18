@@ -43,7 +43,8 @@ class MapGenerator:
                  outputs_dir: Path,
                  locale: str = DEFAULT_LOCALE,
                  theme: str = "midnight",
-                 selection: Optional[ActivitySelection] = None):
+                 selection: Optional[ActivitySelection] = None,
+                 credits_on_screen: bool = False):
         self.catalog_db_path = Path(catalog_db_path)
         self.streams_dir = Path(streams_dir)
         self.outputs_dir = Path(outputs_dir)
@@ -52,6 +53,8 @@ class MapGenerator:
         self.i18n = Translator(locale)
         self.theme = get_theme(theme)
         self.selection = selection or ActivitySelection()
+        # Full credits always go to a sidecar file; drawing them is opt-in.
+        self.credits_on_screen = credits_on_screen
 
     @staticmethod
     def _map_detail_scale(map_detail: str) -> int:
@@ -116,8 +119,8 @@ class MapGenerator:
         *,
         bottom: float = DEFAULT_ATTRIBUTION_Y,
     ) -> None:
-        """Keep provider credits visible in every raster-basemap export."""
-        if basemap not in TILE_PROVIDERS:
+        """Draw the provider credit line when on-screen credits are requested."""
+        if basemap not in TILE_PROVIDERS or not self.credits_on_screen:
             return
         fig.text(
             0.985,

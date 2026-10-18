@@ -6,13 +6,19 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
-from ride_visuals.commands.common import RuntimeConfig, add_selection_arguments
+from ride_visuals.commands.common import (
+    RuntimeConfig,
+    add_credits_argument,
+    add_selection_arguments,
+)
 from ride_visuals.commands.options import (
     COLLECTION_MOTIONS,
     COLLECTION_STYLES,
     LOCALES,
     MAP_DETAILS,
     OVERLAY_FORMATS,
+    SCENE3D_LOOKS,
+    STRATA_PERIODS,
     THEMES,
     VIDEO_ASPECTS,
     VIDEO_TYPES,
@@ -184,6 +190,25 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Static PNG, alpha WebM, or ProRes 4444 MOV (new overlays: WebM; overlay: PNG)",
     )
+    parser.add_argument(
+        "--look",
+        choices=SCENE3D_LOOKS,
+        default="carbon",
+        help="3D cartographic look: carbon or satellite (for flyover, stretch, strata)",
+    )
+    parser.add_argument(
+        "--toward",
+        type=str,
+        default=None,
+        help="Destination place name or 'lat,lon' for video stretch",
+    )
+    parser.add_argument(
+        "--period",
+        choices=STRATA_PERIODS,
+        default="auto",
+        help="Stacking period for video strata (auto, month, or year)",
+    )
+    add_credits_argument(parser)
     parser.add_argument("--config", type=str, help="Path to config/config.toml")
     add_selection_arguments(parser)
     parser.set_defaults(func=run)
@@ -194,6 +219,10 @@ def run(args: argparse.Namespace) -> None:
     if getattr(args, "minimal", False) and args.video_type == "telemetry":
         args.video_type = "minimal"
     context = VideoCommandContext.from_args(args)
+    if args.video_type in {"flyover", "stretch", "strata"}:
+        from ride_visuals.commands.video_scene3d import render_scene3d
+
+        return render_scene3d(context)
     if args.video_type == "timeline":
         from ride_visuals.commands.video_collection import render_timeline
 
