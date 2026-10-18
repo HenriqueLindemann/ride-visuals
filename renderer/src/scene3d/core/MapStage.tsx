@@ -10,6 +10,17 @@ import {buildStyle, contourPaint, contourSource, hillshadePaint, satelliteMixPai
 // stages it into public/scene3d (see stage_scene3d_assets).
 maplibregl.setWorkerUrl(staticFile('scene3d/maplibre-gl-worker.mjs'));
 
+// MapLibre resets a DEM tile's "border backfilled" flags when a load starts,
+// not when the new DEM arrives. A tile reloaded (projection or terrain switch)
+// while a neighbour finishes gets its old DEM backfilled and flagged, and the
+// fresh one keeps clamped borders: a flat 1 px edge the hillshade turns into a
+// dark line along every such tile seam. Reset the flags once the DEM is in.
+const loadDemTile = maplibregl.RasterDEMTileSource.prototype.loadTile;
+maplibregl.RasterDEMTileSource.prototype.loadTile = async function (tile) {
+  await loadDemTile.call(this, tile);
+  if (tile.dem) tile.neighboringTiles = this._getNeighboringTiles(tile.tileID);
+};
+
 const MAP_TIMEOUT_MS = 120_000;
 
 type Props = {

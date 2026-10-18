@@ -20,6 +20,9 @@ Look = Literal["carbon", "satellite"]
 
 #: Share of the relief frames allowed below the DEM level a scene is locked to.
 RELIEF_ZOOM_PERCENTILE = 10.0
+#: DEM tiles are declared 128 px in style.ts: MapLibre loads them two levels
+#: above the map zoom (one for 256 px).
+DEM_LEVELS_ABOVE_MAP_ZOOM = 2
 
 
 def relief_max_zoom(camera: CameraTrack) -> int:
@@ -30,14 +33,16 @@ def relief_max_zoom(camera: CameraTrack) -> int:
     hillshade, contours). Capping the level just above where the camera
     spends nearly all of its relief frames makes everything closer an
     overzoom of the same tiles: the land keeps one look while the camera
-    moves in and out. 256 px DEM tiles load one level above the map zoom.
+    moves in and out. The renderer declares the DEM tiles as 128 px, so they
+    load DEM_LEVELS_ABOVE_MAP_ZOOM levels above the map zoom and the locked
+    level is as fine as the closest shots used to get.
     """
     source_max = TILE_SOURCES["dem"].max_zoom
     relief = (camera.terrain > 0.01) & (camera.map_opacity > 0.5)
     if not relief.any():
         return source_max
     low = float(np.percentile(camera.zoom[relief], RELIEF_ZOOM_PERCENTILE))
-    return int(min(source_max, max(0, np.floor(low) + 1)))
+    return int(min(source_max, max(0, np.floor(low) + DEM_LEVELS_ABOVE_MAP_ZOOM)))
 
 
 def tile_paths(look: Look, dem_max_zoom: int | None = None) -> dict[str, Any]:

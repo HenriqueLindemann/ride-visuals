@@ -728,11 +728,11 @@ def test_relief_is_locked_to_one_dem_level_while_the_camera_zooms() -> None:
     cam = CameraTrack(100)
     cam.zoom = np.linspace(12.05, 14.0, 100)
     cam.terrain[:] = 1.5
-    # 256 px DEM tiles load a level above the map zoom: z13 serves all of 12..14.
-    assert relief_max_zoom(cam) == 13
+    # DEM tiles load two levels above the map zoom: z14 serves all of 12..14.
+    assert relief_max_zoom(cam) == 14
     # A brief establishing shot further out does not drag the whole film down.
     cam.zoom[:5] = 10.9
-    assert relief_max_zoom(cam) == 13
+    assert relief_max_zoom(cam) == 14
     # Without relief on screen the source keeps its full depth.
     cam.terrain[:] = 0.0
     assert relief_max_zoom(cam) == TILE_SOURCES["dem"].max_zoom

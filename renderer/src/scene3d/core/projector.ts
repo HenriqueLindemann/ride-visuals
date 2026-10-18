@@ -49,7 +49,11 @@ export interface Projector {
 type Matrix = ArrayLike<number>;
 
 interface InternalMap {
-  terrain?: {getElevationForLngLat: (lngLat: maplibregl.LngLat, transform: unknown) => number};
+  terrain?: {
+    getElevationForLngLat: (lngLat: maplibregl.LngLat, transform: unknown) => number;
+    /** Rendered DEM tiles; `maxElevation` is exaggerated metres plus a small pad. */
+    getCoverageIndex?: () => {maxElevation: number} | null;
+  };
   _camera?: {transform?: {isLocationOccluded?: (lngLat: maplibregl.LngLat) => boolean}};
 }
 
@@ -111,6 +115,12 @@ function makeRelief(
   const metersPerWorldPx = (my: number) =>
     (40_075_016.686 * Math.cos((unmercLat(my) * Math.PI) / 180)) / worldSize;
   const margin = Math.max(width, height) * 0.25;
+  // Every point of a ray from the eye to an on-screen target is itself on
+  // screen, so only the rendered tiles can block it: the stretch of the ray
+  // above their highest point is never tested. (Those samples, far up under
+  // the eye, also fall outside the rendered tiles, where each lookup costs a
+  // full tile-covering pass.)
+  const ceiling = terrain.getCoverageIndex?.()?.maxElevation ?? Infinity;
   const inAir = (mx: number, my: number, z: number, out: Float64Array, cutaway = 0): Visibility => {
     if (!project(mx, my, z, out)) return 0;
     if (out[0] < -margin || out[0] > width + margin || out[1] < -margin || out[1] > height + margin) return 1;
@@ -123,9 +133,13 @@ function makeRelief(
     // Ignore the last ~90 m so a line lying on a slope does not shadow itself.
     const sMax = 1 - Math.min(0.9, Math.max(90, cutaway) / Math.max(1, lengthM));
     const steps = 40;
-    for (let k = 1; k <= steps; k++) {
-      // Denser sampling near the point, where the ridges that matter usually are.
+    // Ray fraction where it comes down to the relief's ceiling.
+    const sTop = eyeZ > ceiling && dz < 0 ? (ceiling - eyeZ) / dz : 0;
+    // From the point back towards the eye: samples crowd near the point,
+    // where the ridges that matter usually are, so a hidden point exits early.
+    for (let k = steps; k >= 1; k--) {
       const s = sMax * Math.sqrt(k / steps);
+      if (s < sTop) break;
       if (eyeZ + dz * s < ground((eyeX + dx * s) / worldSize, (eyeY + dy * s) / worldSize) - 2) return 2;
     }
     if (!cutaway && z < ground(mx, my) - 4) return 2;

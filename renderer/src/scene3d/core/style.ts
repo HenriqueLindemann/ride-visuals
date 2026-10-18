@@ -25,6 +25,9 @@ export function hillshadePaint(relief: number) {
 let demSource: InstanceType<typeof mlcontour.DemSource> | null = null;
 let demSourceKey = '';
 
+/** Map zoom from which contours are overzoomed: where the relief is locked. */
+const contourLock = (tiles: TileSet) => Math.max(10, Math.min(tiles.demMaxZoom - 2, 14));
+
 /** Contour lines computed in a worker from the same DEM tiles the relief uses. */
 export function contourSource(tiles: TileSet) {
   const key = `${tiles.dem}@${tiles.demMaxZoom}`;
@@ -82,29 +85,32 @@ export function buildStyle(look: Look, tiles: TileSet): StyleSpecification {
     version: 8,
     projection: {type: 'globe'},
     sources: {
-      dem: {type: 'raster-dem', tiles: [tiles.dem], encoding: 'terrarium', tileSize: 256, maxzoom: tiles.demMaxZoom},
+      // Declared 128 px (the files are 256): MapLibre loads two levels above
+      // the map zoom, so the relief keeps its fine detail at chase distance.
+      dem: {type: 'raster-dem', tiles: [tiles.dem], encoding: 'terrarium', tileSize: 128, maxzoom: tiles.demMaxZoom},
       // The same tiles again for the 3D mesh: terrain and hillshade pick tiles
       // differently, and sharing one source costs the hillshade its finest level.
       // demMaxZoom is locked per scene (relief_max_zoom in spec.py), so the
       // relief does not change detail as the camera zooms.
-      terrain: {type: 'raster-dem', tiles: [tiles.dem], encoding: 'terrarium', tileSize: 256, maxzoom: tiles.demMaxZoom},
+      terrain: {type: 'raster-dem', tiles: [tiles.dem], encoding: 'terrarium', tileSize: 128, maxzoom: tiles.demMaxZoom},
       omt: {type: 'vector', tiles: [tiles.vector], maxzoom: tiles.vectorMaxZoom},
       contours: {
         type: 'vector',
         tiles: [
-          // One spacing at every level: a denser set past some zoom would
-          // make the lines visibly double as the camera comes in.
+          // Wider spacing only further out than the relief lock (demMaxZoom - 2
+          // as a map zoom); from there on every line comes from the same tiles.
           contours.contourProtocolUrl({
-            thresholds: {10: [50, 200]},
+            thresholds: {10: [50, 200], [contourLock(tiles)]: [25, 100]},
             contourLayer: 'contours',
             elevationKey: 'ele',
             levelKey: 'level',
-            overzoom: 1,
+            // Each contour tile from the DEM tile of its own level (the finest lines).
+            overzoom: 0,
           }),
         ],
         minzoom: 10,
         // Locked with the relief (demMaxZoom is per scene): closer is overzoom.
-        maxzoom: Math.max(10, Math.min(tiles.demMaxZoom - 1, 14)),
+        maxzoom: contourLock(tiles),
       },
     },
     sky: {
