@@ -124,6 +124,7 @@ export const Scene3D = ({specUrl, width, height}: SceneInput) => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawOps(ctx, projector, output.ops);
     drawKnockouts(ctx, output.knockouts ?? [], 28 * scale);
+    if (output.overlay) drawOps(ctx, projector, output.overlay, {clear: false});
   }, [output, projector, width, height, scale]);
 
   useEffect(() => {

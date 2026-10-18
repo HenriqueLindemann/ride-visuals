@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -24,7 +25,7 @@ from ride_visuals.scene3d.camera import (
     travel,
     zoom_for_mpp,
 )
-from ride_visuals.scene3d.climbs import Climb, detect_climbs, featured_climbs
+from ride_visuals.scene3d.climbs import Climb, detect_climbs, featured_climbs, hero_climb
 from ride_visuals.scene3d.framing import (
     adaptive_exaggeration,
     occlusion,
@@ -52,12 +53,44 @@ SIDE_PITCH = 84.0
 SIDE_EXAGGERATION = 1.0
 SIDE_ORBIT_RATE_DEG_S = 72.0
 #: The hero climb is seen three-quarter on (start lower left, summit upper
-#: right): a 60-odd degree orbit off the chase, eased over HERO_FADE_S.
+#: right): a 60-odd degree orbit off the chase, eased over HERO_FADE_S. The
+#: view starts from the most dramatic angle (HERO_PITCH) and only rises
+#: towards the vertical when the relief would hide the road (HERO_PITCHES).
 HERO_VIEW_ANGLE_DEG = 62.0
+HERO_VIEW_ANGLES_DEG = (62.0, 50.0, 74.0)
 HERO_FADE_S = 2.8
 HERO_ORBIT_RATE_DEG_S = 42.0
 HERO_PITCH = 64.0
-#: The best climb only gets the hero treatment when it is a real climb.
+HERO_PITCHES = (64.0, 58.0, 52.0, 46.0, 40.0)
+#: While the hero beat holds, the camera keeps drifting: this much orbit and
+#: dolly-in over the beat, so it never reads as a frozen frame.
+HERO_ORBIT_DRIFT_DEG = 8.0
+HERO_DOLLY_ZOOM = 0.16
+#: Road samples the hero view is judged on (fine enough to see a short gap).
+HERO_VIEW_SAMPLES = 160
+#: Cost of each degree of pitch given up, of each degree off the 3/4 angle,
+#: and of seeing the climb run right to left, against the hidden fraction.
+HERO_PITCH_COST = 0.0015
+HERO_ANGLE_COST = 0.002
+HERO_MIRROR_COST = 0.05
+#: Where the road is drawn above the relief (ROUTE_LIFT_M in flyover.ts).
+ROUTE_LIFT_M = 4.0
+
+#: Screen layout at a 1080 px short side (see _Layout).
+LAYOUT_1080: dict = {
+    "landscape": {"margin_x": 112.0, "top_y": 88.0, "counters_from_bottom": 162.0, "readout_w": 460.0},
+    "portrait": {"margin_x": 72.0, "top_y": 104.0, "counters_from_bottom": 196.0, "readout_w_frac": 0.6},
+    "counter_w": 440.0,
+    "counter_h": 110.0,
+    #: Readout rows: labels, then the profile strip, then the grade under it.
+    "readout_strip_top": 34.0,
+    "readout_strip_h": 56.0,
+    "readout_grade_h": 40.0,
+}
+
+#: Local metres (x east, y north) -> ground height (m), NaN where unknown.
+GroundXY = Callable[[np.ndarray, np.ndarray], np.ndarray]
+#: The climb of the day only gets the hero treatment when it is a real climb.
 HERO_MIN_GAIN_M = 100.0
 #: Where the hero climb sits on screen (x0, y0, x1, y1), clear of the counters.
 HERO_BOX = (0.2, 0.24, 0.8, 0.72)
@@ -69,6 +102,13 @@ CRUISE_RAMP_S = 1.4
 TYPICAL_CHASE_ZOOM = 12.4
 #: Levels the opening establishing shot sits above the chase zoom.
 OPENING_ZOOM_DROP = 1.5
+#: Live climb readout: shown for climbs that last at least this long on
+#: screen; grade is measured over GRADE_WINDOW_M of road (a sign's grade, not
+#: the noise of each metre) and eased over READOUT_GRADE_SMOOTH_S.
+READOUT_MIN_S = 3.5
+GRADE_WINDOW_M = 200.0
+READOUT_GRADE_SMOOTH_S = 0.5
+READOUT_PROFILE_SAMPLES = 96
 
 
 @dataclass(frozen=True)
@@ -206,6 +246,201 @@ def _side_view(
     )
 
 
+@dataclass(frozen=True)
+class _HeroView:
+    bearing: float
+    pitch: float
+    zoom: float
+    hidden: float
+
+
+def _hero_view(
+    px: np.ndarray,
+    py: np.ndarray,
+    pz: np.ndarray,
+    centre: tuple[float, float, float],
+    exaggeration: float,
+    ground_xy: GroundXY | None,
+    lat: float,
+    width: int,
+    height: int,
+    ceiling_m: float,
+) -> _HeroView:
+    """Camera that shows the whole hero climb: as oblique as the relief allows.
+
+    Every candidate (side, angle off the climb's direction, pitch) is framed
+    to fill HERO_BOX and scored by the fraction of the road the relief hides
+    from it, as the player will draw it, plus small costs for giving up the
+    low dramatic angle or the start-left, summit-right reading.
+    """
+    cx, cy, mid_alt = centre
+    climb_dir = float(bearing_deg(px[-1] - px[0], py[-1] - py[0]))
+    if ground_xy is not None:
+        road = ground_xy(px, py)
+        road_z = (np.where(np.isfinite(road), road, pz) + ROUTE_LIFT_M) * exaggeration
+    else:
+        road_z = (pz + ROUTE_LIFT_M) * exaggeration
+    candidates = [
+        (side, angle, pitch)
+        for side in (-1.0, 1.0)
+        for angle in HERO_VIEW_ANGLES_DEG
+        for pitch in HERO_PITCHES
+    ]
+    if ground_xy is None:
+        candidates = candidates[:1]
+    n = len(candidates)
+    bearings = np.array([(climb_dir + side * angle) % 360.0 for side, angle, _ in candidates])
+    pitches = np.array([pitch for _, _, pitch in candidates])
+    zooms = np.array([
+        zoom_to_fill(
+            cx, cy, mid_alt * exaggeration, pitch, bearing, lat, width, height,
+            px, py, pz * exaggeration, HERO_BOX, zoom_range=(11.0, 14.0),
+        )
+        for bearing, pitch in zip(bearings, pitches, strict=True)
+    ])
+    hidden = np.zeros(n)
+    if ground_xy is not None:
+        # Judged over the whole beat (where the drift starts and where it
+        # ends), every candidate in one pass over the DEM.
+        dx, dy, dz = eye_offset(
+            np.concatenate([zooms, zooms + HERO_DOLLY_ZOOM]),
+            np.tile(pitches, 2),
+            np.concatenate([bearings, bearings + HERO_ORBIT_DRIFT_DEG]),
+            np.full(2 * n, lat),
+            float(height),
+        )
+        seen = occlusion(
+            cx + dx, cy + dy, mid_alt * exaggeration + dz,
+            np.tile(px, (2 * n, 1)), np.tile(py, (2 * n, 1)), np.tile(road_z, (2 * n, 1)),
+            lambda x, y: np.nan_to_num(ground_xy(x, y), nan=-1e4) * exaggeration,
+            ceiling=ceiling_m * exaggeration,
+        )
+        hidden = np.maximum(seen[:n], seen[n:])
+    best: _HeroView | None = None
+    best_cost = np.inf
+    for k, (side, angle, pitch) in enumerate(candidates):
+        cost = (
+            hidden[k]
+            + HERO_PITCH_COST * (HERO_PITCH - pitch)
+            + HERO_ANGLE_COST * abs(angle - HERO_VIEW_ANGLE_DEG)
+            + (HERO_MIRROR_COST if side > 0 else 0.0)
+        )
+        if cost < best_cost:
+            best = _HeroView(float(bearings[k]), pitch, float(zooms[k]), float(hidden[k]))
+            best_cost = cost
+    assert best is not None
+    return best
+
+
+@dataclass(frozen=True)
+class _Layout:
+    """Where the screen furniture sits (px): the single source for director and player.
+
+    Sizes are given for a 1080 px short side (LAYOUT_1080) and scaled. The
+    live climb readout sits top right, mirroring the opening title: during
+    the chase the top of the frame is distant land, while the road behind the
+    rider always runs down through the bottom middle.
+    """
+
+    scale: float
+    margin_x: float
+    top_y: float
+    #: Top of the corner counters (their label row).
+    bottom_y: float
+    counter_w: float
+    counter_h: float
+    readout: tuple[float, float, float, float]
+    strip_top: float
+    strip_bottom: float
+
+    @classmethod
+    def for_frame(cls, width: int, height: int) -> _Layout:
+        portrait = height > width
+        ref = LAYOUT_1080["portrait" if portrait else "landscape"]
+        scale = min(width, height) / 1080.0
+        margin_x = ref["margin_x"] * scale
+        top_y = ref["top_y"] * scale
+        right = width - margin_x
+        readout_w = ref["readout_w_frac"] * width if portrait else ref["readout_w"] * scale
+        strip_top = top_y + LAYOUT_1080["readout_strip_top"] * scale
+        strip_bottom = strip_top + LAYOUT_1080["readout_strip_h"] * scale
+        return cls(
+            scale=scale,
+            margin_x=margin_x,
+            top_y=top_y,
+            bottom_y=height - ref["counters_from_bottom"] * scale,
+            counter_w=LAYOUT_1080["counter_w"] * scale,
+            counter_h=LAYOUT_1080["counter_h"] * scale,
+            readout=(right - readout_w, top_y, right, strip_bottom + LAYOUT_1080["readout_grade_h"] * scale),
+            strip_top=strip_top,
+            strip_bottom=strip_bottom,
+        )
+
+    def keep_out(self, width: int, height: int) -> list[tuple[float, float, float, float]]:
+        """Boxes a summit tag must stay clear of: both counters and the readout."""
+        top = self.bottom_y - self.counter_h
+        return [
+            (0.0, top, self.counter_w, float(height)),
+            (width - self.counter_w, top, float(width), float(height)),
+            self.readout,
+        ]
+
+    def story(self) -> dict[str, object]:
+        def r(v: float) -> float:
+            return round(v, 1)
+
+        return {
+            "marginX": r(self.margin_x),
+            "topY": r(self.top_y),
+            "bottomY": r(self.bottom_y),
+            "routeLift": ROUTE_LIFT_M,
+            "readout": {
+                "box": [r(v) for v in self.readout],
+                "stripTop": r(self.strip_top),
+                "stripBottom": r(self.strip_bottom),
+            },
+        }
+
+
+def _grade_pct(prof_d: np.ndarray, prof_alt: np.ndarray) -> np.ndarray:
+    """Grade (%) at each profile sample over the GRADE_WINDOW_M of road around it."""
+    half = 0.5 * GRADE_WINDOW_M
+    ahead = np.interp(prof_d + half, prof_d, prof_alt)
+    behind = np.interp(prof_d - half, prof_d, prof_alt)
+    run = np.minimum(prof_d + half, prof_d[-1]) - np.maximum(prof_d - half, 0.0)
+    return 100.0 * (ahead - behind) / np.maximum(run, 1.0)
+
+
+def _readout_windows(
+    climbs: list[Climb],
+    head: np.ndarray,
+    t: np.ndarray,
+    riding: np.ndarray,
+    tag_starts: list[float | None],
+) -> list[tuple[float, float] | None]:
+    """(start, end) seconds of each climb's live readout, or None when too brief.
+
+    It comes in as the head reaches the foot and hands over to the summit tag
+    (which sums the climb up) as that comes in, or leaves shortly after the
+    summit; it never overlaps the next climb's readout.
+    """
+    ride_t = t[riding]
+    ride_head = head[riding]
+    windows: list[tuple[float, float] | None] = []
+    for climb, tag_start in zip(climbs, tag_starts, strict=True):
+        t_foot = float(np.interp(climb.start_m, ride_head, ride_t))
+        t_top = float(np.interp(climb.end_m, ride_head, ride_t))
+        t_out = t_top + 0.9
+        if tag_start is not None:
+            t_out = min(t_out, tag_start + 0.45)
+        windows.append((t_foot - 0.3, t_out) if t_out - t_foot >= READOUT_MIN_S else None)
+    for k in range(len(windows) - 1):
+        cur, nxt = windows[k], windows[k + 1]
+        if cur is not None and nxt is not None and cur[1] > nxt[0] - 0.1:
+            windows[k] = (cur[0], nxt[0] - 0.1)
+    return windows
+
+
 def _tag_windows(
     climbs: list[Climb],
     hero: Climb | None,
@@ -270,10 +505,7 @@ def _tag_layout(  # noqa: PLR0913
     shown = np.flatnonzero(env > 0.05)
     if len(shown) == 0:
         return {"tagDir": "up", "tagLeader": 44.0}
-    scale = min(width, height) / 1080.0
-    portrait = height > width
-    bottom = height - ((196.0 if portrait else 162.0) + 110.0) * scale
-    keep_out = [(0.0, bottom, 440.0 * scale, float(height)), (width - 440.0 * scale, bottom, float(width), float(height))]
+    keep_out = _Layout.for_frame(width, height).keep_out(width, height)
     step = max(1, len(shown) // 6)
     anchors: list[tuple[float, float]] = []
     obstacles: list[tuple[np.ndarray, np.ndarray]] = []
@@ -459,12 +691,8 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
 
     prof_d, prof_alt = track.smoothed_altitude(sigma_m=60.0, step_m=10.0)
     all_climbs = detect_climbs(prof_d, prof_alt)
-    climbs = featured_climbs(all_climbs, limit=3)
-    hero: Climb | None = None
-    if climbs:
-        best_climb = max(climbs, key=lambda c: c.score)
-        if best_climb.gain_m >= HERO_MIN_GAIN_M:
-            hero = best_climb
+    hero = hero_climb(all_climbs, min_gain_m=HERO_MIN_GAIN_M)
+    climbs = featured_climbs(all_climbs, limit=3, include=hero)
     grid_x = gaussian_smooth(np.interp(prof_d, track.dist, rx), 6.0)
     grid_y = gaussian_smooth(np.interp(prof_d, track.dist, ry), 6.0)
     side = _side_view(grid_x, grid_y, prof_d, prof_alt, total_m, SIDE_EXAGGERATION, width, height, origin[1])
@@ -558,51 +786,17 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
     hero_window = np.zeros(frames, dtype=bool)
     hero_alt = np.zeros(frames)
     if hero is not None and t_hero_end > t_hero_start:
-        hero_d = np.linspace(hero.start_m, hero.end_m, 12)
-        hx = np.interp(hero_d, prof_d, grid_x)
-        hy = np.interp(hero_d, prof_d, grid_y)
-        climb_dir = float(bearing_deg(hx[-1] - hx[0], hy[-1] - hy[0]))
-        mid_x = float(hx.mean())
-        mid_y = float(hy.mean())
-        hero_mid_alt = float(np.interp(0.5 * (hero.start_m + hero.end_m), prof_d, prof_alt))
-        hero_path = np.linspace(hero.start_m, hero.end_m, 48)
+        hero_path = np.linspace(hero.start_m, hero.end_m, HERO_VIEW_SAMPLES)
         hero_px = np.interp(hero_path, prof_d, grid_x)
         hero_py = np.interp(hero_path, prof_d, grid_y)
         hero_pz = np.interp(hero_path, prof_d, prof_alt)
-
-        def hero_fit(bearing: float) -> float:
-            """Zoom at which the whole climb fills the middle of the frame, seen from ``bearing``."""
-            return zoom_to_fill(
-                mid_x, mid_y, hero_mid_alt * exaggeration, HERO_PITCH, bearing, origin[1], width, height,
-                hero_px, hero_py, hero_pz * exaggeration, HERO_BOX, zoom_range=(11.0, 14.0),
-            )
-
-        hero_zoom = hero_fit((climb_dir - HERO_VIEW_ANGLE_DEG) % 360.0)
-        side_bearing = (climb_dir - HERO_VIEW_ANGLE_DEG) % 360.0
-        if sampler is not None:
-            costs = []
-            for candidate in (side_bearing, (climb_dir + HERO_VIEW_ANGLE_DEG) % 360.0):
-                dx, dy, dz = eye_offset(
-                    np.array([hero_zoom]), np.array([HERO_PITCH]), np.array([candidate]), np.array([origin[1]]), float(height)
-                )
-                costs.append(
-                    float(
-                        occlusion(
-                            np.array([mid_x + dx[0]]),
-                            np.array([mid_y + dy[0]]),
-                            np.array([hero_mid_alt * exaggeration + dz[0]]),
-                            hx[None, :],
-                            hy[None, :],
-                            (np.interp(hero_d, prof_d, prof_alt)[None, :] + 3.0) * exaggeration,
-                            lambda x, y: np.nan_to_num(ground_xy(x, y), nan=-1e4) * exaggeration,
-                            ceiling=relief_ceiling * exaggeration,
-                        )[0]
-                    )
-                )
-            # Seen from the other side the climb runs right-to-left; only switch for a clearly better view.
-            if costs[1] + 0.15 < costs[0]:
-                side_bearing = (climb_dir + HERO_VIEW_ANGLE_DEG) % 360.0
-                hero_zoom = hero_fit(side_bearing)
+        mid_x, mid_y = float(hero_px.mean()), float(hero_py.mean())
+        hero_mid_alt = float(np.interp(0.5 * (hero.start_m + hero.end_m), prof_d, prof_alt))
+        view = _hero_view(
+            hero_px, hero_py, hero_pz, (mid_x, mid_y, hero_mid_alt), exaggeration,
+            ground_xy if sampler is not None else None, origin[1], width, height, relief_ceiling,
+        )
+        hero_zoom, hero_pitch, side_bearing = view.zoom, view.pitch, view.bearing
         # Fully in shortly after the crest leg starts, out before it ends: the
         # orbit in and out is one eased move each, never a snap.
         hero_blend = envelope(t, t_hero_start - 0.6 * HERO_FADE_S, t_hero_end + 0.6 * HERO_FADE_S, HERO_FADE_S)
@@ -612,9 +806,11 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         hero_alt = np.full(frames, hero_mid_alt)
         chase_cx = chase_cx * (1.0 - hero_blend) + mid_x * hero_blend
         chase_cy = chase_cy * (1.0 - hero_blend) + mid_y * hero_blend
-        chase_zoom = chase_zoom * (1.0 - hero_blend) + (hero_zoom + 0.16 * orbit_drift) * hero_blend
-        chase_pitch = chase_pitch * (1.0 - hero_blend) + HERO_PITCH * hero_blend
-        chase_bearing = lerp_angle(chase_bearing, side_bearing + 8.0 * orbit_drift, hero_blend)
+        chase_zoom = chase_zoom * (1.0 - hero_blend) + (hero_zoom + HERO_DOLLY_ZOOM * orbit_drift) * hero_blend
+        chase_pitch = chase_pitch * (1.0 - hero_blend) + hero_pitch * hero_blend
+        chase_bearing = lerp_angle(
+            chase_bearing, side_bearing + HERO_ORBIT_DRIFT_DEG * orbit_drift, hero_blend
+        )
 
     # Assemble full-timeline camera in local metres.
     cx = np.zeros(frames)
@@ -738,6 +934,16 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         cum_ascent = cum_ascent * (official_gain / raw_total_gain)
     ascent_ch = np.interp(head, prof_d, cum_ascent)
 
+    # Live climb readout: the grade under the head, eased so it reads as a
+    # number changing, not flickering.
+    grade_ch = gaussian_smooth(
+        np.interp(head, prof_d, _grade_pct(prof_d, prof_alt)), READOUT_GRADE_SMOOTH_S * fps
+    )
+    tag_windows = _tag_windows(climbs, hero, head, t, t_hero_start, t_hero_end)
+    readouts = _readout_windows(
+        climbs, head, t, riding, [start if end > start else None for start, end, _ in tag_windows]
+    )
+
     unfold_ch = travel(span(t, t_side_end, t_unfold_end))
     chart_ch = ease_in_out_sine(span(t, t_unfold_end - 0.5, t_unfold_end + 0.7))
     stats_ch = ease_in_out_sine(span(t, t_unfold_end + 0.2, t_unfold_end + 1.3))
@@ -752,6 +958,7 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         "km": head / max(total_m, 1.0) * total_km,
         "ascent": ascent_ch,
         "beat": beat,
+        "grade": grade_ch,
         "unfold": unfold_ch,
         "chart": chart_ch,
         "stats": stats_ch,
@@ -759,11 +966,17 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
     }
 
     story_climbs = []
-    for k, (start_s, end_s, fade_s) in enumerate(_tag_windows(climbs, hero, head, t, t_hero_start, t_hero_end)):
+    for k, (start_s, end_s, fade_s) in enumerate(tag_windows):
         climb = climbs[k]
         summit_idx = int(np.searchsorted(track.dist, climb.end_m, side="left"))
         summit_idx = min(len(track.lon) - 1, max(0, summit_idx))
         channels[f"climb{k}"] = envelope(t, start_s, end_s, fade_s) if end_s > start_s else np.zeros(frames)
+        readout = readouts[k]
+        if readout is not None:
+            channels[f"readout{k}"] = envelope(t, readout[0], readout[1], 0.45) * counters
+        climb_d = np.linspace(climb.start_m, climb.end_m, READOUT_PROFILE_SAMPLES)
+        climb_alt = np.interp(climb_d, prof_d, prof_alt)
+        climb_low = float(climb_alt.min())
         gain_text = f"+{i18n.number(round(climb.gain_m))} m"
         sub_text = f"{i18n.number(climb.length_m / 1000.0, 1)} km · {i18n.number(climb.grade_pct, 1)}%"
         story_climbs.append(
@@ -777,6 +990,12 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
                 "gainText": gain_text,
                 "subText": sub_text,
                 "hero": climb == hero,
+                "readout": readout is not None,
+                # The climb's own profile, 0..1 between its lowest and highest point.
+                "profile": np.round(
+                    (climb_alt - climb_low) / max(float(climb_alt.max()) - climb_low, 1.0), 4
+                ).tolist(),
+                "topText": f"{i18n.number(round(climb.end_alt))} m",
                 **_tag_layout(
                     channels[f"climb{k}"], climb, cam, cx, cy, origin, prof_d, grid_x, grid_y, prof_alt,
                     width, height, gain_text, sub_text,
@@ -831,6 +1050,7 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         "labels": {
             "distance": i18n.text("scene3d.distance"),
             "ascent": i18n.text("scene3d.ascent"),
+            "climb": i18n.text("scene3d.climb"),
             "kmUnit": "km",
             "mUnit": "m",
             "zeroKm": "0 km",
@@ -838,6 +1058,7 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
             "peakAlt": f"{i18n.number(round(max_alt))} m",
         },
         "unfold": side.story(origin, prof_alt),
+        "layout": _Layout.for_frame(width, height).story(),
         "totalM": round(total_m, 1),
         "profile": prof_norm,
         "peakFraction": peak_fraction,

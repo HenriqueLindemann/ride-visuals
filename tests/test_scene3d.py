@@ -18,7 +18,7 @@ from PIL import Image
 
 from ride_visuals.cli import build_parser
 from ride_visuals.scene3d.camera import eye_offset
-from ride_visuals.scene3d.climbs import detect_climbs, featured_climbs
+from ride_visuals.scene3d.climbs import detect_climbs, featured_climbs, hero_climb
 from ride_visuals.scene3d.flyover import (
     MAX_BEARING_RATE_DEG_S,
     SIDE_ORBIT_RATE_DEG_S,
@@ -219,6 +219,49 @@ def test_climb_detection_on_synthetic_profiles() -> None:
     top_saw = featured_climbs(all_saw, limit=3)
     assert len(top_saw) <= 3
     assert [c.start_m for c in top_saw] == sorted(c.start_m for c in top_saw)
+
+
+def _profile(points: list[tuple[float, float]], step_m: float = 10.0) -> tuple[np.ndarray, np.ndarray]:
+    """Piecewise-linear profile through (km, altitude) points, sampled every ``step_m``."""
+    km = np.array([p[0] for p in points]) * 1000.0
+    dist = np.arange(0.0, km[-1] + step_m, step_m)
+    return dist, np.interp(dist, km, [p[1] for p in points])
+
+
+def test_climb_continues_through_a_false_flat() -> None:
+    # A mountain road with a 33 m dip two thirds of the way up (as on the Kalmit).
+    dist, alt = _profile([(0, 200), (2, 200), (9.5, 510), (11, 477), (14, 666), (20, 300)])
+    climbs = detect_climbs(dist, alt)
+    assert len(climbs) == 1
+    assert climbs[0].start_m == pytest.approx(2_000.0, abs=50.0)
+    assert climbs[0].end_m == pytest.approx(14_000.0, abs=50.0)
+    assert climbs[0].gain_m == pytest.approx(466.0, abs=2.0)
+
+
+def test_climb_does_not_absorb_a_rolling_approach_or_a_deep_dip() -> None:
+    # A 1.5% roller, a dip, then the real climb: the roller is not climbing.
+    rolling = detect_climbs(*_profile([(0, 120), (3, 165), (4.5, 125), (10, 480), (14, 300)]))
+    assert [round(c.start_m / 1000.0, 1) for c in rolling] == [4.5]
+    # Two climbs split by a long, deep descent stay two climbs.
+    deep = detect_climbs(*_profile([(0, 100), (4, 400), (7, 200), (11, 500), (15, 200)]))
+    assert len(deep) == 2
+
+
+def test_climb_starts_where_the_climbing_starts() -> None:
+    # 16 km of gentle valley road (1%) into a 2 km wall (7%): the climb is the wall.
+    climbs = detect_climbs(*_profile([(0, 200), (16, 360), (18, 500), (22, 300)]))
+    assert len(climbs) == 1
+    assert climbs[0].start_m == pytest.approx(16_000.0, abs=100.0)
+    assert climbs[0].grade_pct == pytest.approx(7.0, abs=0.3)
+
+
+def test_hero_is_the_climb_that_gains_the_most() -> None:
+    # A short steep wall can outscore a long mountain road; the story is the mountain.
+    climbs = detect_climbs(*_profile([(0, 200), (11, 660), (14, 300), (19.5, 630), (25, 300)]))
+    mountain = max(climbs, key=lambda c: c.gain_m)
+    assert hero_climb(climbs) == mountain
+    assert mountain in featured_climbs(climbs, limit=1, include=mountain)
+    assert hero_climb(detect_climbs(*_profile([(0, 200), (1, 260), (3, 200)]))) is None
 
 
 class _FakeSampler(DemSampler):
@@ -624,3 +667,72 @@ def test_stretch_draws_and_consumes_every_ride_including_far_ones(tmp_path: Path
     assert len(spec.tracks) == len(rides)
     assert sum(m["lengthM"] for m in meta) == pytest.approx(spec.story["totalM"], rel=1e-3)
     assert meta[-1]["beforeM"] + meta[-1]["lengthM"] == pytest.approx(spec.story["totalM"], rel=1e-3)
+
+
+def test_flyover_live_climb_readout_follows_long_climbs_only(tmp_path: Path) -> None:
+    # Short enough that the hill is a real climb (~5% at its steepest).
+    track = _synthetic_ride(length_km=30.0, max_climb_m=420.0)
+    spec = build_flyover_spec(track, sampler=_FakeSampler(700.0), fps=30, places_cache_dir=tmp_path, offline=True)
+    climbs = spec.story["climbs"]
+    assert any(c["readout"] for c in climbs)
+    head = spec.channels["head"]
+    for k, climb in enumerate(climbs):
+        assert len(climb["profile"]) > 2 and min(climb["profile"]) == 0.0 and max(climb["profile"]) == 1.0
+        if not climb["readout"]:
+            assert f"readout{k}" not in spec.channels
+            continue
+        shown = spec.channels[f"readout{k}"] > 0.5
+        # On screen while the head is on the climb, never before its foot.
+        assert float(head[shown].min()) >= climb["startM"] - 2_000.0
+        assert float(head[shown].max()) <= climb["endM"] + 1.0
+    # The readout box is the one tags keep out of, clear of the counters below it.
+    layout = spec.story["layout"]
+    x0, y0, x1, y1 = layout["readout"]["box"]
+    assert layout["topY"] <= y0 < layout["readout"]["stripTop"] < layout["readout"]["stripBottom"] < y1
+    assert x1 <= spec.width - layout["marginX"] + 0.5 and y1 < layout["bottomY"]
+    # Grade is a sign's grade: bounded and smooth, never metre-by-metre noise.
+    grade = spec.channels["grade"]
+    assert float(np.abs(grade).max()) < 25.0
+    assert float(np.abs(np.diff(grade)).max()) < 1.0
+
+
+def test_hero_view_rises_above_a_ridge_that_would_hide_the_climb() -> None:
+    from ride_visuals.scene3d.flyover import HERO_PITCH, HERO_PITCHES, _hero_view
+
+    # A straight 3 km climb heading east (start left, summit right from the south).
+    px = np.linspace(-1_500.0, 1_500.0, 120)
+    py = np.zeros_like(px)
+    pz = np.linspace(200.0, 500.0, 120)
+    centre = (0.0, 0.0, 350.0)
+    args = (px, py, pz, centre, 1.5)
+    tail = (49.4, 1920, 1080, 3_000.0)
+    flat = _hero_view(*args, lambda x, y: np.full(np.shape(x), 150.0), *tail)
+    assert flat.pitch == HERO_PITCH and flat.hidden == 0.0
+    # A wall just in front of the road hides it from every low, oblique view.
+    def walled(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        r = np.hypot(x, y)
+        return np.where((r > 2_400.0) & (r < 2_700.0), 900.0, 150.0)
+
+    view = _hero_view(*args, walled, *tail)
+    assert view.pitch < HERO_PITCH and view.pitch in HERO_PITCHES
+    assert view.hidden < 0.05
+    # Without relief data the default three-quarter view is kept.
+    assert _hero_view(*args, None, *tail).pitch == HERO_PITCH
+
+
+def test_relief_is_locked_to_one_dem_level_while_the_camera_zooms() -> None:
+    from ride_visuals.scene3d.camera import CameraTrack
+    from ride_visuals.scene3d.spec import relief_max_zoom
+    from ride_visuals.scene3d.tiles import TILE_SOURCES
+
+    cam = CameraTrack(100)
+    cam.zoom = np.linspace(12.05, 14.0, 100)
+    cam.terrain[:] = 1.5
+    # 256 px DEM tiles load a level above the map zoom: z13 serves all of 12..14.
+    assert relief_max_zoom(cam) == 13
+    # A brief establishing shot further out does not drag the whole film down.
+    cam.zoom[:5] = 10.9
+    assert relief_max_zoom(cam) == 13
+    # Without relief on screen the source keeps its full depth.
+    cam.terrain[:] = 0.0
+    assert relief_max_zoom(cam) == TILE_SOURCES["dem"].max_zoom

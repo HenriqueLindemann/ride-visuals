@@ -18,7 +18,29 @@ SceneKind = Literal["flyover", "stretch", "strata"]
 Look = Literal["carbon", "satellite"]
 
 
-def tile_paths(look: Look) -> dict[str, Any]:
+#: Share of the relief frames allowed below the DEM level a scene is locked to.
+RELIEF_ZOOM_PERCENTILE = 10.0
+
+
+def relief_max_zoom(camera: CameraTrack) -> int:
+    """DEM tile level a scene's relief is locked to.
+
+    MapLibre picks the DEM level from the camera zoom, so every whole zoom
+    level the camera crosses swaps the detail of the whole relief (mesh,
+    hillshade, contours). Capping the level just above where the camera
+    spends nearly all of its relief frames makes everything closer an
+    overzoom of the same tiles: the land keeps one look while the camera
+    moves in and out. 256 px DEM tiles load one level above the map zoom.
+    """
+    source_max = TILE_SOURCES["dem"].max_zoom
+    relief = (camera.terrain > 0.01) & (camera.map_opacity > 0.5)
+    if not relief.any():
+        return source_max
+    low = float(np.percentile(camera.zoom[relief], RELIEF_ZOOM_PERCENTILE))
+    return int(min(source_max, max(0, np.floor(low) + 1)))
+
+
+def tile_paths(look: Look, dem_max_zoom: int | None = None) -> dict[str, Any]:
     """Tile URL paths, relative to the server that serves the spec itself."""
     def path(key: str) -> str:
         return f"/tiles/{key}/{{z}}/{{x}}/{{y}}.{TILE_SOURCES[key].ext}"
@@ -27,7 +49,7 @@ def tile_paths(look: Look) -> dict[str, Any]:
         "dem": path("dem"),
         "vector": path("vector"),
         "satellite": path("satellite") if look == "satellite" else None,
-        "demMaxZoom": TILE_SOURCES["dem"].max_zoom,
+        "demMaxZoom": TILE_SOURCES["dem"].max_zoom if dem_max_zoom is None else dem_max_zoom,
         "vectorMaxZoom": TILE_SOURCES["vector"].max_zoom,
         "satelliteMaxZoom": TILE_SOURCES["satellite"].max_zoom,
     }
@@ -98,7 +120,7 @@ class SceneSpec:
                 "fps": self.fps,
                 "durationInFrames": self.frames,
             },
-            "tiles": tile_paths(self.look),
+            "tiles": tile_paths(self.look, relief_max_zoom(cam)),
             "credits": self.credits,
             "camera": {
                 "lon": _series(cam.lon, 7),

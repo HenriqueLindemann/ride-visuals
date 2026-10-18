@@ -521,10 +521,16 @@ class RemotionVideoEngine:
             props_json,
             "--gl",
             "angle",
+            # Lossless frame capture: JPEG lifts the near-black land and
+            # makes the fine relief shading shimmer from frame to frame.
+            "--image-format",
+            "png",
             "--codec",
             "h264",
+            # Fine contour and hillshade texture on near-black needs more bits
+            # than flat graphics, or it pulses with the encoder's frame types.
             "--crf",
-            "18",
+            "15",
             "--pixel-format",
             "yuv420p",
             "--color-space",

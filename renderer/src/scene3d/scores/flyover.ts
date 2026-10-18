@@ -18,6 +18,12 @@ export type FlyoverClimb = {
   /** Placement chosen by the director so the text never covers the route. */
   tagDir?: 'up' | 'left' | 'right';
   tagLeader?: number;
+  /** Long enough for the live readout (channel `readout<k>`). */
+  readout?: boolean;
+  /** The climb's own profile, 0..1 between its lowest and highest point. */
+  profile?: number[];
+  /** Summit altitude, e.g. "666 m". */
+  topText?: string;
 };
 
 /** The vertical plane (facing the level side camera) the route straightens into. */
@@ -31,6 +37,18 @@ export type FlyoverUnfold = {
   vertical: number;
   minAlt: number;
   altRange: number;
+};
+
+/** Screen furniture placement (px), decided by the director (`_Layout` in flyover.py). */
+export type FlyoverLayout = {
+  marginX: number;
+  topY: number;
+  /** Top of the corner counters. */
+  bottomY: number;
+  /** Height (m) the route is drawn above the relief, so slopes do not shadow their own road. */
+  routeLift: number;
+  /** Live climb readout: its box, and the profile strip inside it. */
+  readout: {box: [number, number, number, number]; stripTop: number; stripBottom: number};
 };
 
 export type FlyoverStat = {
@@ -48,6 +66,7 @@ export type FlyoverStory = {
   labels: {
     distance: string;
     ascent: string;
+    climb?: string;
     kmUnit: string;
     mUnit: string;
     zeroKm: string;
@@ -55,6 +74,7 @@ export type FlyoverStory = {
     peakAlt: string;
   };
   unfold: FlyoverUnfold;
+  layout: FlyoverLayout;
   totalM: number;
   profile: number[];
   peakFraction: number;
@@ -63,8 +83,14 @@ export type FlyoverStory = {
 };
 
 const scratch = new Float64Array(3);
-// Keeps the line off the mesh it lies on, so slopes do not shadow their own road.
-const ROUTE_LIFT_M = 4;
+const gradeFormats = new Map<string, Intl.NumberFormat>();
+
+/** Whole-number percent formatter, built once per locale (not every frame). */
+function gradeFormat(locale: string) {
+  let format = gradeFormats.get(locale);
+  if (!format) gradeFormats.set(locale, (format = new Intl.NumberFormat(locale, {maximumFractionDigits: 0})));
+  return format;
+}
 
 export function flyoverScore({spec, tracks, channel, projector, width, height, scale}: ScoreContext): ScoreOutput {
   const story = spec.story as unknown as FlyoverStory;
@@ -72,11 +98,10 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
   const ops: DrawOp[] = [];
   const texts: TextItem[] = [];
   const knockouts: Knockout[] = [];
+  const overlay: DrawOp[] = [];
 
   const portrait = height > width;
-  const marginX = Math.round((portrait ? 72 : 112) * scale);
-  const topY = Math.round((portrait ? 104 : 88) * scale);
-  const bottomY = Math.round(height - (portrait ? 196 : 162) * scale);
+  const {marginX, topY, bottomY, routeLift} = story.layout;
 
   const head = channel('head');
   const headDot = channel('headDot');
@@ -101,7 +126,7 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
         radius: 5 * scale,
         rgb: INK.accentRGB,
         alpha: headDot,
-        lift: ROUTE_LIFT_M,
+        lift: routeLift,
         occlude: hasRelief,
       });
     }
@@ -115,7 +140,7 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
         alpha: 0.96,
         width: 2.8 * scale,
         head: headDot,
-        lift: ROUTE_LIFT_M,
+        lift: routeLift,
         occlude: hasRelief,
       });
     }
@@ -170,6 +195,13 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
       rgb: INK.accentRGB,
       alpha: 0.72 * alpha,
     });
+  });
+
+  story.climbs.forEach((climb, k) => {
+    const alpha = climb.readout && spec.channels[`readout${k}`] ? channel(`readout${k}`) : 0;
+    if (alpha > 0.004 && climb.profile) {
+      climbReadout(climb, alpha, head, channel('grade'), story, spec.locale, scale, overlay, texts, knockouts);
+    }
   });
 
   // Opening title (top-left).
@@ -257,7 +289,7 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
       const pt = pointAtDistance(track, f * track.length);
       const mx0 = mercX(pt.lon);
       const my0 = mercY(pt.lat);
-      const z0 = projector.ground ? projector.ground(mx0, my0) + ROUTE_LIFT_M : pt.alt * projector.exaggeration;
+      const z0 = projector.ground ? projector.ground(mx0, my0) + routeLift : pt.alt * projector.exaggeration;
       // Plane coordinates: `along` (screen-right) and `depth` (towards the camera's view).
       const dx = (pt.lon - u.center[0]) * kLon;
       const dy = (pt.lat - u.center[1]) * kLat;
@@ -305,6 +337,25 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
         text: story.labels.peakAlt,
         opacity: chart,
       });
+    }
+    // The featured climbs stand out of the finished profile: the same climbs
+    // the readout followed during the ride.
+    if (whole && chart > 0.004) {
+      const xy = runs[0];
+      for (const climb of story.climbs) {
+        const i0 = Math.max(0, Math.round((climb.startM / story.totalM) * (n - 1)));
+        const i1 = Math.min(n - 1, Math.round((climb.endM / story.totalM) * (n - 1)));
+        if (i1 - i0 < 2) continue;
+        ops.push({
+          kind: 'screen-path',
+          xy: xy.slice(i0 * 2, (i1 + 1) * 2),
+          rgb: INK.accentRGB,
+          alpha: 0,
+          width: 0,
+          fillTo: baseY,
+          fillAlpha: (climb.hero ? 0.26 : 0.16) * chart,
+        });
+      }
     }
     for (const xy of runs) {
       ops.push({
@@ -358,5 +409,67 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
     }
   }
 
-  return {ops, texts, black, knockouts};
+  return {ops, texts, black, knockouts, overlay};
+}
+
+/**
+ * Live climb readout, in its reserved box: a label row (climb, summit
+ * altitude), the climb's profile drawn only as far as it has been ridden over
+ * a baseline as long as the whole climb, and the current grade under the rider.
+ */
+function climbReadout(
+  climb: FlyoverClimb,
+  alpha: number,
+  head: number,
+  grade: number,
+  story: FlyoverStory,
+  locale: string,
+  scale: number,
+  ops: DrawOp[],
+  texts: TextItem[],
+  knockouts: Knockout[],
+) {
+  const {box, stripTop: top, stripBottom: base} = story.layout.readout;
+  const [x0, y0, x1, y1] = box;
+  const prof = climb.profile!;
+  const n = prof.length;
+  const f = clamp01((head - climb.startM) / Math.max(1, climb.endM - climb.startM));
+  const xAt = (u: number) => x0 + u * (x1 - x0);
+  const yAt = (v: number) => base - v * (base - top);
+
+  knockouts.push({box: [x0 - 18 * scale, y0 - 6 * scale, x1 + 18 * scale, y1], alpha});
+  ops.push({kind: 'screen-path', xy: [x0, base, x1, base], rgb: INK.paperRGB, alpha: 0.24 * alpha, width: scale});
+  ops.push({kind: 'screen-path', xy: [x1, base, x1, top - 4 * scale], rgb: INK.paperRGB, alpha: 0.24 * alpha, width: scale});
+  const at = f * (n - 1);
+  const i0 = Math.floor(at);
+  if (f > 0) {
+    const xy: number[] = [];
+    for (let i = 0; i <= i0; i++) xy.push(xAt(i / (n - 1)), yAt(prof[i]));
+    const next = prof[Math.min(n - 1, i0 + 1)];
+    xy.push(xAt(f), yAt(prof[i0] + (next - prof[i0]) * (at - i0)));
+    ops.push({
+      kind: 'screen-path',
+      xy,
+      rgb: INK.accentRGB,
+      alpha: 0.96 * alpha,
+      width: 2 * scale,
+      fillTo: base,
+      fillAlpha: 0.2 * alpha,
+      head: alpha,
+    });
+  }
+  texts.push({kind: 'caption', id: 'readout-label', x: x0, y: y0, label: story.labels.climb ?? '', text: '', opacity: alpha});
+  texts.push({kind: 'caption', id: 'readout-top', x: x1, y: y0, label: climb.topText ?? '', text: '', align: 'right', opacity: alpha});
+  const pct = Math.round(grade) || 0;
+  const gx = Math.max(x0 + 24 * scale, Math.min(x1 - 24 * scale, xAt(f)));
+  texts.push({
+    kind: 'caption',
+    id: 'readout-grade',
+    x: gx,
+    y: base + 10 * scale,
+    text: `${gradeFormat(locale).format(pct)}%`,
+    size: 22,
+    align: 'center',
+    opacity: alpha,
+  });
 }

@@ -110,10 +110,14 @@ commands work for rides anywhere in the world (relief is ~30 m globally, finer
 where national elevation models exist).
 
 - **`video flyover <id>`**: one ride from above, then down into the relief.
-  The chase camera reads ahead along the route, the relief is exaggerated to
-  the scale of the view and swells over the featured climbs, and the hardest
-  climb is shown from the side. At the end the camera comes down level beside
-  the ride and the route straightens into its own elevation profile.
+  The chase camera reads ahead along the route and the relief is exaggerated
+  to the scale of the view. Climbs are found the way a rider names them (a
+  false flat does not end a climb, a gentle approach does not start one); on
+  the long ones a quiet readout draws the climb's profile as it is ridden,
+  with the current grade. The climb that gains the most is shown
+  three-quarter on, from the most dramatic angle that still sees all of its
+  road. At the end the camera comes down level beside the ride and the route
+  straightens into its own elevation profile, its climbs standing out.
 - **`video stretch`**: every ride of a selection laid end to end along a great
   circle from home, out onto the globe: each ride is used up along its own road
   while the line grows by the same distance (eastward, or `--toward "Lisbon"` /

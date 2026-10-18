@@ -172,3 +172,19 @@ def test_frame_points_centres_and_fills_a_growing_stack() -> None:
         fill_x = (sx.max() - sx.min()) / (0.70 * 1920)
         fill_y = (sy.max() - sy.min()) / (0.84 * 1080)
         assert max(fill_x, fill_y) > 0.8
+
+
+def test_occlusion_ignores_the_slope_a_road_lies_on_but_not_a_ridge() -> None:
+    # A road cut into a 30% hillside seen from below and in front: the slope
+    # right behind the road must not hide it; a ridge between does.
+    eye = (np.array([0.0]), np.array([-3_000.0]), np.array([1_500.0]))
+    road = (np.array([[0.0]]), np.array([[0.0]]), np.array([[4.0]]))
+
+    def hillside(_x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        return np.maximum(0.0, 0.3 * (y + 20.0))
+
+    def ridge(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        return hillside(x, y) + np.where(np.abs(y + 600.0) < 60.0, 1_400.0, 0.0)
+
+    assert occlusion(*eye, *road, hillside)[0] == 0.0
+    assert occlusion(*eye, *road, ridge)[0] == 1.0

@@ -38,6 +38,8 @@ MAX_RIDE_VERTICES = 4_000
 #: A "home loop" starts and ends this close to home (m); those open the film.
 HOME_LOOP_START_M = 25_000.0
 HOME_LOOP_END_M = 16_000.0
+#: Without any home loop, the opening frames the rides that start this close to home.
+HOME_START_FALLBACK_M = 30_000.0
 
 
 @dataclass(frozen=True)
@@ -72,7 +74,7 @@ def _home_loops_first(
     is_home = (start_d <= HOME_LOOP_START_M) & (end_d <= HOME_LOOP_END_M)
     if not is_home.any():
         # No loop closes at home: open on whatever starts there instead.
-        is_home = start_d <= max(30_000.0, float(start_d.min()))
+        is_home = start_d <= max(HOME_START_FALLBACK_M, float(start_d.min()))
     home_loops = [r for r, h in zip(by_length, is_home, strict=True) if h]
     others = [r for r, h in zip(by_length, is_home, strict=True) if not h]
     return home_loops + others, home_loops

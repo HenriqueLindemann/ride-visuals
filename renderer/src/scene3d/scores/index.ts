@@ -24,6 +24,8 @@ export type ScoreOutput = {
   black: number;
   /** Screen boxes under fixed text where drawn lines fade out (legibility). */
   knockouts?: Knockout[];
+  /** Screen furniture drawn after the knockouts (e.g. a chart inside a cleared box). */
+  overlay?: DrawOp[];
 };
 
 export type Score = (ctx: ScoreContext) => ScoreOutput;

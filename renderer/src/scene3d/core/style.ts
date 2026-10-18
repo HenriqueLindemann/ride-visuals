@@ -23,11 +23,12 @@ export function hillshadePaint(relief: number) {
 }
 
 let demSource: InstanceType<typeof mlcontour.DemSource> | null = null;
-let demSourceUrl = '';
+let demSourceKey = '';
 
 /** Contour lines computed in a worker from the same DEM tiles the relief uses. */
 export function contourSource(tiles: TileSet) {
-  if (!demSource || demSourceUrl !== tiles.dem) {
+  const key = `${tiles.dem}@${tiles.demMaxZoom}`;
+  if (!demSource || demSourceKey !== key) {
     demSource = new mlcontour.DemSource({
       url: tiles.dem,
       encoding: 'terrarium',
@@ -35,7 +36,7 @@ export function contourSource(tiles: TileSet) {
       worker: true,
       cacheSize: 200,
     });
-    demSourceUrl = tiles.dem;
+    demSourceKey = key;
   }
   return demSource;
 }
@@ -84,13 +85,17 @@ export function buildStyle(look: Look, tiles: TileSet): StyleSpecification {
       dem: {type: 'raster-dem', tiles: [tiles.dem], encoding: 'terrarium', tileSize: 256, maxzoom: tiles.demMaxZoom},
       // The same tiles again for the 3D mesh: terrain and hillshade pick tiles
       // differently, and sharing one source costs the hillshade its finest level.
+      // demMaxZoom is locked per scene (relief_max_zoom in spec.py), so the
+      // relief does not change detail as the camera zooms.
       terrain: {type: 'raster-dem', tiles: [tiles.dem], encoding: 'terrarium', tileSize: 256, maxzoom: tiles.demMaxZoom},
       omt: {type: 'vector', tiles: [tiles.vector], maxzoom: tiles.vectorMaxZoom},
       contours: {
         type: 'vector',
         tiles: [
+          // One spacing at every level: a denser set past some zoom would
+          // make the lines visibly double as the camera comes in.
           contours.contourProtocolUrl({
-            thresholds: {10: [50, 200], 11: [50, 200], 12: [50, 200], 13: [25, 100], 14: [25, 100]},
+            thresholds: {10: [50, 200]},
             contourLayer: 'contours',
             elevationKey: 'ele',
             levelKey: 'level',
@@ -98,7 +103,8 @@ export function buildStyle(look: Look, tiles: TileSet): StyleSpecification {
           }),
         ],
         minzoom: 10,
-        maxzoom: 14,
+        // Locked with the relief (demMaxZoom is per scene): closer is overzoom.
+        maxzoom: Math.max(10, Math.min(tiles.demMaxZoom - 1, 14)),
       },
     },
     sky: {

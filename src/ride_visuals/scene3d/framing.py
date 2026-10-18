@@ -157,11 +157,20 @@ def occlusion(
     ty: np.ndarray,
     tz: np.ndarray,
     ground: Callable[[np.ndarray, np.ndarray], np.ndarray],
-    steps: int = 18,
+    steps: int = 24,
     ceiling: float | None = None,
+    near_m: float = 90.0,
 ) -> np.ndarray:
-    """Fraction of targets whose line of sight dips under the ground."""
-    s = np.linspace(0.05, 0.9, steps)[None, None, :]
+    """Fraction of targets whose line of sight dips under the ground.
+
+    The same test the player applies (``inAir`` in projector.ts): samples
+    crowd towards the target, where the ridges that matter usually are, and
+    the last ``near_m`` of each ray are skipped so a road lying on a slope
+    does not hide itself.
+    """
+    reach = np.hypot(tx - eye_x[:, None], ty - eye_y[:, None])
+    s_max = 1.0 - np.minimum(0.9, near_m / np.maximum(reach, 1.0))
+    s = np.sqrt(np.arange(1, steps + 1) / steps)[None, None, :] * s_max[:, :, None]
     px = eye_x[:, None, None] + (tx[:, :, None] - eye_x[:, None, None]) * s
     py = eye_y[:, None, None] + (ty[:, :, None] - eye_y[:, None, None]) * s
     pz = eye_z[:, None, None] + (tz[:, :, None] - eye_z[:, None, None]) * s
@@ -352,7 +361,10 @@ def project_points(
 
 
 #: Tag candidates: (direction, leader px at 1080p), in order of preference.
-TAG_CANDIDATES = (("up", 44.0), ("up", 84.0), ("left", 48.0), ("right", 48.0), ("up", 130.0))
+TAG_CANDIDATES = (
+    ("up", 44.0), ("up", 84.0), ("left", 48.0), ("right", 48.0), ("up", 130.0),
+    ("left", 110.0), ("right", 110.0), ("up", 190.0), ("left", 180.0), ("right", 180.0),
+)
 
 
 def tag_box(direction: str, leader: float, x: float, y: float, w: float, h: float, scale: float):

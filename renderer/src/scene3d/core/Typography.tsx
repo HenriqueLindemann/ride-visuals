@@ -23,7 +23,7 @@ const entrance = (opacity: number, scale: number): CSSProperties => ({
   transform: `translateY(${(1 - opacity) * 10 * scale}px)`,
 });
 
-/** A sentence with an optional small label above it; one word may take the accent. */
+/** A sentence with an optional small label above it (either may be empty); one word may take the accent. */
 export type CaptionItem = {
   kind: 'caption';
   id: string;
@@ -100,14 +100,16 @@ function Caption({item, scale}: {item: CaptionItem; scale: number}) {
     >
       <div style={entrance(item.opacity, scale)}>
         {item.label ? <Label scale={scale}>{item.label}</Label> : null}
-        <div style={{fontSize: size, fontWeight: 400, letterSpacing: '-0.015em', lineHeight: 1.1, color: INK.paper, whiteSpace: 'nowrap'}}>
-          {parts.map((part, i) => (
-            <span key={i}>
-              {part}
-              {i < parts.length - 1 ? <span style={{color: INK.accent}}>{item.accent}</span> : null}
-            </span>
-          ))}
-        </div>
+        {item.text ? (
+          <div style={{...NUMERIC, fontSize: size, fontWeight: 400, letterSpacing: '-0.015em', lineHeight: 1.1, color: INK.paper, whiteSpace: 'nowrap'}}>
+            {parts.map((part, i) => (
+              <span key={i}>
+                {part}
+                {i < parts.length - 1 ? <span style={{color: INK.accent}}>{item.accent}</span> : null}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );

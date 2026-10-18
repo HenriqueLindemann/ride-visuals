@@ -46,6 +46,8 @@ export type ScreenPathOp = {
   fillTo?: number;
   fillAlpha?: number;
   dash?: number[];
+  /** 0..1: position marker at the last point. */
+  head?: number;
 };
 
 /**
@@ -312,14 +314,17 @@ function drawScreenPath(ctx: CanvasRenderingContext2D, op: ScreenPathOp) {
     ctx.closePath();
     ctx.fill();
   }
-  ctx.setLineDash(op.dash ?? []);
-  ctx.strokeStyle = rgba(op.rgb, op.alpha);
-  ctx.lineWidth = op.width;
-  ctx.beginPath();
-  ctx.moveTo(op.xy[0], op.xy[1]);
-  for (let i = 1; i < n; i++) ctx.lineTo(op.xy[i * 2], op.xy[i * 2 + 1]);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  if (op.alpha > 0.002) {
+    ctx.setLineDash(op.dash ?? []);
+    ctx.strokeStyle = rgba(op.rgb, op.alpha);
+    ctx.lineWidth = op.width;
+    ctx.beginPath();
+    ctx.moveTo(op.xy[0], op.xy[1]);
+    for (let i = 1; i < n; i++) ctx.lineTo(op.xy[i * 2], op.xy[i * 2 + 1]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  if (op.head) drawHead(ctx, op.xy[(n - 1) * 2], op.xy[(n - 1) * 2 + 1], op.rgb, op.head * Math.min(1, op.alpha * 1.4));
 }
 
 /** Vertical hairline; with terrain, the parts hidden by the relief are skipped. */
@@ -404,13 +409,14 @@ function drawRing(ctx: CanvasRenderingContext2D, p: Projector, op: RingOp) {
   ctx.setLineDash([]);
 }
 
-export function drawOps(ctx: CanvasRenderingContext2D, p: Projector, ops: DrawOp[]) {
-  ctx.clearRect(0, 0, p.width, p.height);
+export function drawOps(ctx: CanvasRenderingContext2D, p: Projector, ops: DrawOp[], {clear = true} = {}) {
+  if (clear) ctx.clearRect(0, 0, p.width, p.height);
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   for (const op of ops) {
-    if (op.kind !== 'plate' && op.alpha <= 0.002) continue;
+    const fillOnly = op.kind === 'screen-path' && (op.fillAlpha ?? 0) > 0.002;
+    if (op.kind !== 'plate' && op.alpha <= 0.002 && !fillOnly) continue;
     if (op.kind === 'track') drawTrack(ctx, p, op);
     else if (op.kind === 'path') drawPath(ctx, p, op);
     else if (op.kind === 'screen-path') drawScreenPath(ctx, op);
