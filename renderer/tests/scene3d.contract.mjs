@@ -1,0 +1,142 @@
+import {execFileSync} from 'node:child_process';
+import {registerHooks} from 'node:module';
+import {existsSync} from 'node:fs';
+import {dirname, resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if ((specifier.startsWith('./') || specifier.startsWith('../')) && !/\.[a-z0-9]+$/i.test(specifier) && context.parentURL) {
+      for (const ext of ['.ts', '.tsx', '/index.ts']) {
+        const candidate = new URL(specifier + ext, context.parentURL);
+        if (existsSync(fileURLToPath(candidate))) {
+          return nextResolve(specifier + ext, context);
+        }
+      }
+    }
+    return nextResolve(specifier, context);
+  },
+  load(url, context, nextLoad) {
+    if (url.endsWith('/Typography.tsx')) {
+      return {
+        format: 'module',
+        shortCircuit: true,
+        source: `export const INK = {
+          ink: '#0A0A09',
+          paper: '#F3EFE8',
+          paper2: 'rgba(243, 239, 232, 0.62)',
+          paper3: 'rgba(243, 239, 232, 0.38)',
+          hairline: 'rgba(243, 239, 232, 0.22)',
+          accent: '#FF5A1F',
+          accentRGB: [255, 90, 31],
+          warmRGB: [222, 176, 146],
+          paperRGB: [243, 239, 232],
+        };
+        export const FONT_STACK = "'Geist', sans-serif";`,
+      };
+    }
+    return nextLoad(url, context);
+  },
+});
+
+const {decodeTrack} = await import('../src/scene3d/core/track.ts');
+const {sceneSpecSchema} = await import('../src/scene3d/schema.ts');
+const {scores} = await import('../src/scene3d/scores/index.ts');
+
+test('Python 3D directors emit SceneSpecs that validate against sceneSpecSchema and execute in scores', () => {
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+  const venvPython = resolve(repoRoot, '.venv/bin/python');
+  const pythonBin = existsSync(venvPython) ? venvPython : 'python3';
+  const script = `
+import datetime, json, numpy as np
+from ride_visuals.scene3d import (
+    FlyoverMetadata, RideTrack, SceneRide,
+    build_flyover_spec, build_strata_spec, build_stretch_spec,
+)
+
+s = np.linspace(0.0, 20000.0, 200)
+lon = 7.77 + (s / 111320.0) * 0.7
+lat = 49.44 + (s / 110540.0) * 0.3
+alt = 200.0 + 180.0 * np.sin(s / 3000.0)
+track = RideTrack.from_arrays(lon, lat, alt, s / 8.0)
+
+fly = build_flyover_spec(
+    track,
+    metadata=FlyoverMetadata(activity_id=1, name="Test", distance_m=20000.0, elevation_gain_m=360.0, moving_time_s=2500.0),
+    fps=10,
+    offline=True,
+).to_json()
+
+rides = [
+    SceneRide(
+        activity_id=i + 1,
+        start_date=datetime.datetime(2026, (i % 3) + 1, 10, tzinfo=datetime.timezone.utc),
+        track=track,
+        distance_m=20000.0,
+        elevation_gain_m=360.0,
+        moving_time_s=2500.0,
+    )
+    for i in range(3)
+]
+stretch = build_stretch_spec(rides, fps=10, toward="49.50,8.40", offline=True).to_json()
+strata = build_strata_spec(rides, fps=10, period="month", offline=True).spec.to_json()
+print(json.dumps([fly, stretch, strata]))
+`;
+  const raw = execFileSync(pythonBin, ['-c', script], {
+    cwd: repoRoot,
+    env: {...process.env, PYTHONPATH: resolve(repoRoot, 'src')},
+    encoding: 'utf-8',
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  const specs = JSON.parse(raw);
+  assert.equal(specs.length, 3);
+
+  for (const unparsed of specs) {
+    const spec = sceneSpecSchema.parse(unparsed);
+    const decodedTracks = spec.tracks.map(decodeTrack);
+    const midFrame = Math.floor(spec.profile.durationInFrames / 2);
+    const projector = {
+      frame: midFrame,
+      camera: {
+        center: [spec.camera.lon[midFrame], spec.camera.lat[midFrame]],
+        zoom: spec.camera.zoom[midFrame],
+        pitch: spec.camera.pitch[midFrame],
+        bearing: spec.camera.bearing[midFrame],
+        elevation: spec.camera.elevation[midFrame],
+        terrain: spec.camera.terrain[midFrame],
+        globe: spec.camera.globe[midFrame] > 0.5,
+        mapOpacity: spec.camera.mapOpacity[midFrame],
+        contours: spec.camera.contours[midFrame],
+        satellite: spec.camera.satellite[midFrame],
+        shade: spec.camera.shade ? spec.camera.shade[midFrame] : 1,
+      },
+      width: spec.profile.width,
+      height: spec.profile.height,
+      globe: spec.camera.globe[midFrame] > 0.5,
+      exaggeration: spec.camera.terrain[midFrame],
+      resolution: 10,
+      centerDepth: 1,
+      merc: (mx, my, lift, out) => {
+        out[0] = 960;
+        out[1] = 540 - lift * 0.02;
+        out[2] = 1;
+        return true;
+      },
+      lngLat: (lon, lat, lift = 0) => [960 + (lon - 7.77) * 2000, 540 - (lat - 49.44) * 2000 - lift * 0.02, true],
+    };
+    const out = scores[spec.kind]({
+      spec,
+      tracks: decodedTracks,
+      frame: midFrame,
+      channel: (name) => spec.channels[name]?.[midFrame] ?? 0,
+      projector,
+      width: spec.profile.width,
+      height: spec.profile.height,
+      scale: 1,
+    });
+    assert.ok(Array.isArray(out.ops) && out.ops.length > 0);
+    assert.ok(Array.isArray(out.texts));
+  }
+});

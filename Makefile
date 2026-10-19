@@ -49,6 +49,7 @@ check:
 	$(PYTHON) -m compileall -q src
 	npm --prefix renderer run typecheck
 	npm --prefix renderer test
+	npm --prefix renderer run test:contract
 	git diff --check
 
 audit:

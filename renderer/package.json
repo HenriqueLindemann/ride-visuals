@@ -2,8 +2,10 @@
   "name": "@ride-visuals/renderer",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "test:contract": "node --experimental-strip-types --test tests/scene3d.contract.mjs",
     "build": "node node_modules/@remotion/cli/remotion-cli.js bundle src/index.ts",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },
