@@ -157,8 +157,11 @@ draft first.
 - **Canvas, language, and theme**: render in `16:9`, `9:16`, `4k` (3840×2160),
   or `instagram` (1080×1920 Story with safe-area margins). Choose `--locale en`
   or `--locale pt-BR`, and `--theme midnight` or `--theme frost`.
-- **3D look**: `--look carbon` (default) is a near-black map with relief
-  shading and contour lines; `--look satellite` mixes in Esri imagery.
+- **3D look and scenes**: `--look carbon` (default) is a near-black map with
+  relief shading and contour lines; `--look satellite` mixes in Esri imagery.
+  Choose `--period month` or `--period year` for `video strata`, `--toward
+  <place|lat,lon>` to aim `video stretch` at a destination, and `--title` to
+  set a custom opening headline.
 - **Credits**: every output gets a `<name>.credits.txt` listing its sources and
   licenses; `--credits-on-screen` also draws a short attribution line.
 
