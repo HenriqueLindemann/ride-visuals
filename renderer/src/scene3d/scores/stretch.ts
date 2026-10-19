@@ -214,6 +214,7 @@ export function stretchScore({spec, tracks, channel, projector, width, height, s
       text: story.opening.text,
       accent: story.opening.accent,
       size: portrait ? 42 : 46,
+      maxWidth: width - 2 * marginX,
       opacity: openingAlpha,
     });
   }
@@ -247,6 +248,7 @@ export function stretchScore({spec, tracks, channel, projector, width, height, s
       text: story.ending.text,
       accent: story.ending.accent,
       size: portrait ? 42 : 46,
+      maxWidth: width - 2 * marginX,
       opacity: endingAlpha,
     });
   }

@@ -136,6 +136,14 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
     map.on('render', onRender);
     map.triggerRepaint();
     poll = setTimeout(check, 50);
+    return () => {
+      if (done) return;
+      done = true;
+      map.off('idle', finish);
+      map.off('render', onRender);
+      if (poll) clearTimeout(poll);
+      continueRender(handle);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frame, ready]);
 

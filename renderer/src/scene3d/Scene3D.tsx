@@ -1,5 +1,5 @@
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
-import {AbsoluteFill, continueRender, delayRender, staticFile, useCurrentFrame} from 'remotion';
+import {AbsoluteFill, cancelRender, continueRender, delayRender, staticFile, useCurrentFrame} from 'remotion';
 import {drawKnockouts, drawOps} from './core/draw';
 import {MapStage} from './core/MapStage';
 import type {Camera, Projector} from './core/projector';
@@ -30,6 +30,10 @@ function loadScene(url: string): Promise<Loaded> {
         spec.tiles.vector = resolveTile(spec.tiles.vector);
         if (spec.tiles.satellite) spec.tiles.satellite = resolveTile(spec.tiles.satellite);
         return {spec, tracks: spec.tracks.map(decodeTrack)};
+      })
+      .catch((error) => {
+        loads.delete(url);
+        throw error;
       });
     loads.set(url, pending);
   }
@@ -80,7 +84,7 @@ export const Scene3D = ({specUrl, width, height}: SceneInput) => {
       })
       .catch((error) => {
         console.error(error);
-        throw error;
+        cancelRender(error);
       });
   }, [specUrl, loadHandle]);
 
@@ -89,6 +93,16 @@ export const Scene3D = ({specUrl, width, height}: SceneInput) => {
     if (pending.current && pending.current.frame !== frame) continueRender(pending.current.handle);
     pending.current = {frame, handle: delayRender(`overlay ${frame}`, {timeoutInMilliseconds: LOAD_TIMEOUT_MS})};
   }, [frame]);
+
+  useEffect(
+    () => () => {
+      if (pending.current) {
+        continueRender(pending.current.handle);
+        pending.current = null;
+      }
+    },
+    [],
+  );
 
   const camera = useMemo(() => (scene ? cameraAt(scene.spec, frame) : null), [scene, frame]);
   const scale = Math.min(width, height) / 1080;

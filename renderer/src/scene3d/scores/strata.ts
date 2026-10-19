@@ -125,11 +125,16 @@ export function strataScore({spec, tracks, channel, projector, width, height, sc
   if (labelCandidates.length > 0) {
     // Sort bottom-to-top on screen (largest y first).
     labelCandidates.sort((a, b) => b.leftY - a.leftY);
-    // A tag with its sub-line is ~47 px tall at 1080p: keep a clear gap between them.
-    const minGap = 54 * scale;
-    const ys = labelCandidates.map((c) => c.leftY);
     const maxY = height - (portrait ? 290 : 210) * scale;
-    const minY = topY + 40 * scale;
+    const minY = topY + (openingAlpha > 0.05 ? 110 : 40) * scale;
+    // A tag with its sub-line is ~47 px tall at 1080p: keep a clear gap between them,
+    // tightening slightly only when many floors share a short vertical span.
+    const spanY = Math.max(0, maxY - minY);
+    const minGap =
+      labelCandidates.length > 1
+        ? Math.min(54 * scale, Math.max(28 * scale, spanY / (labelCandidates.length - 1)))
+        : 54 * scale;
+    const ys = labelCandidates.map((c) => c.leftY);
     ys[0] = Math.min(ys[0], maxY);
     for (let i = 1; i < ys.length; i++) {
       ys[i] = Math.min(ys[i], ys[i - 1] - minGap);
@@ -182,6 +187,7 @@ export function strataScore({spec, tracks, channel, projector, width, height, sc
       text: story.opening.text,
       accent: story.opening.accent,
       size: portrait ? 42 : 46,
+      maxWidth: width - 2 * marginX,
       opacity: openingAlpha,
     });
   }

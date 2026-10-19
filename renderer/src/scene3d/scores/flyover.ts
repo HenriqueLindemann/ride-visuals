@@ -215,6 +215,7 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
       text: story.title.text,
       accent: story.title.accent,
       size: portrait ? 44 : 48,
+      maxWidth: width - 2 * marginX,
       opacity: titleAlpha,
     });
     const titleSize = (portrait ? 44 : 48) * scale;

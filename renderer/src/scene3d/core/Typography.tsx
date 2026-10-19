@@ -34,6 +34,7 @@ export type CaptionItem = {
   accent?: string;
   align?: 'left' | 'center' | 'right';
   size?: number;
+  maxWidth?: number;
   opacity: number;
 };
 
@@ -101,7 +102,19 @@ function Caption({item, scale}: {item: CaptionItem; scale: number}) {
       <div style={entrance(item.opacity, scale)}>
         {item.label ? <Label scale={scale}>{item.label}</Label> : null}
         {item.text ? (
-          <div style={{...NUMERIC, fontSize: size, fontWeight: 400, letterSpacing: '-0.015em', lineHeight: 1.1, color: INK.paper, whiteSpace: 'nowrap'}}>
+          <div
+            style={{
+              ...NUMERIC,
+              fontSize: size,
+              fontWeight: 400,
+              letterSpacing: '-0.015em',
+              lineHeight: 1.1,
+              color: INK.paper,
+              whiteSpace: item.maxWidth ? 'normal' : 'nowrap',
+              maxWidth: item.maxWidth,
+              textWrap: item.maxWidth ? 'balance' : undefined,
+            }}
+          >
             {parts.map((part, i) => (
               <span key={i}>
                 {part}
