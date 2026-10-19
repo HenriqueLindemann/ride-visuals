@@ -58,11 +58,17 @@ def _make_terrarium_png(elevation_m: float, size: int = 16) -> bytes:
     return buf.getvalue()
 
 
-def test_decode_terrarium_known_elevation() -> None:
+def test_decode_terrarium_known_elevation(tmp_path: Path) -> None:
     png = _make_terrarium_png(487.5, size=8)
     decoded = decode_terrarium(png)
     assert decoded.shape == (8, 8)
     assert np.allclose(decoded, 487.5, atol=0.02)
+
+    sampler = DemSampler(TileCache(tmp_path / "tiles", offline=True), zoom=2)
+    sampler._tiles[(2, 1)] = decoded
+    sampled = sampler.sample(np.array([np.nan, 10.0]), np.array([49.44, 49.44]))
+    assert np.isnan(sampled[0])
+    assert np.isclose(sampled[1], 487.5, atol=0.05)
 
 
 def test_tile_cache_and_tile_server_with_local_upstream(tmp_path: Path) -> None:
@@ -441,6 +447,11 @@ def test_places_gazetteer_and_stretch_over_earth_circumference(tmp_path: Path) -
     by_name = destination_for_distance(7.77, 49.44, 1_800_000.0, toward="Lisbon", cache_dir=tmp_path, offline=True)
     assert by_name is not None and by_name.place.name == "Lisbon"
 
+    by_country = destination_for_distance(
+        7.77, 49.44, 1_800_000.0, toward="Lisbon, Portugal", cache_dir=tmp_path, offline=True
+    )
+    assert by_country is not None and by_country.place.name == "Lisbon"
+
     by_coords = destination_for_distance(7.77, 49.44, 1_800_000.0, toward="38.72,-9.14", cache_dir=tmp_path, offline=True)
     assert by_coords is not None and by_coords.place.name == "Lisbon"
 
@@ -467,8 +478,13 @@ def test_places_gazetteer_and_stretch_over_earth_circumference(tmp_path: Path) -
     assert "Terra" in spec.story["ending"]["text"]
 
 
-def _geonames_row(name: str, lat: float, lon: float, code: str, pop: int) -> str:
-    cols = ["1", name, name, "", str(lat), str(lon), "P", code, "XX", "", "", "", "", "", str(pop), "", "0", "UTC", "2026-01-01"]
+def _geonames_row(
+    name: str, lat: float, lon: float, code: str, pop: int, country: str = "XX"
+) -> str:
+    cols = [
+        "1", name, name, "", str(lat), str(lon), "P", code, country,
+        "", "", "", "", "", str(pop), "", "0", "UTC", "2026-01-01",
+    ]
     return "\t".join(cols)
 
 
@@ -488,7 +504,57 @@ def test_nearest_place_prefers_geonames_towns_over_districts(tmp_path: Path) -> 
     town = nearest_place(0.12, 0.0, max_distance_km=30.0, cache_dir=tmp_path, offline=True)
     assert town is not None and town.place.name == "Smalltown"
 
+    toward_town = destination_for_distance(
+        0.0, 0.0, 15_000.0, toward="Smalltown", cache_dir=tmp_path, offline=True
+    )
+    assert toward_town is not None and toward_town.place.name == "Smalltown"
+    assert toward_town.place.source == "geonames"
+
     assert nearest_place(1.0, 0.0, max_distance_km=30.0, cache_dir=tmp_path, offline=True) is None
+
+
+def test_toward_country_code_uses_exact_match(tmp_path: Path) -> None:
+    rows = [
+        _geonames_row("Springfield", 0.0, 0.0, "PPL", 100_000, country="US"),
+        _geonames_row("Springfield", 0.0, 0.01, "PPL", 900_000, country="AT"),
+    ]
+    (tmp_path / "cities15000.txt").write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    match = destination_for_distance(
+        0.0, 0.0, 15_000.0, toward="Springfield, US", cache_dir=tmp_path, offline=True
+    )
+    assert match is not None
+    assert match.place.name == "Springfield"
+    assert match.place.country == "US"
+
+
+def test_scene3d_title_override_does_not_credit_home_gazetteer(tmp_path: Path) -> None:
+    (tmp_path / "cities15000.txt").write_text(
+        _geonames_row("Hometown", 49.44, 7.77, "PPL", 100_000) + "\n",
+        encoding="utf-8",
+    )
+    track = _synthetic_ride(length_km=35.0, max_climb_m=150.0)
+    ride = SceneRide(
+        activity_id=1,
+        start_date=datetime(2026, 8, 10, tzinfo=timezone.utc),
+        track=track,
+        distance_m=35_000.0,
+        elevation_gain_m=150.0,
+        moving_time_s=4_200.0,
+    )
+    specs = [
+        build_flyover_spec(
+            track, fps=1, title_override="Custom title", places_cache_dir=tmp_path, offline=True
+        ),
+        build_stretch_spec(
+            [ride], fps=1, title_override="Custom title", places_cache_dir=tmp_path, offline=True
+        ),
+        build_strata_spec(
+            [ride], fps=1, title_override="Custom title", places_cache_dir=tmp_path, offline=True
+        ).spec,
+    ]
+    for spec in specs:
+        assert "geonames" not in spec.sources
 
 
 def test_strata_single_month_and_empty_selection(tmp_path: Path) -> None:
@@ -736,3 +802,68 @@ def test_relief_is_locked_to_one_dem_level_while_the_camera_zooms() -> None:
     # Without relief on screen the source keeps its full depth.
     cam.terrain[:] = 0.0
     assert relief_max_zoom(cam) == TILE_SOURCES["dem"].max_zoom
+
+
+def test_scene3d_cli_orchestration_and_aspect_validation(
+    reference_cli_workspace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ride_visuals.cli import main
+    from tests.conftest import REFERENCE_ACTIVITY_ID
+
+    with pytest.raises(SystemExit) as bad_aspect:
+        main(
+            [
+                "video",
+                "flyover",
+                str(REFERENCE_ACTIVITY_ID),
+                "--aspect",
+                "instagram",
+                "--config",
+                str(reference_cli_workspace.config_path),
+            ]
+        )
+    assert bad_aspect.value.code == 1
+
+    captured: dict[str, object] = {}
+
+    def fake_render_scene3d(self, spec, output_path, **kwargs):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"mp4")
+        captured["spec"] = spec
+        captured["output"] = output_path
+        captured.update(kwargs)
+        return output_path, []
+
+    monkeypatch.setattr(
+        "ride_visuals.video.engines.remotion.RemotionVideoEngine.render_scene3d",
+        fake_render_scene3d,
+    )
+    monkeypatch.setattr(
+        "ride_visuals.scene3d.terrain.DemSampler.sample",
+        lambda self, lon, lat: np.full(np.shape(lon), 220.0),
+    )
+    monkeypatch.setattr(
+        "ride_visuals.scene3d.terrain.DemSampler.sample_blurred",
+        lambda self, lon, lat, radius_m: np.full(np.shape(lon), 220.0),
+    )
+
+    main(
+        [
+            "video",
+            "flyover",
+            str(REFERENCE_ACTIVITY_ID),
+            "--preview",
+            "--no-keyframes",
+            "--title",
+            "Reference ride",
+            "--config",
+            str(reference_cli_workspace.config_path),
+        ]
+    )
+
+    out_path = captured["output"]
+    assert isinstance(out_path, Path) and out_path.exists()
+    assert out_path.with_name(f"{out_path.stem}.credits.txt").exists()
+    spec_file = reference_cli_workspace.outputs_dir / "render-specs" / f"{out_path.stem}.json"
+    assert spec_file.exists()

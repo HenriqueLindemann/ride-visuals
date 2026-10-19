@@ -32,6 +32,8 @@ def _resolve_canvas(aspect: str, *, preview: bool) -> tuple[int, int, int]:
 
 def _scene_paths(context: VideoCommandContext) -> Scene3DRenderPaths:
     args = context.args
+    if args.video_type not in {"flyover", "stretch", "strata"}:
+        raise ValueError(f"Unsupported 3D scene type: {args.video_type!r}")
     locale_tag = context.runtime.locale.lower().replace("-", "_")
     look_tag = f"_{args.look}"
     aspect_tag = args.aspect.replace(":", "_")
@@ -156,14 +158,15 @@ def _build_scene_spec(
     rides = _load_collection_rides(context)
     if args.video_type == "stretch":
         return build_stretch_spec(rides, toward=args.toward, **common)
-
-    result = build_strata_spec(rides, period=args.period, **common)
-    if result.excluded_rides > 0:
-        print(
-            f"[Strata] Home region: {result.kept_rides} rides kept, "
-            f"{result.excluded_rides} outside {HOME_REGION_RADIUS_M / 1000:.0f} km skipped."
-        )
-    return result.spec
+    if args.video_type == "strata":
+        result = build_strata_spec(rides, period=args.period, **common)
+        if result.excluded_rides > 0:
+            print(
+                f"[Strata] Home region: {result.kept_rides} rides kept, "
+                f"{result.excluded_rides} outside {HOME_REGION_RADIUS_M / 1000:.0f} km skipped."
+            )
+        return result.spec
+    raise ValueError(f"Unsupported 3D scene type: {args.video_type!r}")
 
 
 def render_scene3d(context: VideoCommandContext) -> None:
@@ -173,9 +176,6 @@ def render_scene3d(context: VideoCommandContext) -> None:
     from ride_visuals.video.engines.remotion import RemotionVideoEngine
 
     args = context.args
-    width, height, scale = _resolve_canvas(args.aspect, preview=args.preview)
-    fps = 30 if args.preview else 60
-    paths = _scene_paths(context)
     cache = TileCache()
 
     print(
@@ -183,8 +183,11 @@ def render_scene3d(context: VideoCommandContext) -> None:
         f"(look: {args.look}, aspect: {args.aspect}, locale: {context.runtime.locale}, preview: {args.preview})..."
     )
     try:
+        width, height, scale = _resolve_canvas(args.aspect, preview=args.preview)
+        fps = 30 if args.preview else 60
+        paths = _scene_paths(context)
         spec = _build_scene_spec(context, width, height, fps, cache)
-    except ValueError as error:
+    except (ValueError, FileNotFoundError, RuntimeError) as error:
         print(f"[Error] {error}")
         raise SystemExit(1) from error
     serialized = spec.write(paths.spec_path).resolve()

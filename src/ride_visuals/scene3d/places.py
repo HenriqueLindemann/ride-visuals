@@ -3,9 +3,10 @@
 Start places come from GeoNames ``cities15000`` (CC BY 4.0, every town with
 15,000+ inhabitants), which is dense enough to name where most rides begin.
 Destinations come from Natural Earth's 10m populated places (public domain),
-which also backs start places when GeoNames is unavailable. Both are cached
-locally on first use. When running offline without a cached copy, every lookup
-degrades gracefully to ``None`` so renders still succeed with distance-only copy.
+with GeoNames backing smaller towns passed to ``--toward`` and start places
+when one gazetteer is unavailable. Both are cached locally on first use. When
+running offline without a cached copy, every lookup degrades gracefully to
+``None`` so renders still succeed with distance-only copy.
 """
 
 from __future__ import annotations
@@ -61,7 +62,7 @@ class PlaceMatch:
     bearing_deg: float
 
 
-_MEMORY_CACHE: dict[Path, tuple[Place, ...]] = {}
+_MEMORY_CACHE: dict[tuple[Path, int], tuple[Place, ...]] = {}
 
 
 def _fetch(url: str, target: Path, extract: str | None = None) -> bool:
@@ -118,14 +119,14 @@ def load_places(
     offline: bool = False,
 ) -> tuple[Place, ...]:
     """Load the Natural Earth gazetteer from disk or fetch it once."""
-    resolved_dir = Path(cache_dir).resolve()
-    if resolved_dir in _MEMORY_CACHE:
-        return _MEMORY_CACHE[resolved_dir]
-    target = resolved_dir / PLACES_FILENAME
+    target = Path(cache_dir).resolve() / PLACES_FILENAME
     if not target.exists() and not offline and not _fetch(NATURALEARTH_PLACES_URL, target):
         return ()
     if not target.exists():
         return ()
+    cache_key = (target, target.stat().st_mtime_ns)
+    if cache_key in _MEMORY_CACHE:
+        return _MEMORY_CACHE[cache_key]
     try:
         raw = json.loads(target.read_text(encoding="utf-8"))
         places: list[Place] = []
@@ -151,7 +152,7 @@ def load_places(
                 )
             )
         result = tuple(places)
-        _MEMORY_CACHE[resolved_dir] = result
+        _MEMORY_CACHE[cache_key] = result
         return result
     except (OSError, ValueError, KeyError, TypeError):
         return ()
@@ -164,12 +165,13 @@ def load_towns(
 ) -> tuple[Place, ...]:
     """Load GeoNames ``cities15000`` (tab-separated) from disk or fetch it once."""
     target = Path(cache_dir).resolve() / TOWNS_FILENAME
-    if target in _MEMORY_CACHE:
-        return _MEMORY_CACHE[target]
     if not target.exists() and not offline and not _fetch(GEONAMES_TOWNS_URL, target, TOWNS_FILENAME):
         return ()
     if not target.exists():
         return ()
+    cache_key = (target, target.stat().st_mtime_ns)
+    if cache_key in _MEMORY_CACHE:
+        return _MEMORY_CACHE[cache_key]
     places: list[Place] = []
     try:
         with target.open(encoding="utf-8") as handle:
@@ -192,7 +194,7 @@ def load_towns(
     except (OSError, ValueError):
         return ()
     result = tuple(places)
-    _MEMORY_CACHE[target] = result
+    _MEMORY_CACHE[cache_key] = result
     return result
 
 
@@ -249,7 +251,42 @@ def _parse_lat_lon(text: str) -> tuple[float, float] | None:
     return lon, lat
 
 
-def destination_for_distance(
+def _country_matches(country: str, query: str) -> bool:
+    """Match a gazetteer country name or ISO code without 2-letter false positives."""
+    country = country.casefold()
+    query = query.casefold()
+    if not query:
+        return True
+    # Natural Earth stores full names; GeoNames stores ISO codes. Exact matching
+    # for short codes prevents "US" from also matching "Austria" or "Australia".
+    return country == query if len(query) == 2 else query in country
+
+
+def _match_named_place(places: Sequence[Place], raw_query: str) -> list[Place]:
+    """Match ``City`` or ``City, Country`` against a gazetteer (exact first, then substring)."""
+    if "," in raw_query:
+        city_part, country_part = (part.strip().casefold() for part in raw_query.split(",", 1))
+    else:
+        city_part, country_part = raw_query.strip().casefold(), ""
+
+    def country_ok(place: Place) -> bool:
+        return _country_matches(place.country, country_part)
+
+    exact = [
+        p
+        for p in places
+        if country_ok(p) and (p.name.casefold() == city_part or p.name_ascii.casefold() == city_part)
+    ]
+    if exact:
+        return exact
+    return [
+        p
+        for p in places
+        if country_ok(p) and (city_part in p.name.casefold() or city_part in p.name_ascii.casefold())
+    ]
+
+
+def destination_for_distance(  # noqa: PLR0913
     origin_lon: float,
     origin_lat: float,
     distance_m: float,
@@ -302,20 +339,11 @@ def destination_for_distance(
                 bearing_deg=great_circle_bearing(origin_lon, origin_lat, lon, lat),
             )
 
-        places = load_places(cache_dir, offline=offline)
-        if not places:
-            return None
-        needle = raw_toward.casefold()
-        exact = [
-            p
-            for p in places
-            if p.name.casefold() == needle or p.name_ascii.casefold() == needle
-        ]
-        candidates = exact or [
-            p
-            for p in places
-            if needle in p.name.casefold() or needle in p.name_ascii.casefold()
-        ]
+        candidates = _match_named_place(load_places(cache_dir, offline=offline), raw_toward)
+        if not candidates:
+            # GeoNames backs smaller towns that Natural Earth omits. Load it only
+            # when the primary gazetteer had no match, so a hit never downloads.
+            candidates = _match_named_place(load_towns(cache_dir, offline=offline), raw_toward)
         if not candidates:
             raise ValueError(f"Unknown destination place for --toward: {toward!r}")
         chosen = max(candidates, key=lambda p: (p.pop_max, -p.scalerank))

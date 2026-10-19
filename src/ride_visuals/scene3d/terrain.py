@@ -39,22 +39,31 @@ class DemSampler:
         self._tiles: dict[tuple[int, int], np.ndarray | None] = {}
 
     def _tile(self, x: int, y: int) -> np.ndarray | None:
-        key = (x % 2**self.zoom, y)
+        limit = 2**self.zoom
+        if y < 0 or y >= limit:
+            return None
+        key = (x % limit, y)
         if key not in self._tiles:
             data = self.cache.get(TILE_SOURCES["dem"], self.zoom, key[0], key[1])
-            self._tiles[key] = decode_terrarium(data) if data else None
+            try:
+                self._tiles[key] = decode_terrarium(data) if data else None
+            except (OSError, ValueError):
+                self._tiles[key] = None
         return self._tiles[key]
 
     def sample(self, lon: np.ndarray, lat: np.ndarray) -> np.ndarray:
         """Elevation (m) at each point; NaN where no tile could be read."""
         lon = np.asarray(lon, dtype=float)
         lat = np.asarray(lat, dtype=float)
-        fx, fy = _tile_xy(lon, lat, self.zoom)
         out = np.full(lon.shape, np.nan)
-        tx = np.floor(fx).astype(np.int64).ravel()
-        ty = np.floor(fy).astype(np.int64).ravel()
-        fxr = fx.ravel()
-        fyr = fy.ravel()
+        flat_lon = lon.ravel()
+        flat_lat = lat.ravel()
+        valid = np.flatnonzero(np.isfinite(flat_lon) & np.isfinite(flat_lat))
+        if len(valid) == 0:
+            return out
+        fxr, fyr = _tile_xy(flat_lon[valid], flat_lat[valid], self.zoom)
+        tx = np.floor(fxr).astype(np.int64)
+        ty = np.floor(fyr).astype(np.int64)
         flat = out.ravel()
         # Group points by tile in one sort instead of one mask per tile.
         keys = tx * (1 << 31) + ty
@@ -76,7 +85,7 @@ class DemSampler:
             v = py - y0
             top = tile[y0, x0] * (1 - u) + tile[y0, x0 + 1] * u
             bottom = tile[y0 + 1, x0] * (1 - u) + tile[y0 + 1, x0 + 1] * u
-            flat[group] = top * (1 - v) + bottom * v
+            flat[valid[group]] = top * (1 - v) + bottom * v
         return flat.reshape(out.shape)
 
     def sample_blurred(self, lon: np.ndarray, lat: np.ndarray, radius_m: float) -> np.ndarray:

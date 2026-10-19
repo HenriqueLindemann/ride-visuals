@@ -44,8 +44,9 @@ The 3D scenes use:
 - [Esri World Imagery](https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9)
   for `--look satellite`, under Esri's own terms of use.
 - [GeoNames](https://www.geonames.org/) `cities15000` (CC BY 4.0) to name where
-  a ride starts, and [Natural Earth](https://www.naturalearthdata.com/)
-  populated places (public domain) for destinations.
+  a ride starts (and smaller towns passed to `--toward`), and
+  [Natural Earth](https://www.naturalearthdata.com/) populated places (public
+  domain) for destinations.
 
 Each output's `.credits.txt` sidecar lists exactly the sources it used.
 

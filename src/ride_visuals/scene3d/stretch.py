@@ -180,15 +180,6 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
         before_m += length_m
 
     extra_sources: list[str] = []
-    home_place = nearest_place(
-        home_lon,
-        home_lat,
-        max_distance_km=30.0,
-        cache_dir=places_cache_dir,
-        offline=offline,
-    )
-    if home_place is not None and home_place.place.source:
-        extra_sources.append(home_place.place.source)
 
     # Only an explicit --toward names a destination; an automatic "nearest city
     # at that distance" reads as random, so by default the line simply heads east.
@@ -214,11 +205,24 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
         distance=i18n.number(round(total_km)),
     )
     if title_override is not None and title_override.strip():
+        # The user's title replaces the place name, so do not consult or credit
+        # the gazetteer for this scene.
         opening_text = sanitize_display_text(title_override.strip())
-    elif home_place is not None:
-        opening_text = home_place.place.name
     else:
-        opening_text = i18n.text("scene3d.strata.rides", count=len(ordered))
+        home_place = nearest_place(
+            home_lon,
+            home_lat,
+            max_distance_km=30.0,
+            cache_dir=places_cache_dir,
+            offline=offline,
+        )
+        if home_place is not None and home_place.place.source:
+            extra_sources.append(home_place.place.source)
+        opening_text = (
+            home_place.place.name
+            if home_place is not None
+            else i18n.text("scene3d.strata.rides", count=len(ordered))
+        )
 
     ending_accent: str | None = None
     dest_story = None
