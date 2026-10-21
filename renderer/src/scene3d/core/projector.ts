@@ -59,6 +59,14 @@ interface InternalMap {
 
 const unmercLat = (my: number) => (360 / Math.PI) * Math.atan(Math.exp((180 - my * 360) * (Math.PI / 180))) - 90;
 
+/**
+ * Line-of-sight ray fractions (eye -> target), precomputed once. sqrt(k/steps)
+ * crowds the samples toward the target, where the ridges that matter usually
+ * are, so a hidden point exits the walk early. Indexed k = steps..1.
+ */
+const RAY_STEPS = 40;
+const RAY_S: number[] = Array.from({length: RAY_STEPS + 1}, (_, k) => Math.sqrt(k / RAY_STEPS));
+
 export function invert4(m: Matrix): Float64Array | null {
   const a = Array.from(m);
   const inv = new Float64Array(16);
@@ -132,13 +140,12 @@ function makeRelief(
     const lengthM = Math.hypot(dx, dy) * metersPerWorldPx(my);
     // Ignore the last ~90 m so a line lying on a slope does not shadow itself.
     const sMax = 1 - Math.min(0.9, Math.max(90, cutaway) / Math.max(1, lengthM));
-    const steps = 40;
     // Ray fraction where it comes down to the relief's ceiling.
     const sTop = eyeZ > ceiling && dz < 0 ? (ceiling - eyeZ) / dz : 0;
     // From the point back towards the eye: samples crowd near the point,
     // where the ridges that matter usually are, so a hidden point exits early.
-    for (let k = steps; k >= 1; k--) {
-      const s = sMax * Math.sqrt(k / steps);
+    for (let k = RAY_STEPS; k >= 1; k--) {
+      const s = sMax * RAY_S[k];
       if (s < sTop) break;
       if (eyeZ + dz * s < ground((eyeX + dx * s) / worldSize, (eyeY + dy * s) / worldSize) - 2) return 2;
     }
