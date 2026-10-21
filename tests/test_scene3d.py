@@ -71,6 +71,29 @@ def test_decode_terrarium_known_elevation(tmp_path: Path) -> None:
     assert np.isclose(sampled[1], 487.5, atol=0.05)
 
 
+def test_sample_blurred_batches_offsets_and_averages_valid_samples(tmp_path: Path) -> None:
+    sampler = DemSampler(TileCache(tmp_path / "tiles", offline=True), zoom=6)
+    sizes: list[int] = []
+
+    def fake_sample(lon: np.ndarray, lat: np.ndarray) -> np.ndarray:
+        lon = np.asarray(lon, dtype=float)
+        lat = np.asarray(lat, dtype=float)
+        sizes.append(lon.size)
+        # 100 m per degree of longitude; unknown (NaN) south of the equator.
+        return np.where(lat < 0.0, np.nan, 100.0 * lon)
+
+    sampler.sample = fake_sample  # type: ignore[method-assign]
+    blurred = sampler.sample_blurred(np.array([1.0, 2.0]), np.array([0.5, -0.5]), radius_m=1000.0)
+
+    # One batched pass over points x 25 offsets, not 25 separate passes.
+    assert sizes == [2 * 25]
+    # Symmetric offsets cancel, so the mean equals the point's own value.
+    assert np.isfinite(blurred[0])
+    assert np.isclose(blurred[0], 100.0)
+    # Every sample of the southern point is unknown, so it stays NaN.
+    assert np.isnan(blurred[1])
+
+
 def test_tile_cache_and_tile_server_with_local_upstream(tmp_path: Path) -> None:
     payload_raw = b"vector-tile-bytes"
     payload_gz = gzip.compress(payload_raw)

@@ -89,19 +89,33 @@ class DemSampler:
         return flat.reshape(out.shape)
 
     def sample_blurred(self, lon: np.ndarray, lat: np.ndarray, radius_m: float) -> np.ndarray:
-        """Mean elevation over a 5x5 neighbourhood spanning ±radius_m around each point."""
+        """Mean elevation over a 5x5 neighbourhood spanning ±radius_m around each point.
+
+        All 25 offsets are sampled in a single :meth:`sample` pass (one tile
+        grouping instead of 25), then averaged per point over just the samples
+        the DEM could answer; a point with no valid sample stays NaN.
+        """
         lon = np.asarray(lon, dtype=float)
         lat = np.asarray(lat, dtype=float)
-        offsets = np.linspace(-radius_m, radius_m, 5)
-        dlat = offsets / 110_540.0
-        acc = np.zeros(lon.shape)
-        count = np.zeros(lon.shape)
-        for oy in dlat:
-            for ox in offsets:
-                dlon = ox / (111_320.0 * np.maximum(0.05, np.cos(np.radians(lat))))
-                values = self.sample(lon + dlon, lat + oy)
-                valid = np.isfinite(values)
-                acc[valid] += values[valid]
-                count[valid] += 1
+        shape = lon.shape
+        flat_lon = lon.reshape(-1)
+        flat_lat = lat.reshape(-1)
+        n = flat_lon.size
+        if n == 0:
+            return np.full(shape, np.nan)
+        offsets_m = np.linspace(-radius_m, radius_m, 5)
+        # 25 (east, north) offset pairs, in metres.
+        east_m, north_m = (axis.reshape(-1) for axis in np.meshgrid(offsets_m, offsets_m))
+        # Metres per degree of longitude shrinks towards the poles.
+        m_per_deg_lon = 111_320.0 * np.maximum(0.05, np.cos(np.radians(flat_lat)))
+        east_deg = east_m[None, :] / m_per_deg_lon[:, None]
+        north_deg = north_m[None, :] / 110_540.0
+        sample_lon = (flat_lon[:, None] + east_deg).reshape(-1)
+        sample_lat = (flat_lat[:, None] + north_deg).reshape(-1)
+        values = self.sample(sample_lon, sample_lat).reshape(n, east_m.size)
+        valid = np.isfinite(values)
+        total = np.where(valid, values, 0.0).sum(axis=1)
+        count = valid.sum(axis=1)
         with np.errstate(invalid="ignore"):
-            return np.where(count > 0, acc / np.maximum(count, 1), np.nan)
+            out = np.where(count > 0, total / np.maximum(count, 1), np.nan)
+        return out.reshape(shape)
