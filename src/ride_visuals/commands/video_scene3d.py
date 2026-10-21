@@ -177,6 +177,10 @@ def render_scene3d(context: VideoCommandContext) -> None:
 
     args = context.args
     cache = TileCache()
+    # 3D scenes render WebGL terrain frame by frame; the default of 4 workers
+    # exhausted a 16 GB / integrated-GPU machine, so default to a safe 2 and
+    # let --concurrency raise it where there is headroom.
+    concurrency = max(1, getattr(args, "concurrency", None) or 2)
 
     print(
         f"[Scene3D] Preparing {args.video_type} "
@@ -201,6 +205,7 @@ def render_scene3d(context: VideoCommandContext) -> None:
             spec_url=spec_url,
             scale=scale,
             keyframes_dir=paths.keyframes_dir,
+            concurrency=concurrency,
         )
         failures = server.failures
 

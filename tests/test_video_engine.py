@@ -11,6 +11,7 @@ from ride_visuals.validate.media_validator import MediaValidator
 from ride_visuals.video.engines.remotion import (
     RemotionVideoEngine,
     background_video_source,
+    keyframe_timestamps,
     media_normalization_command,
     stage_background_video,
 )
@@ -131,6 +132,22 @@ def test_media_normalization_produces_aligned_padded_audio(tmp_path):
 
     assert float(audio["start_time"]) == pytest.approx(0.0, abs=1e-3)
     assert float(metadata["format"]["duration"]) == pytest.approx(1.0, abs=0.05)
+
+
+def test_keyframe_timestamps_inset_from_fades_and_stay_ordered():
+    start, mid, end = keyframe_timestamps(78.17, 60, start_inset_s=0.9, end_inset_s=1.2)
+    # Both ends are pulled inside the black curtain instead of sampling a fade.
+    assert 0.8 < start < 1.0
+    assert start < mid < end
+    assert end < 78.17 - 1.0
+
+    # With no inset this reproduces the historical 0 / mid / last-frame sampling,
+    # so activity keyframes are unchanged.
+    assert keyframe_timestamps(18.6, 30) == (0.0, 9.3, 18.6 - 1.0 / 30)
+
+    # Clamped so the three samples stay ordered even for a very short clip.
+    tiny = keyframe_timestamps(0.4, 30, start_inset_s=0.9, end_inset_s=1.2)
+    assert 0.0 <= tiny[0] < tiny[1] < tiny[2] <= 0.4 - 1.0 / 30
 
 
 def test_remotion_engine_rejects_mp4_for_transparent_video(tmp_path):

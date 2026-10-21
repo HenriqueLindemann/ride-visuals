@@ -194,6 +194,33 @@ def media_normalization_command(
     return command
 
 
+#: 3D scenes open and close on a black curtain; sample the inspection keyframes
+#: just inside it, so a frame is never a fully black fade.
+KEYFRAME_START_INSET_S = 0.9
+KEYFRAME_END_INSET_S = 1.2
+
+
+def keyframe_timestamps(
+    total_seconds: float,
+    fps: int,
+    *,
+    start_inset_s: float = 0.0,
+    end_inset_s: float = 0.0,
+) -> tuple[float, float, float]:
+    """0/50/100% sample times, optionally inset from the ends.
+
+    Insets keep inspection frames off a fade. They are clamped so the three
+    samples stay ordered and inside the video even for very short clips; with
+    no inset this reproduces the historical 0 / mid / last-frame sampling.
+    """
+    frame_s = 1.0 / max(fps, 1)
+    last = max(total_seconds - frame_s, 0.0)
+    mid = total_seconds * 0.5
+    start = min(max(start_inset_s, 0.0), max(mid - frame_s, 0.0))
+    end = max(min(max(total_seconds - end_inset_s, mid + frame_s), last), mid + frame_s)
+    return (start, mid, end)
+
+
 class RemotionVideoEngine:
     name = "remotion"
     capabilities = EngineCapabilities(
@@ -485,7 +512,7 @@ class RemotionVideoEngine:
         spec_url: str,
         scale: int = 1,
         keyframes_dir: Path | None = None,
-        concurrency: int = 4,
+        concurrency: int = 2,
     ) -> tuple[Path, list[Path]]:
         """Render the ``Scene3D`` composition served by a local ``TileServer``."""
         from ride_visuals.scene3d.tiles import stage_scene3d_assets
@@ -575,7 +602,14 @@ class RemotionVideoEngine:
         if not validation.get("valid") or validation.get("has_faststart") is not True:
             raise RuntimeError(f"Rendered 3D video failed validation: {validation}")
 
-        keyframes = self._extract_keyframes_by_duration(output, total_seconds, spec.fps, keyframes_dir)
+        keyframes = self._extract_keyframes_by_duration(
+            output,
+            total_seconds,
+            spec.fps,
+            keyframes_dir,
+            start_inset_s=KEYFRAME_START_INSET_S,
+            end_inset_s=KEYFRAME_END_INSET_S,
+        )
         return output, keyframes
 
     @staticmethod
@@ -608,12 +642,17 @@ class RemotionVideoEngine:
         total_seconds: float,
         fps: int,
         destination: Path | None,
+        *,
+        start_inset_s: float = 0.0,
+        end_inset_s: float = 0.0,
     ) -> list[Path]:
         if destination is None:
             return []
         destination = Path(destination).resolve()
         destination.mkdir(parents=True, exist_ok=True)
-        times = (0.0, total_seconds * 0.5, max(0.0, total_seconds - 1.0 / fps))
+        times = keyframe_timestamps(
+            total_seconds, fps, start_inset_s=start_inset_s, end_inset_s=end_inset_s
+        )
         paths: list[Path] = []
         for label, timestamp in zip(("00", "50", "100"), times, strict=True):
             frame = destination / f"keyframe_{label}pct.png"

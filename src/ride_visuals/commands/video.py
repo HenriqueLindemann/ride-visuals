@@ -208,6 +208,15 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         default="auto",
         help="Stacking period for video strata (auto, month, or year)",
     )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        help=(
+            "Parallel render workers for 3D scenes (default 2; raise on a machine "
+            "with a discrete GPU and ample RAM)"
+        ),
+    )
     add_credits_argument(parser)
     parser.add_argument("--config", type=str, help="Path to config/config.toml")
     add_selection_arguments(parser)

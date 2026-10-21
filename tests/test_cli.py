@@ -47,6 +47,14 @@ def test_video_parser_rejects_multiple_background_sources() -> None:
     assert error.value.code == 2
 
 
+def test_video_parser_exposes_scene3d_concurrency() -> None:
+    default_args = build_parser().parse_args(["video", "flyover", "42"])
+    assert default_args.concurrency is None
+
+    tuned = build_parser().parse_args(["video", "strata", "--concurrency", "6"])
+    assert tuned.concurrency == 6
+
+
 def test_runtime_config_preserves_config_and_cli_precedence(tmp_path: Path) -> None:
     config_path = tmp_path / "custom.toml"
     config_path.write_text(
