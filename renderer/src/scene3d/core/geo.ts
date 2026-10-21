@@ -2,9 +2,15 @@
 
 export type LngLat = [number, number];
 
+/** Mean Earth radius (authalic): for great-circle distance and bearing. */
 const R = 6_371_008.8;
 const RAD = Math.PI / 180;
-export const EARTH_CIRCUMFERENCE = 2 * Math.PI * R;
+/**
+ * Web Mercator ground scale uses the equatorial (WGS84 semi-major)
+ * circumference — the same constant MapLibre and the Python director use — not
+ * 2*pi times the mean radius, which would drift the metres-per-pixel estimate.
+ */
+export const EARTH_CIRCUMFERENCE = 40_075_016.686;
 
 export const mercX = (lon: number) => (lon + 180) / 360;
 

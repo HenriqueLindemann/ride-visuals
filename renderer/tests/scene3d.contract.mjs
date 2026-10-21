@@ -41,6 +41,7 @@ registerHooks({
   },
 });
 
+const {EARTH_CIRCUMFERENCE, metersPerPixel} = await import('../src/scene3d/core/geo.ts');
 const {decodeTrack} = await import('../src/scene3d/core/track.ts');
 const {sceneSpecSchema} = await import('../src/scene3d/schema.ts');
 const {scores} = await import('../src/scene3d/scores/index.ts');
@@ -138,5 +139,42 @@ print(json.dumps([fly, stretch, strata]))
     });
     assert.ok(Array.isArray(out.ops) && out.ops.length > 0);
     assert.ok(Array.isArray(out.texts));
+  }
+});
+
+test('director and player share map scale, so offline framing matches the render', () => {
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+  const venvPython = resolve(repoRoot, '.venv/bin/python');
+  const pythonBin = existsSync(venvPython) ? venvPython : 'python3';
+  const raw = execFileSync(
+    pythonBin,
+    [
+      '-c',
+      `
+import json
+from ride_visuals.scene3d.camera import EARTH_CIRCUMFERENCE_M, meters_per_pixel
+print(json.dumps({
+  "circumference": EARTH_CIRCUMFERENCE_M,
+  "mpp": [[z, lat, float(meters_per_pixel(z, lat))] for z, lat in [(8, 60.0), (10, 49.44), (12.4, 49.44), (14, -33.9)]],
+}))
+      `,
+    ],
+    {cwd: repoRoot, env: {...process.env, PYTHONPATH: resolve(repoRoot, 'src')}, encoding: 'utf-8'},
+  );
+  const data = JSON.parse(raw);
+
+  // The occlusion, framing and layout maths only agree when both sides use the
+  // same Earth size and metres-per-pixel; a silent drift here is invisible
+  // until the overlays stop lining up with the rendered map.
+  assert.ok(
+    Math.abs(data.circumference - EARTH_CIRCUMFERENCE) < 1.0,
+    `Earth circumference drifted: Python ${data.circumference} vs TS ${EARTH_CIRCUMFERENCE}`,
+  );
+  for (const [zoom, lat, mpp] of data.mpp) {
+    const ts = metersPerPixel(zoom, lat);
+    assert.ok(
+      Math.abs(mpp - ts) <= 1e-6 * Math.max(1, ts),
+      `meters_per_pixel(${zoom}, ${lat}) drifted: Python ${mpp} vs TS ${ts}`,
+    );
   }
 });
