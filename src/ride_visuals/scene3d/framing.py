@@ -22,7 +22,7 @@ The director knows the whole future, so the camera is solved offline:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -358,64 +358,6 @@ def project_points(
     sx = 0.5 * width + focal * (vx * r[0] + vy * r[1] + vz * r[2]) / safe
     sy = 0.5 * height - focal * (vx * u[0] + vy * u[1] + vz * u[2]) / safe
     return sx, sy, zc > 1e-6
-
-
-#: Tag candidates: (direction, leader px at 1080p), in order of preference.
-TAG_CANDIDATES = (
-    ("up", 44.0), ("up", 84.0), ("left", 48.0), ("right", 48.0), ("up", 130.0),
-    ("left", 110.0), ("right", 110.0), ("up", 190.0), ("left", 180.0), ("right", 180.0),
-)
-
-
-def tag_box(direction: str, leader: float, x: float, y: float, w: float, h: float, scale: float):
-    """Screen box (x0, y0, x1, y1) of a tag's text, mirroring Typography's Tag."""
-    if direction == "up":
-        bottom = y - leader - 8.0 * scale
-        return x - w / 2.0, bottom - h, x + w / 2.0, bottom
-    if direction == "left":
-        right = x - leader - 10.0 * scale
-        return right - w, y - h / 2.0, right, y + h / 2.0
-    left = x + leader + 10.0 * scale
-    return left, y - h / 2.0, left + w, y + h / 2.0
-
-
-def place_tag(
-    anchors: list[tuple[float, float]],
-    obstacles: list[tuple[np.ndarray, np.ndarray]],
-    text: str,
-    sub: str,
-    width: int,
-    height: int,
-    keep_out: Sequence[tuple[float, float, float, float]] = (),
-) -> tuple[str, float]:
-    """One placement for a tag over its whole on-screen window (no flicker).
-
-    ``anchors`` and ``obstacles`` (route points in screen px) are sampled at a
-    few frames of the window; the candidate covering the fewest route points
-    (padded) wins, ties broken by preference order.
-    """
-    scale = min(width, height) / 1080.0
-    w = max(len(text) * 22.0 * 0.58, len(sub) * 13.0 * 0.72) * scale
-    h = (22.0 * 1.15 + 4.0 + 13.0 * 1.3) * scale
-    pad = 10.0 * scale
-    best = TAG_CANDIDATES[0]
-    best_cost = np.inf
-    for rank, (direction, leader_1080) in enumerate(TAG_CANDIDATES):
-        leader = leader_1080 * scale
-        cost = 0.6 * rank
-        for (ax, ay), (ox, oy) in zip(anchors, obstacles, strict=True):
-            x0, y0, x1, y1 = tag_box(direction, leader, ax, ay, w, h, scale)
-            inside = (ox > x0 - pad) & (ox < x1 + pad) & (oy > y0 - pad) & (oy < y1 + pad)
-            cost += 4.0 * float(np.count_nonzero(inside))
-            if x0 < 0 or y0 < 0 or x1 > width or y1 > height:
-                cost += 50.0
-            for kx0, ky0, kx1, ky1 in keep_out:
-                if x0 < kx1 and x1 > kx0 and y0 < ky1 and y1 > ky0:
-                    cost += 50.0
-        if cost < best_cost:
-            best_cost = cost
-            best = (direction, leader_1080)
-    return best
 
 
 def zoom_to_fill(

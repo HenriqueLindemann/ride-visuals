@@ -1,14 +1,17 @@
 import {type DrawOp, type RGB, rgba} from '../core/draw';
 import {clamp01, lerp, outCubic} from '../core/ease';
 import type {LngLat} from '../core/geo';
-import {metricHeight, STORY_SAFE_BOTTOM, STORY_SAFE_TOP} from '../core/layout';
+import {frameMargins, LABEL_GAP, LABEL_LINE, metricHeight, totalsGrid, TYPE} from '../core/layout';
 import {INK, type TextItem} from '../core/Typography';
 import type {ScoreContext, ScoreOutput} from './index';
 
 export type StrataFloor = {
   id: string;
+  /** The period (month or year), set small above its distance. */
   label: string;
-  subLabel: string;
+  /** Distance ridden in the period, formatted, and its unit. */
+  value: string;
+  unit: string;
   targetLift: number;
   /** Vertical distance between floors (m); a landing plate starts this far above. */
   step?: number;
@@ -30,21 +33,19 @@ export type StrataStory = {
   }[];
 };
 
-/** Portrait totals: a 2x2 block resting on the safe area, the label column stopping above it. */
-const PORTRAIT_STAT_SIZE = 50;
-const PORTRAIT_STAT_ROW_PITCH = 110;
-const LABELS_CLEAR_OF_STATS = 60;
+/** Clear space between two floor blocks, and between the column and the totals (px at scale 1). */
+const FLOOR_GAP = 10;
+const LABELS_CLEAR_OF_TOTALS = 48;
 
-export function strataScore({spec, tracks, channel, projector, width, height, scale}: ScoreContext): ScoreOutput {
+export function strataScore({spec, tracks, channel, projector, width, height, scale, textScale}: ScoreContext): ScoreOutput {
   const story = spec.story as unknown as StrataStory;
   const ops: DrawOp[] = [];
   const texts: TextItem[] = [];
 
   const portrait = height > width;
-  const marginX = Math.round((portrait ? 68 : 112) * scale);
-  const topY = Math.round((portrait ? STORY_SAFE_TOP : 84) * scale);
-  const statsBottomRowY = Math.round(height - (STORY_SAFE_BOTTOM + metricHeight(PORTRAIT_STAT_SIZE)) * scale);
-  const statsTopRowY = Math.round(statsBottomRowY - PORTRAIT_STAT_ROW_PITCH * scale);
+  const margins = frameMargins(portrait);
+  const marginX = Math.round(margins.x * scale);
+  const topY = Math.round(margins.y * scale);
 
   const final = channel('final');
   const openingAlpha = channel('opening');
@@ -53,6 +54,15 @@ export function strataScore({spec, tracks, channel, projector, width, height, sc
   const black = channel('black');
 
   const floorCount = story.floors.length;
+  const totals = totalsGrid(story.stats, {
+    x0: marginX,
+    x1: width - marginX,
+    bottom: height - topY,
+    portrait,
+    textScale,
+    opacity: statsAlpha,
+    id: 'strata-stat',
+  });
 
   // Painter's order: bottom floor (oldest, k=0) to top floor (newest, k=floorCount-1).
   const labelCandidates: {
@@ -129,19 +139,23 @@ export function strataScore({spec, tracks, channel, projector, width, height, sc
     }
   });
 
-  // Left-aligned column of floor labels with leaders and vertical collision avoidance.
+  // Right-aligned column of floor distances, each led to its plate by a
+  // hairline at the middle of its number; collisions resolved vertically.
   if (labelCandidates.length > 0) {
     // Sort bottom-to-top on screen (largest y first).
     labelCandidates.sort((a, b) => b.leftY - a.leftY);
-    const maxY = portrait ? statsTopRowY - LABELS_CLEAR_OF_STATS * scale : height - 210 * scale;
-    const minY = topY + (openingAlpha > 0.05 ? 110 : 40) * scale;
-    // A tag with its sub-line is ~47 px tall at 1080p: keep a clear gap between them,
-    // tightening slightly only when many floors share a short vertical span.
-    const spanY = Math.max(0, maxY - minY);
-    const minGap =
-      labelCandidates.length > 1
-        ? Math.min(54 * scale, Math.max(28 * scale, spanY / (labelCandidates.length - 1)))
-        : 54 * scale;
+    // y is the leader's height: the number's middle, with the period label above it.
+    const blockAbove = (size: number) => (metricHeight(size) - size / 2) * textScale;
+    const top = topY + (openingAlpha > 0.05 ? 110 : 40) * textScale;
+    const footer = totals.top - LABELS_CLEAR_OF_TOTALS * textScale;
+    // The list size when the column has room: n blocks and n - 1 gaps between the top
+    // and the totals. Down to the tag size when many floors share it.
+    const n = labelCandidates.length;
+    const fit = ((footer - top) / textScale - (n - 1) * FLOOR_GAP) / n - LABEL_LINE - LABEL_GAP;
+    const size = Math.max(TYPE.tag, Math.min(TYPE.figure, fit));
+    const minGap = (metricHeight(size) + FLOOR_GAP) * textScale;
+    const minY = top + blockAbove(size);
+    const maxY = footer - (size / 2) * textScale;
     const ys = labelCandidates.map((c) => c.leftY);
     ys[0] = Math.min(ys[0], maxY);
     for (let i = 1; i < ys.length; i++) {
@@ -172,14 +186,15 @@ export function strataScore({spec, tracks, channel, projector, width, height, sc
         });
       }
       texts.push({
-        kind: 'tag',
+        kind: 'metric',
         id: `floor-label-${c.k}`,
-        x: colX,
-        y: labelY,
-        leader: 0,
-        direction: 'left',
-        text: c.floor.label,
-        sub: c.floor.subLabel,
+        x: colX - 10 * scale,
+        y: labelY - blockAbove(size),
+        label: c.floor.label,
+        value: c.floor.value,
+        unit: c.floor.unit,
+        align: 'right',
+        size,
         opacity: c.alpha,
       });
     });
@@ -194,52 +209,13 @@ export function strataScore({spec, tracks, channel, projector, width, height, sc
       label: story.opening.label,
       text: story.opening.text,
       accent: story.opening.accent,
-      size: portrait ? 42 : 46,
+      size: TYPE.title,
       maxWidth: width - 2 * marginX,
       opacity: openingAlpha,
     });
   }
 
-  if (statsAlpha > 0.004 && story.stats.length > 0) {
-    if (portrait) {
-      story.stats.slice(0, 4).forEach((stat, idx) => {
-        const rightCol = idx % 2 === 1;
-        const rowY = idx < 2 ? statsTopRowY : statsBottomRowY;
-        texts.push({
-          kind: 'metric',
-          id: `strata-stat-${idx}`,
-          x: rightCol ? width - marginX : marginX,
-          y: rowY,
-          label: stat.label,
-          value: stat.value,
-          unit: stat.unit,
-          align: rightCol ? 'right' : 'left',
-          size: PORTRAIT_STAT_SIZE,
-          opacity: statsAlpha,
-        });
-      });
-    } else {
-      const statY = Math.round(height - 148 * scale);
-      const spanW = width - 2 * marginX;
-      const count = story.stats.length;
-      story.stats.forEach((stat, idx) => {
-        const isLast = idx === count - 1;
-        const x = isLast ? width - marginX : marginX + (idx / Math.max(1, count - 1)) * spanW * 0.88;
-        texts.push({
-          kind: 'metric',
-          id: `strata-stat-${idx}`,
-          x,
-          y: statY,
-          label: stat.label,
-          value: stat.value,
-          unit: stat.unit,
-          align: isLast ? 'right' : 'left',
-          size: 56,
-          opacity: statsAlpha,
-        });
-      });
-    }
-  }
+  if (statsAlpha > 0.004) texts.push(...totals.items);
 
   return {ops, texts, black};
 }

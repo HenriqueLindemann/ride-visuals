@@ -177,7 +177,8 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
     label_col = (0.30 if portrait else 0.27) * tilt + 0.04 * (1.0 - tilt)
     # The whole height while building; a little room for the totals at the end.
     stats_in = ease_in_out_sine(span(t, t_final - 0.6, t_final + 1.0))
-    bottom = (0.9 - (0.12 if portrait else 0.1) * stats_in)
+    # Portrait totals are two rows of larger text above the safe area.
+    bottom = (0.9 - (0.21 if portrait else 0.1) * stats_in)
     heights = np.concatenate([np.zeros((frames, 4)), np.repeat(framed_top[:, None], 4, axis=1)], axis=1)
     cam_cx, cam_cy, cam.zoom = frame_points(
         np.full(frames, cx_plate), np.full(frames, cy_plate), cam.elevation, np.full(frames, z_top), cam.pitch,
@@ -222,7 +223,6 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
             label = i18n.month_name(month, year if multi_year else None)
         else:
             label = str(year)
-        sub_label = f"{i18n.number(round(floor_km))} km · {i18n.text('scene3d.rides_count', count=len(indices))}"
 
         b0 = beat_start[k]
         channels[f"floor{k}"] = glide(span(t, b0, b0 + 0.9))
@@ -236,7 +236,9 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
             {
                 "id": key,
                 "label": label,
-                "subLabel": sub_label,
+                # Each floor reads as its distance alone: the stack is about how far, not how often.
+                "value": i18n.number(round(floor_km)),
+                "unit": "km",
                 "targetLift": round(floor_lifts[k], 1),
                 "step": round(floor_step_m, 1),
                 "trackIndices": indices,

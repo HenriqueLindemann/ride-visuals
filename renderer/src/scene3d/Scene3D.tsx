@@ -1,6 +1,7 @@
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {AbsoluteFill, cancelRender, continueRender, delayRender, staticFile, useCurrentFrame} from 'remotion';
 import {drawKnockouts, drawOps} from './core/draw';
+import {textScaleFor} from './core/layout';
 import {MapStage} from './core/MapStage';
 import type {Camera, Projector} from './core/projector';
 import {decodeTrack, type Track} from './core/track';
@@ -74,6 +75,7 @@ export const Scene3D = ({specUrl, width, height}: SceneInput) => {
   const [loadHandle] = useState(() => delayRender('scene spec and font', {timeoutInMilliseconds: LOAD_TIMEOUT_MS}));
   const [projector, setProjector] = useState<Projector | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const textRef = useRef<HTMLDivElement>(null);
   const pending = useRef<{frame: number; handle: number} | null>(null);
 
   useEffect(() => {
@@ -106,6 +108,7 @@ export const Scene3D = ({specUrl, width, height}: SceneInput) => {
 
   const camera = useMemo(() => (scene ? cameraAt(scene.spec, frame) : null), [scene, frame]);
   const scale = Math.min(width, height) / 1080;
+  const textScale = textScaleFor(width, height);
 
   const output: ScoreOutput | null = useMemo(() => {
     if (!scene || !projector || projector.frame !== frame) return null;
@@ -123,8 +126,9 @@ export const Scene3D = ({specUrl, width, height}: SceneInput) => {
       width,
       height,
       scale,
+      textScale,
     });
-  }, [scene, projector, frame, width, height, scale]);
+  }, [scene, projector, frame, width, height, scale, textScale]);
 
   useLayoutEffect(() => {
     if (!output || !projector) return;
@@ -137,9 +141,8 @@ export const Scene3D = ({specUrl, width, height}: SceneInput) => {
     const ctx = canvas.getContext('2d')!;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawOps(ctx, projector, output.ops);
-    drawKnockouts(ctx, output.knockouts ?? [], 28 * scale);
-    if (output.overlay) drawOps(ctx, projector, output.overlay, {clear: false});
-  }, [output, projector, width, height, scale]);
+    drawKnockouts(ctx, output.knockouts ?? [], textRef.current, width);
+  }, [output, projector, width, height]);
 
   useEffect(() => {
     if (output && pending.current?.frame === frame) {
@@ -154,7 +157,7 @@ export const Scene3D = ({specUrl, width, height}: SceneInput) => {
         <MapStage spec={scene.spec} frame={frame} camera={camera} width={width} height={height} onProjector={setProjector} />
       ) : null}
       <canvas ref={canvasRef} style={{position: 'absolute', left: 0, top: 0, width, height}} />
-      {output ? <Typography items={output.texts} scale={scale} /> : null}
+      {output ? <Typography ref={textRef} items={output.texts} scale={textScale} /> : null}
       {/* Cinematic vignette: draws the eye to the centre and keeps edges quiet. */}
       <AbsoluteFill
         style={{background: 'radial-gradient(ellipse 85% 80% at 50% 48%, rgba(0,0,0,0) 58%, rgba(0,0,0,0.5) 100%)'}}

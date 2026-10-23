@@ -376,11 +376,9 @@ def test_flyover_director_invariants_and_terrain_clearance(tmp_path: Path) -> No
     assert abs(head[-1] - track.length_m) < 1.0
     # The distance counter lands on the catalog distance, not the GPS length.
     assert abs(spec.channels["km"][-1] - 60.0) < 1e-6
-    # Relief gets exaggerated, then shading follows it; tags carry a placement.
+    # Relief gets exaggerated, then shading follows it.
     assert spec.camera.terrain.max() >= 1.25
     assert spec.camera.shade.max() > 1.5
-    for climb in spec.story["climbs"]:
-        assert climb["tagDir"] in {"up", "left", "right"}
 
     # Bearing rate: gentle while chasing (counters on screen), a wider but
     # bounded sweep for the orbit down to the level side view.
@@ -715,6 +713,8 @@ def test_strata_stack_fills_the_frame_and_camera_only_backs_off(width: int, heig
     spec = build_strata_spec(
         _monthly_rides(8), width=width, height=height, fps=30, places_cache_dir=tmp_path, offline=True
     ).spec
+    # Each floor states its distance only, never a ride count.
+    assert all(floor["unit"] == "km" and floor["value"].isdigit() for floor in spec.story["floors"])
     cam = spec.camera
     peak = int(np.argmax(cam.zoom))
     assert np.all(np.diff(cam.zoom[peak:]) <= 1e-9)
@@ -776,31 +776,47 @@ def test_stretch_draws_and_consumes_every_ride_including_far_ones(tmp_path: Path
     assert meta[-1]["beforeM"] + meta[-1]["lengthM"] == pytest.approx(spec.story["totalM"], rel=1e-3)
 
 
-def test_flyover_live_climb_readout_follows_long_climbs_only(tmp_path: Path) -> None:
+def test_flyover_live_text_sits_at_the_top_over_the_land_ahead(tmp_path: Path) -> None:
+    from ride_visuals.scene3d.flyover import _Layout
+
+    # The road is drawn only behind the rider, down through the bottom of the
+    # frame: the counters take the top corners, the climb trace sits centred
+    # under them, and the hero climb is framed clear of both.
+    for width, height in ((1920, 1080), (1080, 1920)):
+        layout = _Layout.for_frame(width, height)
+        counters_bottom = layout.counters_y + layout.counter_h
+        x0, y0, x1, y1 = layout.trace
+        assert layout.counters_y == layout.top_y and counters_bottom < y0 < y1
+        assert x0 + x1 == pytest.approx(width)
+        _, top, _, bottom = layout.hero_box(width, height)
+        assert y1 / height < top < bottom < 0.8
+
+
+def test_flyover_climb_trace_follows_long_climbs_only(tmp_path: Path) -> None:
+    from ride_visuals.scene3d.flyover import _Layout
+
     # Short enough that the hill is a real climb (~5% at its steepest).
     track = _synthetic_ride(length_km=30.0, max_climb_m=420.0)
     spec = build_flyover_spec(track, sampler=_FakeSampler(700.0), fps=30, places_cache_dir=tmp_path, offline=True)
+    trace_box = _Layout.for_frame(spec.width, spec.height).trace
+    assert spec.story["layout"]["trace"] == [round(v, 1) for v in trace_box]
     climbs = spec.story["climbs"]
-    assert any(c["readout"] for c in climbs)
+    assert any(c["trace"] for c in climbs)
     head = spec.channels["head"]
     for k, climb in enumerate(climbs):
-        assert len(climb["profile"]) > 2 and min(climb["profile"]) == 0.0 and max(climb["profile"]) == 1.0
-        if not climb["readout"]:
-            assert f"readout{k}" not in spec.channels
+        rise = climb["rise"]
+        assert len(rise) > 2 and rise[0] == 0.0 and max(rise) > 0.0
+        if not climb["trace"]:
+            assert f"trace{k}" not in spec.channels
             continue
-        shown = spec.channels[f"readout{k}"] > 0.5
-        # On screen while the head is on the climb, never before its foot.
+        shown = spec.channels[f"trace{k}"] > 0.5
+        # On screen from the foot, held past the summit so the climb reads whole.
         assert float(head[shown].min()) >= climb["startM"] - 2_000.0
-        assert float(head[shown].max()) <= climb["endM"] + 1.0
-    # The readout box is the one tags keep out of, clear of the counters below it.
-    layout = spec.story["layout"]
-    x0, y0, x1, y1 = layout["readout"]["box"]
-    assert layout["topY"] <= y0 < layout["readout"]["stripTop"] < layout["readout"]["stripBottom"] < y1
-    assert x1 <= spec.width - layout["marginX"] + 0.5 and y1 < layout["bottomY"]
-    # Grade is a sign's grade: bounded and smooth, never metre-by-metre noise.
-    grade = spec.channels["grade"]
-    assert float(np.abs(grade).max()) < 25.0
-    assert float(np.abs(np.diff(grade)).max()) < 1.0
+        assert float(head[shown].max()) > climb["endM"]
+        summit = spec.channels[f"summit{k}"]
+        assert float(summit.min()) == 0.0 and float(summit.max()) == 1.0
+        assert float(head[summit > 0.0].min()) >= climb["endM"] - 1.0
+        assert climb["summary"].endswith("%")
 
 
 def test_hero_view_rises_above_a_ridge_that_would_hide_the_climb() -> None:

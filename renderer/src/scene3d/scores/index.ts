@@ -15,17 +15,18 @@ export type ScoreContext = {
   projector: Projector;
   width: number;
   height: number;
+  /** Frame size over a 1080 px short side: margins, strokes, marks. */
   scale: number;
+  /** The same for text and what is sized by it, larger in portrait (see textScaleFor). */
+  textScale: number;
 };
 
 export type ScoreOutput = {
   ops: DrawOp[];
   texts: TextItem[];
   black: number;
-  /** Screen boxes under fixed text where drawn lines fade out (legibility). */
+  /** Fixed text the drawn lines give way to (legibility). */
   knockouts?: Knockout[];
-  /** Screen furniture drawn after the knockouts (e.g. a chart inside a cleared box). */
-  overlay?: DrawOp[];
 };
 
 export type Score = (ctx: ScoreContext) => ScoreOutput;

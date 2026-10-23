@@ -409,8 +409,8 @@ function drawRing(ctx: CanvasRenderingContext2D, p: Projector, op: RingOp) {
   ctx.setLineDash([]);
 }
 
-export function drawOps(ctx: CanvasRenderingContext2D, p: Projector, ops: DrawOp[], {clear = true} = {}) {
-  if (clear) ctx.clearRect(0, 0, p.width, p.height);
+export function drawOps(ctx: CanvasRenderingContext2D, p: Projector, ops: DrawOp[]) {
+  ctx.clearRect(0, 0, p.width, p.height);
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -452,23 +452,84 @@ export function drawOps(ctx: CanvasRenderingContext2D, p: Projector, ops: DrawOp
   ctx.restore();
 }
 
-/** A screen box (px) under fixed text where drawn lines fade out. */
-export type Knockout = {box: [number, number, number, number]; alpha: number};
+/** Fixed text (a text item's id) the drawn lines give way to, at the text's own alpha. */
+export type Knockout = {text: string; alpha: number};
+
+/** Halo (CSS px) kept clear around a glyph set at `size` px. */
+const haloFor = (size: number) => 3 + 0.05 * size;
 
 /**
- * Erases whatever the ops drew under fixed text, with a soft edge: corner
- * counters and titles stay legible wherever the route happens to run.
+ * Erases whatever the ops drew in a thin halo around the glyphs of fixed
+ * text, the way a map keeps its labels legible: a route running under a
+ * counter stays whole around and between the characters, never vanishing
+ * into a box as if into a tunnel. Glyph positions come from the laid-out
+ * text under `root`, the shapes from the same font.
  */
-export function drawKnockouts(ctx: CanvasRenderingContext2D, knockouts: Knockout[], feather: number) {
-  if (knockouts.length === 0) return;
-  ctx.save();
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.filter = `blur(${Math.max(1, feather / 2)}px)`;
-  for (const {box, alpha} of knockouts) {
+export function drawKnockouts(ctx: CanvasRenderingContext2D, knockouts: Knockout[], root: HTMLElement | null, width: number) {
+  for (const {text, alpha} of knockouts) {
     if (alpha <= 0.003) continue;
-    ctx.fillStyle = `rgba(0,0,0,${Math.min(1, alpha)})`;
-    const [x0, y0, x1, y1] = box;
-    ctx.fillRect(x0 - feather / 2, y0 - feather / 2, x1 - x0 + feather, y1 - y0 + feather);
+    const element = root?.querySelector<HTMLElement>(`[data-text-id="${text}"]`);
+    if (!element) continue;
+    // Glyphs drawn opaque into a layer, then cleared once at the text's own
+    // alpha: a halo's fill and stroke would otherwise double up mid-fade.
+    const layer = scratch(ctx);
+    layer.save();
+    layer.setTransform(1, 0, 0, 1, 0, 0);
+    layer.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+    layer.restore();
+    layer.save();
+    traceGlyphs(layer, element, ctx.canvas.getBoundingClientRect(), width);
+    layer.restore();
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.globalAlpha = Math.min(1, alpha);
+    ctx.filter = 'blur(0.6px)';
+    ctx.drawImage(layer.canvas, 0, 0);
+    ctx.restore();
   }
-  ctx.restore();
+}
+
+/**
+ * Fills and strokes (with its halo) every character under `element`, each at
+ * the position the browser laid it out: kerning, tabular figures and letter
+ * spacing all come from the page; the canvas only supplies the glyph shape.
+ */
+function traceGlyphs(ctx: CanvasRenderingContext2D, element: HTMLElement, frame: DOMRect, width: number) {
+  // Composition px per client px (the Studio scales its preview).
+  const k = width / frame.width;
+  const range = document.createRange();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.lineJoin = 'round';
+  ctx.fillStyle = '#000';
+  ctx.strokeStyle = '#000';
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node as Text;
+    const style = getComputedStyle(text.parentElement!);
+    const size = parseFloat(style.fontSize);
+    const spacing = parseFloat(style.letterSpacing) || 0;
+    const upper = style.textTransform === 'uppercase';
+    ctx.font = `${style.fontWeight} ${size}px ${style.fontFamily}`;
+    // A text range's box is the font's content area: its top is one ascent above the baseline.
+    const ascent = ctx.measureText('H').fontBoundingBoxAscent;
+    ctx.lineWidth = 2 * haloFor(size);
+    let at = 0;
+    for (const char of text.data) {
+      const from = at;
+      at += char.length;
+      if (char.trim() === '') continue;
+      range.setStart(text, from);
+      range.setEnd(text, at);
+      const box = range.getBoundingClientRect();
+      if (box.width === 0) continue;
+      // Letter spacing trails each character: the glyph is centred on its advance.
+      const x = (box.left - frame.left) * k + (box.width * k - spacing) / 2;
+      const y = (box.top - frame.top) * k + ascent;
+      const glyph = upper ? char.toLocaleUpperCase() : char;
+      ctx.strokeText(glyph, x, y);
+      ctx.fillText(glyph, x, y);
+    }
+  }
 }

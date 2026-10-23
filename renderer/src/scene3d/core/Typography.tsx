@@ -1,4 +1,5 @@
-import type {CSSProperties} from 'react';
+import type {CSSProperties, Ref} from 'react';
+import {LABEL_GAP, LABEL_LINE, TYPE} from './layout';
 
 /** One warm accent on carbon black; everything else is paper at three strengths. */
 export const INK = {
@@ -47,7 +48,7 @@ export type MetricItem = {
   label: string;
   value: string;
   unit?: string;
-  align?: 'left' | 'right';
+  align?: 'left' | 'center' | 'right';
   size?: number;
   opacity: number;
 };
@@ -72,12 +73,13 @@ export type TextItem = CaptionItem | MetricItem | TagItem;
 const Label = ({children, scale}: {children: string; scale: number}) => (
   <div
     style={{
-      fontSize: 13 * scale,
+      fontSize: TYPE.label * scale,
+      lineHeight: `${LABEL_LINE * scale}px`,
       fontWeight: 500,
       letterSpacing: '0.14em',
       textTransform: 'uppercase',
       color: INK.paper2,
-      marginBottom: 10 * scale,
+      marginBottom: LABEL_GAP * scale,
       whiteSpace: 'nowrap',
     }}
   >
@@ -91,6 +93,7 @@ function Caption({item, scale}: {item: CaptionItem; scale: number}) {
   const centered = item.align === 'center';
   return (
     <div
+      data-text-id={item.id}
       style={{
         position: 'absolute',
         left: item.x,
@@ -130,16 +133,17 @@ function Caption({item, scale}: {item: CaptionItem; scale: number}) {
 
 function Metric({item, scale}: {item: MetricItem; scale: number}) {
   const size = (item.size ?? 72) * scale;
-  const right = item.align === 'right';
+  const align = item.align ?? 'left';
   return (
     <div
+      data-text-id={item.id}
       style={{
         position: 'absolute',
-        // A right-aligned metric is anchored by its right edge at x.
+        // x is the metric's left edge, centre or right edge, as aligned.
         left: item.x,
         top: item.y,
-        transform: right ? 'translateX(-100%)' : undefined,
-        textAlign: right ? 'right' : 'left',
+        transform: align === 'right' ? 'translateX(-100%)' : align === 'center' ? 'translateX(-50%)' : undefined,
+        textAlign: align,
       }}
     >
       <div style={entrance(item.opacity, scale)}>
@@ -147,7 +151,7 @@ function Metric({item, scale}: {item: MetricItem; scale: number}) {
         <div style={{whiteSpace: 'nowrap', color: INK.paper, lineHeight: 1}}>
           <span style={{...NUMERIC, fontSize: size, fontWeight: 300, letterSpacing: '-0.03em'}}>{item.value}</span>
           {item.unit ? (
-            <span style={{fontSize: size * 0.28, fontWeight: 400, color: INK.paper2, marginLeft: 6 * scale}}>{item.unit}</span>
+            <span style={{fontSize: Math.max(TYPE.label * scale, size * 0.28), fontWeight: 400, color: INK.paper2, marginLeft: 6 * scale}}>{item.unit}</span>
           ) : null}
         </div>
       </div>
@@ -179,10 +183,10 @@ function Tag({item, scale}: {item: TagItem; scale: number}) {
   return (
     <>
       <div style={{position: 'absolute', background: INK.hairline, ...line}} />
-      <div style={textStyle}>
-        <div style={{...NUMERIC, fontSize: 22 * scale, fontWeight: 400, color: INK.paper, lineHeight: 1.15}}>{item.text}</div>
+      <div data-text-id={item.id} style={textStyle}>
+        <div style={{...NUMERIC, fontSize: TYPE.tag * scale, fontWeight: 400, color: INK.paper, lineHeight: 1.15}}>{item.text}</div>
         {item.sub ? (
-          <div style={{...NUMERIC, fontSize: 13 * scale, fontWeight: 500, letterSpacing: '0.08em', color: INK.paper2, marginTop: 4 * scale}}>
+          <div style={{...NUMERIC, fontSize: TYPE.label * scale, fontWeight: 500, letterSpacing: '0.08em', color: INK.paper2, marginTop: 4 * scale}}>
             {item.sub}
           </div>
         ) : null}
@@ -191,8 +195,9 @@ function Tag({item, scale}: {item: TagItem; scale: number}) {
   );
 }
 
-export const Typography = ({items, scale}: {items: TextItem[]; scale: number}) => (
-  <div style={{position: 'absolute', inset: 0, fontFamily: FONT_STACK, pointerEvents: 'none'}}>
+/** Each item's root carries `data-text-id`, so knockouts can find its laid-out glyphs. */
+export const Typography = ({items, scale, ref}: {items: TextItem[]; scale: number; ref?: Ref<HTMLDivElement>}) => (
+  <div ref={ref} style={{position: 'absolute', inset: 0, fontFamily: FONT_STACK, pointerEvents: 'none'}}>
     {items
       .filter((item) => item.opacity > 0.004)
       .map((item) =>

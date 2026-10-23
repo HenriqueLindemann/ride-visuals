@@ -44,6 +44,7 @@ const {destination, greatCircle, groundResolution, mercX, mercY, metersPerPixel,
   '../src/scene3d/core/geo.ts'
 );
 const {decodeTrack, indexAtDistance, lodFor, pointAtDistance} = await import('../src/scene3d/core/track.ts');
+const {PORTRAIT_TEXT} = await import('../src/scene3d/core/layout.ts');
 const {sceneSpecSchema} = await import('../src/scene3d/schema.ts');
 const {scores} = await import('../src/scene3d/scores/index.ts');
 
@@ -161,11 +162,11 @@ test('flyover, stretch, and strata scores produce valid ops and non-overlapping 
       title: {label: 'Aug 29, 2026', text: 'Kaiserslautern'},
       labels: {distance: 'Distance', ascent: 'Elevation gain', kmUnit: 'km', mUnit: 'm', peakAlt: '400 m'},
       unfold: {center: [7.77, 49.44], right: [1, 0], lineM: 2000, baseZ: 100, vertical: 1, minAlt: 80, altRange: 320},
-      layout: {marginX: 112, topY: 88, bottomY: 918, routeLift: 4, readout: {box: [1348, 88, 1808, 218], stripTop: 122, stripBottom: 178}},
+      layout: {marginX: 112, topY: 88, countersY: 88, routeLift: 4, trace: [1448, 213, 1808, 293]},
       totalM: 2000,
       profile: [0, 0.5, 1, 0.8],
       peakFraction: 0.66,
-      climbs: [{lon: 7.78, lat: 49.45, alt: 400, startAlt: 200, startM: 200, endM: 1400, gainText: '+200 m', subText: '1.2 km · 6%', hero: true}],
+      climbs: [{lon: 7.78, lat: 49.45, alt: 400, startAlt: 200, startM: 200, endM: 1400, hero: true}],
       stats: [{label: 'Distance', value: '2.0', unit: 'km'}],
     },
   });
@@ -179,6 +180,7 @@ test('flyover, stretch, and strata scores produce valid ops and non-overlapping 
     width: 1920,
     height: 1080,
     scale: 1,
+    textScale: 1,
   });
   assert.ok(flyOut.ops.length > 0);
   assert.ok(flyOut.texts.length > 0);
@@ -193,6 +195,7 @@ test('flyover, stretch, and strata scores produce valid ops and non-overlapping 
     width: 1920,
     height: 1080,
     scale: 1,
+    textScale: 1,
   });
   assert.equal(flyOpening.ops.filter((op) => op.kind === 'track').length, 0);
   assert.equal(flyOpening.ops.filter((op) => op.kind === 'dot').length, 1);
@@ -223,8 +226,8 @@ test('flyover, stretch, and strata scores produce valid ops and non-overlapping 
         [7.7, 49.5],
       ],
       floors: [
-        {id: '2026-07', label: 'July', subLabel: '400 km · 8', targetLift: 0, trackIndices: [0]},
-        {id: '2026-08', label: 'August', subLabel: '620 km · 12', targetLift: 5000, trackIndices: [0]},
+        {id: '2026-07', label: 'July', value: '400', unit: 'km', targetLift: 0, trackIndices: [0]},
+        {id: '2026-08', label: 'August', value: '620', unit: 'km', targetLift: 5000, trackIndices: [0]},
       ],
       opening: {label: '20 rides', text: 'Kaiserslautern'},
       stats: [{label: 'Rides', value: '20'}],
@@ -239,6 +242,7 @@ test('flyover, stretch, and strata scores produce valid ops and non-overlapping 
     width: 1920,
     height: 1080,
     scale: 1,
+    textScale: 1,
   });
   const floorTags = strataOut.texts.filter((t) => t.id.startsWith('floor-label-'));
   assert.equal(floorTags.length, 2);
@@ -317,7 +321,7 @@ test('edge-case scores: flat flyover, 12-month portrait strata, and multi-ride s
       title: {label: 'Aug 29, 2026', text: 'Flat Ride'},
       labels: {distance: 'Distance', ascent: 'Elevation gain', kmUnit: 'km', mUnit: 'm', peakAlt: '200 m'},
       unfold: {center: [7.77, 49.44], right: [1, 0], lineM: 2000, baseZ: 100, vertical: 1, minAlt: 180, altRange: 60},
-      layout: {marginX: 112, topY: 88, bottomY: 918, routeLift: 4, readout: {box: [1348, 88, 1808, 218], stripTop: 122, stripBottom: 178}},
+      layout: {marginX: 112, topY: 88, countersY: 88, routeLift: 4, trace: [1448, 213, 1808, 293]},
       totalM: 2000,
       profile: [0, 0, 0, 0],
       peakFraction: 0,
@@ -334,8 +338,9 @@ test('edge-case scores: flat flyover, 12-month portrait strata, and multi-ride s
     width: 1920,
     height: 1080,
     scale: 1,
+    textScale: 1,
   });
-  assert.equal(flatOut.texts.filter((t) => t.id.startsWith('climb-')).length, 0);
+  assert.equal(flatOut.texts.filter((t) => t.id.startsWith('trace-')).length, 0);
   assert.equal(flatOut.ops.filter((op) => op.kind === 'stem').length, 0);
   assert.ok(flatOut.texts.some((t) => t.id === 'peak-alt'));
 
@@ -344,7 +349,8 @@ test('edge-case scores: flat flyover, 12-month portrait strata, and multi-ride s
   const floors = months.map((label, k) => ({
     id: `2026-${String(k + 1).padStart(2, '0')}`,
     label,
-    subLabel: `${(k + 1) * 120} km · ${k + 3}`,
+    value: `${(k + 1) * 120}`,
+    unit: 'km',
     targetLift: k * 1200,
     step: 1200,
     trackIndices: [0],
@@ -393,26 +399,27 @@ test('edge-case scores: flat flyover, 12-month portrait strata, and multi-ride s
     width: 1080,
     height: 1920,
     scale: 1,
+    textScale: PORTRAIT_TEXT,
   });
-  const tags12 = strata12Out.texts.filter((t) => t.id.startsWith('floor-label-'));
-  assert.equal(tags12.length, 12);
-  // Sorted bottom-to-top: verify minimum vertical spacing, header clearance, and footer clearance
-  for (let i = 1; i < tags12.length; i++) {
-    assert.ok(tags12[i - 1].y - tags12[i].y >= 28 - 1e-6);
+  // A metric block: label line (17) + gap (10) + its value line, at the portrait text scale.
+  const blockBottom = (t) => t.y + (27 + t.size) * PORTRAIT_TEXT;
+  const floors12 = strata12Out.texts.filter((t) => t.id.startsWith('floor-label-')).sort((a, b) => a.y - b.y);
+  assert.equal(floors12.length, 12);
+  // Twelve floors still read as figures (never below the tag size) and never touch.
+  for (let i = 0; i < floors12.length; i++) {
+    assert.ok(floors12[i].size >= 22);
+    if (i > 0) assert.ok(floors12[i].y >= blockBottom(floors12[i - 1]), `floor ${i} touches the one above`);
   }
-  const topFloorY = Math.min(...tags12.map((t) => t.y));
-  const bottomFloorY = Math.max(...tags12.map((t) => t.y));
   // Instagram Story: the top and bottom 220 px of a 1080x1920 frame are covered.
-  assert.ok(topFloorY >= 220 + 110 - 1e-6);
+  assert.ok(floors12[0].y >= 220);
 
-  // The 2x2 totals rest on the safe area (a label + value block is ~77 px tall)
-  // and the floor labels stop above them.
+  // The 2x2 totals rest on the safe area and the floor column stops above them.
   const statTexts = strata12Out.texts.filter((t) => t.id.startsWith('strata-stat-'));
   assert.equal(statTexts.length, 4);
   for (const t of statTexts) {
-    assert.ok(t.y + 77 <= 1920 - 220 + 1e-6, `stat ${t.id} reaches into the reply bar`);
+    assert.ok(blockBottom(t) <= 1920 - 220 + 1e-6, `stat ${t.id} reaches into the reply bar`);
   }
-  assert.ok(bottomFloorY <= Math.min(...statTexts.map((t) => t.y)) - 1e-6, 'labels overlap the stats');
+  assert.ok(blockBottom(floors12.at(-1)) <= Math.min(...statTexts.map((t) => t.y)), 'floors overlap the totals');
 
   // 3. Stretch with dozens of short rides + --toward destination
   const manyRides = Array.from({length: 40}, (_, k) => ({
@@ -457,6 +464,7 @@ test('edge-case scores: flat flyover, 12-month portrait strata, and multi-ride s
     width: 1920,
     height: 1080,
     scale: 1,
+    textScale: 1,
   });
   assert.ok(stretchOut.ops.some((op) => op.kind === 'pulse'));
   assert.ok(stretchOut.texts.some((t) => t.id === 'stretch-ending'));

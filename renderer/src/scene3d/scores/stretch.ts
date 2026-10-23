@@ -1,7 +1,7 @@
 import type {DrawOp, RGB} from '../core/draw';
 import {clamp01, lerp, outCubic} from '../core/ease';
 import {destination, type LngLat} from '../core/geo';
-import {STORY_SAFE_TOP} from '../core/layout';
+import {frameMargins, TYPE} from '../core/layout';
 import {pointAtDistance} from '../core/track';
 import {INK, type TextItem} from '../core/Typography';
 import type {ScoreContext, ScoreOutput} from './index';
@@ -47,8 +47,9 @@ export function stretchScore({spec, tracks, channel, projector, width, height, s
   const texts: TextItem[] = [];
 
   const portrait = height > width;
-  const marginX = Math.round((portrait ? 72 : 112) * scale);
-  const topY = Math.round((portrait ? STORY_SAFE_TOP : 88) * scale);
+  const margins = frameMargins(portrait);
+  const marginX = Math.round(margins.x * scale);
+  const topY = Math.round(margins.y * scale);
 
   const laid = channel('laid');
   const openingAlpha = channel('opening');
@@ -214,7 +215,7 @@ export function stretchScore({spec, tracks, channel, projector, width, height, s
       label: story.opening.label,
       text: story.opening.text,
       accent: story.opening.accent,
-      size: portrait ? 42 : 46,
+      size: TYPE.title,
       maxWidth: width - 2 * marginX,
       opacity: openingAlpha,
     });
@@ -234,7 +235,7 @@ export function stretchScore({spec, tracks, channel, projector, width, height, s
       value: fmt.format(Math.max(0, kmVal)),
       unit: story.counter.unit,
       align: 'left',
-      size: portrait ? 62 : 70,
+      size: TYPE.number,
       opacity: counterAlpha,
     });
   }
@@ -248,7 +249,7 @@ export function stretchScore({spec, tracks, channel, projector, width, height, s
       label: story.ending.label,
       text: story.ending.text,
       accent: story.ending.accent,
-      size: portrait ? 42 : 46,
+      size: TYPE.title,
       maxWidth: width - 2 * marginX,
       opacity: endingAlpha,
     });

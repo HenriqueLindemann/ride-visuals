@@ -31,8 +31,6 @@ from ride_visuals.scene3d.climbs import Climb, detect_climbs, featured_climbs, h
 from ride_visuals.scene3d.framing import (
     adaptive_exaggeration,
     occlusion,
-    place_tag,
-    project_points,
     solve_chase,
     visible_bearing_offset,
     zoom_to_fill,
@@ -79,32 +77,41 @@ HERO_MIRROR_COST = 0.05
 #: Where the road is drawn above the relief (ROUTE_LIFT_M in flyover.ts).
 ROUTE_LIFT_M = 4.0
 
-#: Height of a live counter (label line, gap, 60 px value) at a 1080 px short side.
-_COUNTER_TEXT_H = 17.0 + 10.0 + 60.0
-#: Screen layout at a 1080 px short side (see _Layout). Portrait text stays
-#: inside the Instagram Story safe area, like every other 9:16 output.
+#: Text, and what is sized by it, is set this much larger in portrait (mirrors
+#: PORTRAIT_TEXT in renderer/src/scene3d/core/layout.ts).
+PORTRAIT_TEXT = 1.4
+#: Height of a live counter (label line, gap, 68 px value) at text scale 1.
+_COUNTER_TEXT_H = 17.0 + 10.0 + 68.0
+#: Screen layout at a 1080 px short side (see _Layout; frameMargins in
+#: layout.ts): side margins and one vertical margin for the top and the bottom,
+#: the Instagram Story safe area in portrait. The other entries are sized by
+#: text, so they grow with it in portrait.
 LAYOUT_1080: dict = {
-    "landscape": {"margin_x": 112.0, "top_y": 88.0, "counters_from_bottom": 162.0, "readout_w": 460.0},
-    "portrait": {
-        "margin_x": 72.0,
-        "top_y": float(INSTAGRAM_STORY.profile_safe_px),
-        "counters_from_bottom": INSTAGRAM_STORY.reply_safe_px + _COUNTER_TEXT_H,
-        "readout_w_frac": 0.6,
-    },
+    "landscape": {"margin_x": 112.0, "margin_y": 88.0, "trace_w": 360.0},
+    "portrait": {"margin_x": 72.0, "margin_y": float(INSTAGRAM_STORY.profile_safe_px), "trace_w_frac": 0.4},
     "counter_w": 440.0,
-    "counter_h": 110.0,
-    #: Readout rows: labels, then the profile strip, then the grade under it.
-    "readout_strip_top": 34.0,
-    "readout_strip_h": 56.0,
-    "readout_grade_h": 40.0,
+    #: The climb trace hangs this far under the counters, this tall: the
+    #: gain figure, the line, and the climb's length and grade under it.
+    "trace_gap": 30.0,
+    "trace_h": 170.0,
 }
 
 #: Local metres (x east, y north) -> ground height (m), NaN where unknown.
 GroundXY = Callable[[np.ndarray, np.ndarray], np.ndarray]
+#: Climb trace: every featured climb ridden over at least this long on screen,
+#: drawn from this many samples of the climb, and held this long once the
+#: summit is reached (the hero climb: through its summit beat).
+TRACE_MIN_S = 0.5
+TRACE_SAMPLES = 96
+TRACE_HOLD_S = 2.4
+#: The summary under a trace fades in over this long after the summit.
+TRACE_SUMMIT_S = 1.4
 #: The climb of the day only gets the hero treatment when it is a real climb.
 HERO_MIN_GAIN_M = 100.0
-#: Where the hero climb sits on screen (x0, y0, x1, y1), clear of the counters.
-HERO_BOX = (0.2, 0.24, 0.8, 0.72)
+#: Sides and bottom of the box the hero climb fills (fractions of the frame);
+#: its top keeps clear of the counters and the climb trace (_Layout.hero_box).
+HERO_BOX_X = (0.2, 0.8)
+HERO_BOX_BOTTOM = 0.76
 CLIMB_TIME_WEIGHT = 3.5
 #: Screen-time ground speed on the flats (m/s): low enough that the chase
 #: camera can stay close (~z12) without the land streaming past.
@@ -113,13 +120,6 @@ CRUISE_RAMP_S = 1.4
 TYPICAL_CHASE_ZOOM = 12.4
 #: Levels the opening establishing shot sits above the chase zoom.
 OPENING_ZOOM_DROP = 1.5
-#: Live climb readout: shown for climbs that last at least this long on
-#: screen; grade is measured over GRADE_WINDOW_M of road (a sign's grade, not
-#: the noise of each metre) and eased over READOUT_GRADE_SMOOTH_S.
-READOUT_MIN_S = 3.5
-GRADE_WINDOW_M = 200.0
-READOUT_GRADE_SMOOTH_S = 0.5
-READOUT_PROFILE_SAMPLES = 96
 
 
 @dataclass(frozen=True)
@@ -280,7 +280,7 @@ def _hero_view(
     """Camera that shows the whole hero climb: as oblique as the relief allows.
 
     Every candidate (side, angle off the climb's direction, pitch) is framed
-    to fill HERO_BOX and scored by the fraction of the road the relief hides
+    to fill the layout's hero box and scored by the fraction of the road the relief hides
     from it, as the player will draw it, plus small costs for giving up the
     low dramatic angle or the start-left, summit-right reading.
     """
@@ -300,12 +300,13 @@ def _hero_view(
     if ground_xy is None:
         candidates = candidates[:1]
     n = len(candidates)
+    box = _Layout.for_frame(width, height).hero_box(width, height)
     bearings = np.array([(climb_dir + side * angle) % 360.0 for side, angle, _ in candidates])
     pitches = np.array([pitch for _, _, pitch in candidates])
     zooms = np.array([
         zoom_to_fill(
             cx, cy, mid_alt * exaggeration, pitch, bearing, lat, width, height,
-            px, py, pz * exaggeration, HERO_BOX, zoom_range=(11.0, 14.0),
+            px, py, pz * exaggeration, box, zoom_range=(11.0, 14.0),
         )
         for bearing, pitch in zip(bearings, pitches, strict=True)
     ])
@@ -347,54 +348,50 @@ def _hero_view(
 class _Layout:
     """Where the screen furniture sits (px): the single source for director and player.
 
-    Sizes are given for a 1080 px short side (LAYOUT_1080) and scaled. The
-    live climb readout sits top right, mirroring the opening title: during
-    the chase the top of the frame is distant land, while the road behind the
-    rider always runs down through the bottom middle.
+    Sizes are given for a 1080 px short side (LAYOUT_1080) and scaled. All
+    live text sits along the top: the route is never drawn ahead of the rider,
+    so the top of the frame is land still to come, while the road behind runs
+    down through the bottom, winding into either corner (in a portrait frame,
+    under bottom corner counters most of the ride). The two counters take the
+    top corners, as the opening title did. While a climb is ridden, its trace
+    sits centred under them: the climb's profile drawn as it is ridden, and
+    the metres it has gained.
     """
 
     scale: float
     margin_x: float
     top_y: float
-    #: Top of the corner counters (their label row).
-    bottom_y: float
-    counter_w: float
+    #: Top of the corner counters (their label row), and their height.
+    counters_y: float
     counter_h: float
-    readout: tuple[float, float, float, float]
-    strip_top: float
-    strip_bottom: float
+    counter_w: float
+    #: The climb trace's box (px).
+    trace: tuple[float, float, float, float]
 
     @classmethod
     def for_frame(cls, width: int, height: int) -> _Layout:
         portrait = height > width
         ref = LAYOUT_1080["portrait" if portrait else "landscape"]
         scale = min(width, height) / 1080.0
+        text = scale * (PORTRAIT_TEXT if portrait else 1.0)
         margin_x = ref["margin_x"] * scale
-        top_y = ref["top_y"] * scale
-        right = width - margin_x
-        readout_w = ref["readout_w_frac"] * width if portrait else ref["readout_w"] * scale
-        strip_top = top_y + LAYOUT_1080["readout_strip_top"] * scale
-        strip_bottom = strip_top + LAYOUT_1080["readout_strip_h"] * scale
+        top_y = ref["margin_y"] * scale
+        trace_w = ref["trace_w_frac"] * width if portrait else ref["trace_w"] * scale
+        trace_y = top_y + _COUNTER_TEXT_H * text + LAYOUT_1080["trace_gap"] * text
         return cls(
             scale=scale,
             margin_x=margin_x,
             top_y=top_y,
-            bottom_y=height - ref["counters_from_bottom"] * scale,
-            counter_w=LAYOUT_1080["counter_w"] * scale,
-            counter_h=LAYOUT_1080["counter_h"] * scale,
-            readout=(right - readout_w, top_y, right, strip_bottom + LAYOUT_1080["readout_grade_h"] * scale),
-            strip_top=strip_top,
-            strip_bottom=strip_bottom,
+            counters_y=top_y,
+            counter_h=_COUNTER_TEXT_H * text,
+            counter_w=LAYOUT_1080["counter_w"] * text,
+            trace=(0.5 * (width - trace_w), trace_y, 0.5 * (width + trace_w), trace_y + LAYOUT_1080["trace_h"] * text),
         )
 
-    def keep_out(self, width: int, height: int) -> list[tuple[float, float, float, float]]:
-        """Boxes a summit tag must stay clear of: both counters and the readout."""
-        top = self.bottom_y - self.counter_h
-        return [
-            (0.0, top, self.counter_w, float(height)),
-            (width - self.counter_w, top, float(width), float(height)),
-            self.readout,
-        ]
+    def hero_box(self, width: int, height: int) -> tuple[float, float, float, float]:
+        """Where the hero climb sits (fractions of the frame): under the climb trace."""
+        top = self.trace[3] / height + 0.04
+        return (HERO_BOX_X[0], top, HERO_BOX_X[1], HERO_BOX_BOTTOM)
 
     def story(self) -> dict[str, object]:
         def r(v: float) -> float:
@@ -403,52 +400,40 @@ class _Layout:
         return {
             "marginX": r(self.margin_x),
             "topY": r(self.top_y),
-            "bottomY": r(self.bottom_y),
+            "countersY": r(self.counters_y),
             "routeLift": ROUTE_LIFT_M,
-            "readout": {
-                "box": [r(v) for v in self.readout],
-                "stripTop": r(self.strip_top),
-                "stripBottom": r(self.strip_bottom),
-            },
+            "trace": [r(v) for v in self.trace],
         }
 
 
-def _grade_pct(prof_d: np.ndarray, prof_alt: np.ndarray) -> np.ndarray:
-    """Grade (%) at each profile sample over the GRADE_WINDOW_M of road around it."""
-    half = 0.5 * GRADE_WINDOW_M
-    ahead = np.interp(prof_d + half, prof_d, prof_alt)
-    behind = np.interp(prof_d - half, prof_d, prof_alt)
-    run = np.minimum(prof_d + half, prof_d[-1]) - np.maximum(prof_d - half, 0.0)
-    return 100.0 * (ahead - behind) / np.maximum(run, 1.0)
-
-
-def _readout_windows(
+def _trace_windows(
     climbs: list[Climb],
+    hero: Climb | None,
     head: np.ndarray,
     t: np.ndarray,
     riding: np.ndarray,
-    tag_starts: list[float | None],
-) -> list[tuple[float, float] | None]:
-    """(start, end) seconds of each climb's live readout, or None when too brief.
+    t_hero_end: float,
+) -> list[tuple[float, float, float] | None]:
+    """(start, summit, end) seconds of each climb's trace, or None when too brief.
 
-    It comes in as the head reaches the foot and hands over to the summit tag
-    (which sums the climb up) as that comes in, or leaves shortly after the
-    summit; it never overlaps the next climb's readout.
+    It comes in as the head reaches the foot and stays a moment past the
+    summit (the hero climb: through its summit beat), so the climb can be
+    taken in whole; it never overlaps the next climb's trace.
     """
     ride_t = t[riding]
     ride_head = head[riding]
-    windows: list[tuple[float, float] | None] = []
-    for climb, tag_start in zip(climbs, tag_starts, strict=True):
+    windows: list[tuple[float, float, float] | None] = []
+    for climb in climbs:
         t_foot = float(np.interp(climb.start_m, ride_head, ride_t))
         t_top = float(np.interp(climb.end_m, ride_head, ride_t))
-        t_out = t_top + 0.9
-        if tag_start is not None:
-            t_out = min(t_out, tag_start + 0.45)
-        windows.append((t_foot - 0.3, t_out) if t_out - t_foot >= READOUT_MIN_S else None)
+        t_out = t_top + TRACE_HOLD_S
+        if climb == hero:
+            t_out = max(t_out, t_hero_end + 0.3)
+        windows.append((t_foot - 0.3, t_top, t_out) if t_top - t_foot >= TRACE_MIN_S else None)
     for k in range(len(windows) - 1):
         cur, nxt = windows[k], windows[k + 1]
-        if cur is not None and nxt is not None and cur[1] > nxt[0] - 0.1:
-            windows[k] = (cur[0], nxt[0] - 0.1)
+        if cur is not None and nxt is not None and cur[2] > nxt[0] - 0.1:
+            windows[k] = (cur[0], cur[1], max(cur[1], nxt[0] - 0.1))
     return windows
 
 
@@ -492,50 +477,6 @@ def _tag_windows(
         accepted.append((start, end))
         out[i] = (start, end, fade)
     return out
-
-
-def _tag_layout(  # noqa: PLR0913
-    env: np.ndarray,
-    climb: Climb,
-    cam: CameraTrack,
-    cx: np.ndarray,
-    cy: np.ndarray,
-    origin: tuple[float, float],
-    prof_d: np.ndarray,
-    grid_x: np.ndarray,
-    grid_y: np.ndarray,
-    prof_alt: np.ndarray,
-    width: int,
-    height: int,
-    text: str,
-    sub: str,
-    *,
-    summit_xy: tuple[float, float],
-) -> dict[str, object]:
-    """Pick the tag's direction and leader so its text never covers the route."""
-    shown = np.flatnonzero(env > 0.05)
-    if len(shown) == 0:
-        return {"tagDir": "up", "tagLeader": 44.0}
-    keep_out = _Layout.for_frame(width, height).keep_out(width, height)
-    step = max(1, len(shown) // 6)
-    anchors: list[tuple[float, float]] = []
-    obstacles: list[tuple[np.ndarray, np.ndarray]] = []
-    route = slice(None, None, 4)
-    for i in shown[::step]:
-        e = float(cam.terrain[i])
-        args = (float(cx[i]), float(cy[i]), float(cam.elevation[i]), float(cam.zoom[i]), float(cam.pitch[i]),
-                float(cam.bearing[i]), origin[1], width, height)
-        ax, ay, ok = project_points(*args, np.array([summit_xy[0]]), np.array([summit_xy[1]]),
-                                    np.array([climb.end_alt * e]))
-        if not ok[0]:
-            continue
-        ox, oy, front = project_points(*args, grid_x[route], grid_y[route], prof_alt[route] * e)
-        anchors.append((float(ax[0]), float(ay[0])))
-        obstacles.append((ox[front], oy[front]))
-    if not anchors:
-        return {"tagDir": "up", "tagLeader": 44.0}
-    direction, leader = place_tag(anchors, obstacles, text, sub, width, height, keep_out)
-    return {"tagDir": direction, "tagLeader": leader}
 
 
 def _time_weights(grid_s: np.ndarray, climbs: list[Climb], hero: Climb | None) -> np.ndarray:
@@ -946,15 +887,8 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         cum_ascent = cum_ascent * (official_gain / raw_total_gain)
     ascent_ch = np.interp(head, prof_d, cum_ascent)
 
-    # Live climb readout: the grade under the head, eased so it reads as a
-    # number changing, not flickering.
-    grade_ch = gaussian_smooth(
-        np.interp(head, prof_d, _grade_pct(prof_d, prof_alt)), READOUT_GRADE_SMOOTH_S * fps
-    )
     tag_windows = _tag_windows(climbs, hero, head, t, t_hero_start, t_hero_end)
-    readouts = _readout_windows(
-        climbs, head, t, riding, [start if end > start else None for start, end, _ in tag_windows]
-    )
+    traces = _trace_windows(climbs, hero, head, t, riding, t_hero_end)
 
     unfold_ch = travel(span(t, t_side_end, t_unfold_end))
     chart_ch = ease_in_out_sine(span(t, t_unfold_end - 0.5, t_unfold_end + 0.7))
@@ -970,7 +904,6 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         "km": head / max(total_m, 1.0) * total_km,
         "ascent": ascent_ch,
         "beat": beat,
-        "grade": grade_ch,
         "unfold": unfold_ch,
         "chart": chart_ch,
         "stats": stats_ch,
@@ -983,14 +916,11 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         summit_idx = int(np.searchsorted(track.dist, climb.end_m, side="left"))
         summit_idx = min(len(track.lon) - 1, max(0, summit_idx))
         channels[f"climb{k}"] = envelope(t, start_s, end_s, fade_s) if end_s > start_s else np.zeros(frames)
-        readout = readouts[k]
-        if readout is not None:
-            channels[f"readout{k}"] = envelope(t, readout[0], readout[1], 0.45) * counters
-        climb_d = np.linspace(climb.start_m, climb.end_m, READOUT_PROFILE_SAMPLES)
-        climb_alt = np.interp(climb_d, prof_d, prof_alt)
-        climb_low = float(climb_alt.min())
-        gain_text = f"+{i18n.number(round(climb.gain_m))} m"
-        sub_text = f"{i18n.number(climb.length_m / 1000.0, 1)} km · {i18n.number(climb.grade_pct, 1)}%"
+        trace = traces[k]
+        if trace is not None:
+            channels[f"trace{k}"] = envelope(t, trace[0], trace[2], 0.45) * counters
+            channels[f"summit{k}"] = span(t, trace[1], trace[1] + TRACE_SUMMIT_S)
+        climb_alt = np.interp(np.linspace(climb.start_m, climb.end_m, TRACE_SAMPLES), prof_d, prof_alt)
         story_climbs.append(
             {
                 "lon": round(float(track.lon[summit_idx]), 6),
@@ -999,20 +929,12 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
                 "startAlt": round(climb.start_alt, 1),
                 "startM": round(climb.start_m, 1),
                 "endM": round(climb.end_m, 1),
-                "gainText": gain_text,
-                "subText": sub_text,
                 "hero": climb == hero,
-                "readout": readout is not None,
-                # The climb's own profile, 0..1 between its lowest and highest point.
-                "profile": np.round(
-                    (climb_alt - climb_low) / max(float(climb_alt.max()) - climb_low, 1.0), 4
-                ).tolist(),
-                "topText": f"{i18n.number(round(climb.end_alt))} m",
-                **_tag_layout(
-                    channels[f"climb{k}"], climb, cam, cx, cy, origin, prof_d, grid_x, grid_y, prof_alt,
-                    width, height, gain_text, sub_text,
-                    summit_xy=(float(rx[summit_idx]), float(ry[summit_idx])),
-                ),
+                # The climb summed up under its trace once the summit is reached.
+                "summary": f"{i18n.number(climb.length_m / 1000.0, 1)} km · {i18n.number(climb.grade_pct, 1)}%",
+                "trace": trace is not None,
+                # Metres above the climb's foot along it (evenly spaced), for its trace.
+                "rise": np.round(climb_alt - climb_alt[0], 1).tolist(),
             }
         )
 
@@ -1062,7 +984,6 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         "labels": {
             "distance": i18n.text("scene3d.distance"),
             "ascent": i18n.text("scene3d.ascent"),
-            "climb": i18n.text("scene3d.climb"),
             "kmUnit": "km",
             "mUnit": "m",
             "peakAlt": f"{i18n.number(round(max_alt))} m",

@@ -42,6 +42,7 @@ registerHooks({
 });
 
 const {EARTH_CIRCUMFERENCE, metersPerPixel} = await import('../src/scene3d/core/geo.ts');
+const {frameMargins, PORTRAIT_TEXT, STORY_SAFE, textScaleFor} = await import('../src/scene3d/core/layout.ts');
 const {decodeTrack} = await import('../src/scene3d/core/track.ts');
 const {sceneSpecSchema} = await import('../src/scene3d/schema.ts');
 const {scores} = await import('../src/scene3d/scores/index.ts');
@@ -136,13 +137,14 @@ print(json.dumps([fly, stretch, strata]))
       width: spec.profile.width,
       height: spec.profile.height,
       scale: 1,
+      textScale: textScaleFor(spec.profile.width, spec.profile.height),
     });
     assert.ok(Array.isArray(out.ops) && out.ops.length > 0);
     assert.ok(Array.isArray(out.texts));
   }
 });
 
-test('director and player share map scale, so offline framing matches the render', () => {
+test('director and player share map scale and layout, so offline framing matches the render', () => {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
   const venvPython = resolve(repoRoot, '.venv/bin/python');
   const pythonBin = existsSync(venvPython) ? venvPython : 'python3';
@@ -153,7 +155,12 @@ test('director and player share map scale, so offline framing matches the render
       `
 import json
 from ride_visuals.scene3d.camera import EARTH_CIRCUMFERENCE_M, meters_per_pixel
+from ride_visuals.scene3d.flyover import LAYOUT_1080, PORTRAIT_TEXT
+from ride_visuals.video.instagram import INSTAGRAM_STORY
 print(json.dumps({
+  "portraitText": PORTRAIT_TEXT,
+  "storySafe": [INSTAGRAM_STORY.profile_safe_px, INSTAGRAM_STORY.reply_safe_px],
+  "margins": {k: [LAYOUT_1080[k]["margin_x"], LAYOUT_1080[k]["margin_y"]] for k in ("portrait", "landscape")},
   "circumference": EARTH_CIRCUMFERENCE_M,
   "mpp": [[z, lat, float(meters_per_pixel(z, lat))] for z, lat in [(8, 60.0), (10, 49.44), (12.4, 49.44), (14, -33.9)]],
 }))
@@ -170,6 +177,13 @@ print(json.dumps({
     Math.abs(data.circumference - EARTH_CIRCUMFERENCE) < 1.0,
     `Earth circumference drifted: Python ${data.circumference} vs TS ${EARTH_CIRCUMFERENCE}`,
   );
+  // The flyover's layout is planned in Python and drawn in TS: same margins, safe area and text scale.
+  assert.equal(data.portraitText, PORTRAIT_TEXT);
+  assert.deepEqual(data.storySafe, [STORY_SAFE, STORY_SAFE]);
+  for (const [key, portrait] of [['portrait', true], ['landscape', false]]) {
+    const m = frameMargins(portrait);
+    assert.deepEqual(data.margins[key], [m.x, m.y], `${key} margins drifted`);
+  }
   for (const [zoom, lat, mpp] of data.mpp) {
     const ts = metersPerPixel(zoom, lat);
     assert.ok(

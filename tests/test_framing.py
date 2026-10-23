@@ -12,7 +12,6 @@ from ride_visuals.scene3d.framing import (
     adaptive_exaggeration,
     frame_points,
     occlusion,
-    place_tag,
     project_points,
     rate_limited_floor,
     solve_chase,
@@ -93,18 +92,6 @@ def test_occlusion_sees_walls() -> None:
     # Above the ceiling nothing is sampled, so a far-away wall is ignored.
     skipped = occlusion(*eye, np.array([[1_000.0]]), np.array([[0.0]]), np.array([[0.0]]), wall, ceiling=-1.0)
     assert skipped[0] == 0.0
-
-
-def test_place_tag_avoids_route_above_summit() -> None:
-    # The road climbs straight up the screen through the space above the summit.
-    oy = np.linspace(100.0, 600.0, 120)
-    ox = np.full_like(oy, 960.0)
-    direction, _ = place_tag([(960.0, 600.0)], [(ox, oy)], "+356 m", "7,4 km · 4,8%", 1920, 1080)
-    assert direction in {"left", "right"}
-
-    # With a clear sky it keeps the default.
-    direction, leader = place_tag([(960.0, 600.0)], [(np.array([]), np.array([]))], "+356 m", "", 1920, 1080)
-    assert (direction, leader) == ("up", 44.0)
 
 
 def test_tag_windows_never_overlap() -> None:

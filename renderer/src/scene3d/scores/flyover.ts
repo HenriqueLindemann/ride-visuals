@@ -1,6 +1,7 @@
 import type {DrawOp, Knockout} from '../core/draw';
 import {clamp01, smootherstep} from '../core/ease';
 import {mercX, mercY} from '../core/geo';
+import {LABEL_LINE, totalsGrid, TYPE} from '../core/layout';
 import {pointAtDistance} from '../core/track';
 import {INK, type TextItem} from '../core/Typography';
 import type {ScoreContext, ScoreOutput} from './index';
@@ -12,18 +13,13 @@ export type FlyoverClimb = {
   startAlt: number;
   startM: number;
   endM: number;
-  gainText: string;
-  subText: string;
   hero: boolean;
-  /** Placement chosen by the director so the text never covers the route. */
-  tagDir?: 'up' | 'left' | 'right';
-  tagLeader?: number;
-  /** Long enough for the live readout (channel `readout<k>`). */
-  readout?: boolean;
-  /** The climb's own profile, 0..1 between its lowest and highest point. */
-  profile?: number[];
-  /** Summit altitude, e.g. "666 m". */
-  topText?: string;
+  /** Long enough for a trace under the ascent counter (channel `trace<k>`). */
+  trace?: boolean;
+  /** Metres above the climb's foot, evenly spaced along it. */
+  rise?: number[];
+  /** Length and average grade, shown under the trace once the summit is reached. */
+  summary?: string;
 };
 
 /** The vertical plane (facing the level side camera) the route straightens into. */
@@ -43,12 +39,12 @@ export type FlyoverUnfold = {
 export type FlyoverLayout = {
   marginX: number;
   topY: number;
-  /** Top of the corner counters. */
-  bottomY: number;
+  /** Top of the live counters, in the top corners. */
+  countersY: number;
   /** Height (m) the route is drawn above the relief, so slopes do not shadow their own road. */
   routeLift: number;
-  /** Live climb readout: its box, and the profile strip inside it. */
-  readout: {box: [number, number, number, number]; stripTop: number; stripBottom: number};
+  /** The climb trace's box, centred under the counters. */
+  trace: [number, number, number, number];
 };
 
 export type FlyoverStat = {
@@ -66,7 +62,6 @@ export type FlyoverStory = {
   labels: {
     distance: string;
     ascent: string;
-    climb?: string;
     kmUnit: string;
     mUnit: string;
     peakAlt: string;
@@ -81,25 +76,16 @@ export type FlyoverStory = {
 };
 
 const scratch = new Float64Array(3);
-const gradeFormats = new Map<string, Intl.NumberFormat>();
 
-/** Whole-number percent formatter, built once per locale (not every frame). */
-function gradeFormat(locale: string) {
-  let format = gradeFormats.get(locale);
-  if (!format) gradeFormats.set(locale, (format = new Intl.NumberFormat(locale, {maximumFractionDigits: 0})));
-  return format;
-}
-
-export function flyoverScore({spec, tracks, channel, projector, width, height, scale}: ScoreContext): ScoreOutput {
+export function flyoverScore({spec, tracks, channel, projector, width, height, scale, textScale}: ScoreContext): ScoreOutput {
   const story = spec.story as unknown as FlyoverStory;
   const track = tracks[0];
   const ops: DrawOp[] = [];
   const texts: TextItem[] = [];
   const knockouts: Knockout[] = [];
-  const overlay: DrawOp[] = [];
 
   const portrait = height > width;
-  const {marginX, topY, bottomY, routeLift} = story.layout;
+  const {marginX, topY, countersY, routeLift} = story.layout;
 
   const head = channel('head');
   const headDot = channel('headDot');
@@ -164,27 +150,11 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
     }
   }
 
-  // Featured climb summit tags.
+  // A featured climb's summit, marked on the land by a pulse as it is reached
+  // (its figures live in the trace, not on the map).
   story.climbs.forEach((climb, k) => {
     const alpha = spec.channels[`climb${k}`] ? channel(`climb${k}`) : 0;
     if (alpha <= 0.005) return;
-    const mx = mercX(climb.lon);
-    const my = mercY(climb.lat);
-    const z = projector.ground ? projector.ground(mx, my) : climb.alt * projector.exaggeration;
-    if (!projector.merc(mx, my, z, scratch)) return;
-    const x = Math.max(marginX + 90 * scale, Math.min(width - marginX - 90 * scale, scratch[0]));
-    const y = Math.max(topY + 96 * scale, Math.min(bottomY - 64 * scale, scratch[1]));
-    texts.push({
-      kind: 'tag',
-      id: `climb-${k}`,
-      x,
-      y,
-      leader: (climb.tagLeader ?? 44) * scale,
-      direction: climb.tagDir ?? 'up',
-      text: climb.gainText,
-      sub: climb.subText,
-      opacity: alpha,
-    });
     ops.push({
       kind: 'pulse',
       at: [climb.lon, climb.lat],
@@ -195,11 +165,12 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
     });
   });
 
+  // While a climb is ridden, its trace sits centred under the counters.
   story.climbs.forEach((climb, k) => {
-    const alpha = climb.readout && spec.channels[`readout${k}`] ? channel(`readout${k}`) : 0;
-    if (alpha > 0.004 && climb.profile) {
-      climbReadout(climb, alpha, head, channel('grade'), story, spec.locale, scale, overlay, texts, knockouts);
-    }
+    const alpha = climb.trace && climb.rise && spec.channels[`trace${k}`] ? channel(`trace${k}`) : 0;
+    if (alpha <= 0.004) return;
+    const summit = smootherstep(clamp01(2 * channel(`summit${k}`)));
+    climbTrace(climb, alpha, summit, head, story, spec.locale, scale, textScale, ops, texts, knockouts);
   });
 
   // Opening title (top-left).
@@ -212,34 +183,26 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
       label: story.title.label,
       text: story.title.text,
       accent: story.title.accent,
-      size: portrait ? 44 : 48,
+      size: TYPE.title,
       maxWidth: width - 2 * marginX,
       opacity: titleAlpha,
     });
-    const titleSize = (portrait ? 44 : 48) * scale;
-    const titleW = Math.max(story.title.text.length * 0.56 * titleSize, (story.title.label?.length ?? 0) * 9 * scale);
-    knockouts.push({box: [marginX, topY, marginX + titleW, topY + 22 * scale + titleSize * 1.15], alpha: titleAlpha});
+    knockouts.push({text: 'opening-title', alpha: titleAlpha});
   }
 
-  // Live counters during the 3D ride (bottom-left and bottom-right).
+  // Live counters during the 3D ride (top-left and top-right, over the land ahead).
   if (countersAlpha > 0.004) {
     const fmtKm = new Intl.NumberFormat(spec.locale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
     const fmtInt = new Intl.NumberFormat(spec.locale, {maximumFractionDigits: 0});
-    const metricSize = portrait ? 60 : 68;
+    const metricSize = TYPE.number;
     const kmText = fmtKm.format(Math.max(0, kmVal));
     const ascentText = `+${fmtInt.format(Math.max(0, Math.round(ascentVal)))}`;
-    const metricPx = metricSize * scale;
-    const metricH = 22 * scale + metricPx;
-    const metricW = (n: number) => n * 0.56 * metricPx + 0.6 * metricPx;
-    knockouts.push(
-      {box: [marginX, bottomY, marginX + metricW(kmText.length), bottomY + metricH], alpha: countersAlpha},
-      {box: [width - marginX - metricW(ascentText.length), bottomY, width - marginX, bottomY + metricH], alpha: countersAlpha},
-    );
+    knockouts.push({text: 'live-km', alpha: countersAlpha}, {text: 'live-ascent', alpha: countersAlpha});
     texts.push({
       kind: 'metric',
       id: 'live-km',
       x: marginX,
-      y: bottomY,
+      y: countersY,
       label: story.labels.distance,
       value: kmText,
       unit: story.labels.kmUnit,
@@ -251,7 +214,7 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
       kind: 'metric',
       id: 'live-ascent',
       x: width - marginX,
-      y: bottomY,
+      y: countersY,
       label: story.labels.ascent,
       value: ascentText,
       unit: story.labels.mUnit,
@@ -336,7 +299,7 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
       });
     }
     // The featured climbs stand out of the finished profile: the same climbs
-    // the readout followed during the ride.
+    // tagged at their summits during the ride.
     if (whole && chart > 0.004) {
       const xy = runs[0];
       for (const climb of story.climbs) {
@@ -366,108 +329,78 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
       });
     }
 
-    if (statsAlpha > 0.004 && story.stats.length > 0) {
-      // Four stats stack 2x2 in portrait; fewer share one row, as in landscape.
-      if (portrait && story.stats.length === 4) {
-        const rows = [baseY + 0.1 * height, baseY + 0.19 * height];
-        story.stats.slice(0, 4).forEach((stat, idx) => {
-          const rightCol = idx % 2 === 1;
-          texts.push({
-            kind: 'metric',
-            id: `stat-${idx}`,
-            x: rightCol ? x1 : x0,
-            y: Math.round(rows[idx < 2 ? 0 : 1]),
-            label: stat.label,
-            value: stat.value,
-            unit: stat.unit,
-            align: rightCol ? 'right' : 'left',
-            size: 50,
-            opacity: statsAlpha,
-          });
-        });
-      } else {
-        const statY = Math.round(baseY + 0.13 * height);
-        const count = story.stats.length;
-        story.stats.forEach((stat, idx) => {
-          const isLast = idx === count - 1;
-          texts.push({
-            kind: 'metric',
-            id: `stat-${idx}`,
-            x: isLast ? x1 : x0 + (idx / Math.max(1, count - 1)) * (x1 - x0) * 0.88,
-            y: statY,
-            label: stat.label,
-            value: stat.value,
-            unit: stat.unit,
-            align: isLast ? 'right' : 'left',
-            size: portrait ? 50 : 54,
-            opacity: statsAlpha,
-          });
-        });
-      }
+    if (statsAlpha > 0.004) {
+      const totals = totalsGrid(story.stats, {
+        x0,
+        x1,
+        top: baseY + 0.1 * height,
+        portrait,
+        textScale,
+        opacity: statsAlpha,
+        id: 'stat',
+      });
+      texts.push(...totals.items);
     }
   }
 
-  return {ops, texts, black, knockouts, overlay};
+  return {ops, texts, black, knockouts};
 }
 
 /**
- * Live climb readout, in its reserved box: a label row (climb, summit
- * altitude), the climb's profile drawn only as far as it has been ridden over
- * a baseline as long as the whole climb, and the current grade under the rider.
+ * A climb's trace, centred under the counters: the metres it has gained over
+ * the climb's whole profile, there faint from the start at its full size and
+ * filled in as it is ridden. Every climb fills the box, so each one gets its
+ * full moment: the figure tells its size, the line its shape. At the summit
+ * the figure settles on the whole climb and its length and average grade
+ * come in under it.
  */
-function climbReadout(
+function climbTrace(
   climb: FlyoverClimb,
   alpha: number,
+  summit: number,
   head: number,
-  grade: number,
   story: FlyoverStory,
   locale: string,
   scale: number,
+  textScale: number,
   ops: DrawOp[],
   texts: TextItem[],
   knockouts: Knockout[],
 ) {
-  const {box, stripTop: top, stripBottom: base} = story.layout.readout;
-  const [x0, y0, x1, y1] = box;
-  const prof = climb.profile!;
-  const n = prof.length;
-  const f = clamp01((head - climb.startM) / Math.max(1, climb.endM - climb.startM));
-  const xAt = (u: number) => x0 + u * (x1 - x0);
-  const yAt = (v: number) => base - v * (base - top);
+  const [x0, y0, x1, y1] = story.layout.trace;
+  const rise = climb.rise!;
+  const n = rise.length;
+  const lengthM = Math.max(1, climb.endM - climb.startM);
+  const cx = 0.5 * (x0 + x1);
+  // Rows: the figure, the line, then the summary on the baseline's foot.
+  const lineTop = y0 + (TYPE.figure * 1.1 + 14) * textScale;
+  const base = y1 - (LABEL_LINE + 12) * textScale;
+  const top = Math.max(1, ...rise);
+  const xAt = (i: number) => x0 + (i / (n - 1)) * (x1 - x0);
+  const yAt = (m: number) => base - (m / top) * (base - lineTop);
 
-  knockouts.push({box: [x0 - 18 * scale, y0 - 6 * scale, x1 + 18 * scale, y1], alpha});
-  ops.push({kind: 'screen-path', xy: [x0, base, x1, base], rgb: INK.paperRGB, alpha: 0.24 * alpha, width: scale});
-  ops.push({kind: 'screen-path', xy: [x1, base, x1, top - 4 * scale], rgb: INK.paperRGB, alpha: 0.24 * alpha, width: scale});
+  // The whole climb is there from the start, faint; the ride fills it in.
+  const whole: number[] = [];
+  for (let i = 0; i < n; i++) whole.push(xAt(i), yAt(rise[i]));
+  ops.push({kind: 'screen-path', xy: [x0, base, x1, base], rgb: INK.paperRGB, alpha: 0.14 * alpha, width: scale});
+  ops.push({kind: 'screen-path', xy: whole, rgb: INK.paperRGB, alpha: 0.28 * alpha, width: 2 * scale});
+  const f = clamp01((head - climb.startM) / lengthM);
   const at = f * (n - 1);
   const i0 = Math.floor(at);
+  const gained = rise[i0] + (rise[Math.min(n - 1, i0 + 1)] - rise[i0]) * (at - i0);
   if (f > 0) {
     const xy: number[] = [];
-    for (let i = 0; i <= i0; i++) xy.push(xAt(i / (n - 1)), yAt(prof[i]));
-    const next = prof[Math.min(n - 1, i0 + 1)];
-    xy.push(xAt(f), yAt(prof[i0] + (next - prof[i0]) * (at - i0)));
-    ops.push({
-      kind: 'screen-path',
-      xy,
-      rgb: INK.accentRGB,
-      alpha: 0.96 * alpha,
-      width: 2 * scale,
-      fillTo: base,
-      fillAlpha: 0.2 * alpha,
-      head: alpha,
-    });
+    for (let i = 0; i <= i0; i++) xy.push(xAt(i), yAt(rise[i]));
+    xy.push(xAt(at), yAt(gained));
+    ops.push({kind: 'screen-path', xy, rgb: INK.accentRGB, alpha: 0.96 * alpha, width: 2 * scale, head: alpha});
   }
-  texts.push({kind: 'caption', id: 'readout-label', x: x0, y: y0, label: story.labels.climb ?? '', text: '', opacity: alpha});
-  texts.push({kind: 'caption', id: 'readout-top', x: x1, y: y0, label: climb.topText ?? '', text: '', align: 'right', opacity: alpha});
-  const pct = Math.round(grade) || 0;
-  const gx = Math.max(x0 + 24 * scale, Math.min(x1 - 24 * scale, xAt(f)));
-  texts.push({
-    kind: 'caption',
-    id: 'readout-grade',
-    x: gx,
-    y: base + 10 * scale,
-    text: `${gradeFormat(locale).format(pct)}%`,
-    size: 22,
-    align: 'center',
-    opacity: alpha,
-  });
+
+  const figure = `+${new Intl.NumberFormat(locale, {maximumFractionDigits: 0}).format(Math.max(0, Math.round(gained)))} m`;
+  texts.push({kind: 'caption', id: 'trace-gain', x: cx, y: y0, text: figure, size: TYPE.figure, align: 'center', opacity: alpha});
+  knockouts.push({text: 'trace-gain', alpha});
+  if (climb.summary && summit > 0.004) {
+    const opacity = alpha * summit;
+    texts.push({kind: 'caption', id: 'trace-summary', x: cx, y: base + 12 * textScale, label: climb.summary, text: '', align: 'center', opacity});
+    knockouts.push({text: 'trace-summary', alpha: opacity});
+  }
 }
