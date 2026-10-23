@@ -1,5 +1,5 @@
 import * as maplibregl from 'maplibre-gl';
-import {mercX, mercY, metersPerPixel} from './geo';
+import {EARTH_CIRCUMFERENCE, groundResolution, mercX, mercY} from './geo';
 
 /** One frame's camera and map state, as the Python director wrote it. */
 export interface Camera {
@@ -31,7 +31,7 @@ export interface Projector {
   height: number;
   globe: boolean;
   exaggeration: number;
-  /** Ground resolution at the screen centre (m/px), finer when pitched. */
+  /** Ground resolution at the screen centre (m/px), finer when pitched (see groundResolution). */
   resolution: number;
   /** Mercator point raised `lift` metres; returns false when it cannot be drawn. */
   merc(mx: number, my: number, lift: number, out: Float64Array): boolean;
@@ -121,7 +121,7 @@ function makeRelief(
     return terrain.getElevationForLngLat(probe, transform);
   };
   const metersPerWorldPx = (my: number) =>
-    (40_075_016.686 * Math.cos((unmercLat(my) * Math.PI) / 180)) / worldSize;
+    (EARTH_CIRCUMFERENCE * Math.cos((unmercLat(my) * Math.PI) / 180)) / worldSize;
   const margin = Math.max(width, height) * 0.25;
   // Every point of a ray from the eye to an on-screen target is itself on
   // screen, so only the rendered tiles can block it: the stretch of the ray
@@ -203,7 +203,7 @@ export function makeProjector(
     height,
     globe: camera.globe,
     exaggeration: camera.terrain,
-    resolution: metersPerPixel(camera.zoom, camera.center[1]) * (camera.pitch > 30 ? 0.55 : 1),
+    resolution: groundResolution(camera.zoom, camera.center[1], camera.pitch),
     centerDepth,
     merc: project,
     lngLat(lon, lat, lift = 0) {

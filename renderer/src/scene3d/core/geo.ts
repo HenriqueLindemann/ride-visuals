@@ -1,5 +1,7 @@
 /** Spherical and Web Mercator helpers (MapLibre conventions: 512 px tiles). */
 
+import {smootherstep, span} from './ease';
+
 export type LngLat = [number, number];
 
 /** Mean Earth radius (authalic): for great-circle distance and bearing. */
@@ -53,3 +55,11 @@ export function destination(origin: LngLat, bearing: number, meters: number): Ln
 /** Ground metres per CSS pixel at a zoom level and latitude. */
 export const metersPerPixel = (zoom: number, lat: number) =>
   (EARTH_CIRCUMFERENCE * Math.cos(lat * RAD)) / (512 * 2 ** zoom);
+
+/**
+ * Ground resolution the overlays plan with (m/px): the centre's, eased to the
+ * finer foreground of a pitched view (0.55x from 40°). Continuous in pitch, so
+ * line detail and density fades never pop while the camera tilts.
+ */
+export const groundResolution = (zoom: number, lat: number, pitch: number) =>
+  metersPerPixel(zoom, lat) * (1 - 0.45 * smootherstep(span(pitch, 20, 40)));

@@ -40,7 +40,9 @@ registerHooks({
 });
 
 const {clamp01, envelope, glide, span, travel} = await import('../src/scene3d/core/ease.ts');
-const {destination, greatCircle, mercX, mercY, unmercX, unmercY} = await import('../src/scene3d/core/geo.ts');
+const {destination, greatCircle, groundResolution, mercX, mercY, metersPerPixel, unmercX, unmercY} = await import(
+  '../src/scene3d/core/geo.ts'
+);
 const {decodeTrack, indexAtDistance, lodFor, pointAtDistance} = await import('../src/scene3d/core/track.ts');
 const {sceneSpecSchema} = await import('../src/scene3d/schema.ts');
 const {scores} = await import('../src/scene3d/scores/index.ts');
@@ -65,6 +67,14 @@ test('web mercator and great-circle helpers round-trip cleanly', () => {
   assert.ok(Math.abs(mid[0] - 5) < 1e-3);
   const east = destination([0, 0], 90, 111_320);
   assert.ok(Math.abs(east[0] - 1) < 0.02);
+});
+
+test('ground resolution eases with pitch instead of jumping', () => {
+  const mpp = metersPerPixel(12, 49.44);
+  assert.equal(groundResolution(12, 49.44, 0), mpp);
+  assert.ok(Math.abs(groundResolution(12, 49.44, 60) - 0.55 * mpp) < 1e-9);
+  // It used to step from 1x to 0.55x at 30 degrees: line detail popped mid-tilt.
+  assert.ok(Math.abs(groundResolution(12, 49.44, 29.9) - groundResolution(12, 49.44, 30.1)) < 0.01 * mpp);
 });
 
 test('decodeTrack reconstructs delta-encoded tracks and interpolates by distance', () => {
