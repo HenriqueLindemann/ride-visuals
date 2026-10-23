@@ -159,7 +159,7 @@ test('flyover, stretch, and strata scores produce valid ops and non-overlapping 
     tracks: [],
     story: {
       title: {label: 'Aug 29, 2026', text: 'Kaiserslautern'},
-      labels: {distance: 'Distance', ascent: 'Elevation gain', kmUnit: 'km', mUnit: 'm', zeroKm: '0 km', totalKm: '2.0 km', peakAlt: '400 m'},
+      labels: {distance: 'Distance', ascent: 'Elevation gain', kmUnit: 'km', mUnit: 'm', peakAlt: '400 m'},
       unfold: {center: [7.77, 49.44], right: [1, 0], lineM: 2000, baseZ: 100, vertical: 1, minAlt: 80, altRange: 320},
       layout: {marginX: 112, topY: 88, bottomY: 918, routeLift: 4, readout: {box: [1348, 88, 1808, 218], stripTop: 122, stripBottom: 178}},
       totalM: 2000,
@@ -315,7 +315,7 @@ test('edge-case scores: flat flyover, 12-month portrait strata, and multi-ride s
     tracks: [],
     story: {
       title: {label: 'Aug 29, 2026', text: 'Flat Ride'},
-      labels: {distance: 'Distance', ascent: 'Elevation gain', kmUnit: 'km', mUnit: 'm', zeroKm: '0 km', totalKm: '2.0 km', peakAlt: '200 m'},
+      labels: {distance: 'Distance', ascent: 'Elevation gain', kmUnit: 'km', mUnit: 'm', peakAlt: '200 m'},
       unfold: {center: [7.77, 49.44], right: [1, 0], lineM: 2000, baseZ: 100, vertical: 1, minAlt: 180, altRange: 60},
       layout: {marginX: 112, topY: 88, bottomY: 918, routeLift: 4, readout: {box: [1348, 88, 1808, 218], stripTop: 122, stripBottom: 178}},
       totalM: 2000,

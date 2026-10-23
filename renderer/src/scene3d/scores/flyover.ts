@@ -69,8 +69,6 @@ export type FlyoverStory = {
     climb?: string;
     kmUnit: string;
     mUnit: string;
-    zeroKm: string;
-    totalKm: string;
     peakAlt: string;
   };
   unfold: FlyoverUnfold;
@@ -324,8 +322,6 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
 
     if (chart > 0.004) {
       ops.push({kind: 'screen-path', xy: [x0, baseY, x1, baseY], rgb: INK.paperRGB, alpha: 0.24 * chart, width: 1 * scale});
-      texts.push({kind: 'caption', id: 'axis-start', x: x0, y: baseY + 14 * scale, text: story.labels.zeroKm, size: 16, opacity: chart * 0.72});
-      texts.push({kind: 'caption', id: 'axis-end', x: x1, y: baseY + 14 * scale, text: story.labels.totalKm, size: 16, align: 'right', opacity: chart * 0.72});
       const peakIdx = Math.min(n - 1, Math.max(0, Math.round(story.peakFraction * (n - 1))));
       planeAt(story.peakFraction, u.baseZ + prof[peakIdx] * u.altRange * u.vertical, scratch);
       texts.push({
@@ -371,7 +367,8 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
     }
 
     if (statsAlpha > 0.004 && story.stats.length > 0) {
-      if (portrait) {
+      // Four stats stack 2x2 in portrait; fewer share one row, as in landscape.
+      if (portrait && story.stats.length === 4) {
         const rows = [baseY + 0.1 * height, baseY + 0.19 * height];
         story.stats.slice(0, 4).forEach((stat, idx) => {
           const rightCol = idx % 2 === 1;
@@ -402,7 +399,7 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
             value: stat.value,
             unit: stat.unit,
             align: isLast ? 'right' : 'left',
-            size: 54,
+            size: portrait ? 50 : 54,
             opacity: statsAlpha,
           });
         });

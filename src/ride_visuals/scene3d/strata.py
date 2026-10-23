@@ -219,7 +219,7 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
             label = i18n.month_name(month, year if multi_year else None)
         else:
             label = str(year)
-        sub_label = f"{i18n.number(round(floor_km))} km · {len(indices)}"
+        sub_label = f"{i18n.number(round(floor_km))} km · {i18n.text('scene3d.rides_count', count=len(indices))}"
 
         b0 = beat_start[k]
         channels[f"floor{k}"] = glide(span(t, b0, b0 + 0.9))
@@ -258,7 +258,7 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
         opening_text = (
             home_place.place.name
             if home_place is not None
-            else i18n.text("scene3d.strata.rides", count=len(regional))
+            else i18n.text("scene3d.rides_count", count=len(regional))
         )
 
     total_km = sum((r.distance_m if r.distance_m > 0 else r.track.length_m) for r in regional) / 1000.0
@@ -272,7 +272,6 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
         "opening": {
             "label": i18n.text(
                 "scene3d.strata.kicker",
-                count=len(regional),
                 start=i18n.date(first_dt),
                 end=i18n.date(last_dt),
             ),

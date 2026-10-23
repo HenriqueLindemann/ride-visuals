@@ -29,7 +29,7 @@ export type StretchStory = {
     unit: string;
   };
   ending: {
-    label: string;
+    label?: string;
     text: string;
     accent?: string;
   };

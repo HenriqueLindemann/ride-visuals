@@ -494,6 +494,10 @@ def test_places_gazetteer_and_stretch_over_earth_circumference(tmp_path: Path) -
     spec.validate()
     assert spec.story["destination"] is None
     assert "Terra" in spec.story["ending"]["text"]
+    # The total is the counter's punchline: no copy states it ahead or repeats it.
+    assert spec.story["opening"]["label"] == "2 pedaladas"
+    assert "45.000" not in spec.story["opening"]["label"] + spec.story["ending"]["text"]
+    assert "label" not in spec.story["ending"]
 
 
 def _geonames_row(

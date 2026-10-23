@@ -199,11 +199,9 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
     pull_bearing = dest.bearing_deg if dest is not None else 90.0
 
     # Opening & ending copy.
-    kicker = i18n.text(
-        "scene3d.rides_kicker",
-        count=len(ordered),
-        distance=i18n.number(round(total_km)),
-    )
+    # The total distance is the counter's punchline: the copy never states it
+    # ahead of the count, nor repeats it after.
+    kicker = i18n.text("scene3d.rides_count", count=len(ordered))
     if title_override is not None and title_override.strip():
         # The user's title replaces the place name, so do not consult or credit
         # the gazetteer for this scene.
@@ -221,7 +219,7 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
         opening_text = (
             home_place.place.name
             if home_place is not None
-            else i18n.text("scene3d.strata.rides", count=len(ordered))
+            else kicker
         )
 
     ending_accent: str | None = None
@@ -233,17 +231,14 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
         if rel_diff < 0.03:
             ending_text = i18n.text("scene3d.stretch.reach", place=place_name)
         else:
-            ending_text = i18n.text(
-                "scene3d.stretch.toward",
-                distance=i18n.number(round(total_km)),
-                place=place_name,
-            )
+            ending_text = i18n.text("scene3d.stretch.toward", place=place_name)
         dest_story = {
             "name": place_name,
             "at": [round(dest.place.lon, 5), round(dest.place.lat, 5)],
             "distanceM": round(dest.distance_m, 1),
         }
-    elif total_m > 20_000_000.0:
+    elif total_m >= 0.05 * EARTH_CIRCUMFERENCE_M:
+        # Perspective on the total, not the total again.
         laps = total_m / EARTH_CIRCUMFERENCE_M
         earth_word = i18n.text("scene3d.stretch.earth_word")
         ending_accent = earth_word
@@ -252,7 +247,7 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
         else:
             ending_text = i18n.text("scene3d.stretch.earth_pct", pct=round(laps * 100.0))
     else:
-        ending_text = i18n.text("scene3d.stretch.fallback", distance=i18n.number(round(total_km)))
+        ending_text = i18n.text("scene3d.stretch.fallback")
 
     # Timeline (seconds).
     t_open = 2.3
@@ -358,7 +353,6 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
             "unit": "km",
         },
         "ending": {
-            "label": kicker,
             "text": ending_text,
             "accent": ending_accent,
         },

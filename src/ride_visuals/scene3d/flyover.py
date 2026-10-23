@@ -1053,8 +1053,6 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
             "climb": i18n.text("scene3d.climb"),
             "kmUnit": "km",
             "mUnit": "m",
-            "zeroKm": "0 km",
-            "totalKm": f"{i18n.number(total_km, 1)} km",
             "peakAlt": f"{i18n.number(round(max_alt))} m",
         },
         "unfold": side.story(origin, prof_alt),
@@ -1067,7 +1065,6 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
             {"label": i18n.text("scene3d.distance"), "value": i18n.number(total_km, 1), "unit": "km"},
             {"label": i18n.text("scene3d.ascent"), "value": f"+{i18n.number(round(official_gain))}", "unit": "m"},
             {"label": i18n.text("scene3d.moving_time"), "value": hours_val, "unit": hours_unit},
-            {"label": i18n.text("scene3d.max_altitude"), "value": i18n.number(round(max_alt)), "unit": "m"},
         ],
     }
 
