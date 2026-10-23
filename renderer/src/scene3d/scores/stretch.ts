@@ -1,6 +1,7 @@
 import type {DrawOp, RGB} from '../core/draw';
 import {clamp01, lerp, outCubic} from '../core/ease';
 import {destination, type LngLat} from '../core/geo';
+import {STORY_SAFE_TOP} from '../core/layout';
 import {pointAtDistance} from '../core/track';
 import {INK, type TextItem} from '../core/Typography';
 import type {ScoreContext, ScoreOutput} from './index';
@@ -47,7 +48,7 @@ export function stretchScore({spec, tracks, channel, projector, width, height, s
 
   const portrait = height > width;
   const marginX = Math.round((portrait ? 72 : 112) * scale);
-  const topY = Math.round((portrait ? 104 : 88) * scale);
+  const topY = Math.round((portrait ? STORY_SAFE_TOP : 88) * scale);
 
   const laid = channel('laid');
   const openingAlpha = channel('opening');

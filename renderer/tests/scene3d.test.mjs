@@ -402,8 +402,17 @@ test('edge-case scores: flat flyover, 12-month portrait strata, and multi-ride s
   }
   const topFloorY = Math.min(...tags12.map((t) => t.y));
   const bottomFloorY = Math.max(...tags12.map((t) => t.y));
-  assert.ok(topFloorY >= 100 + 110 - 1e-6);
-  assert.ok(bottomFloorY <= 1920 - 290 + 1e-6);
+  // Instagram Story: the top and bottom 220 px of a 1080x1920 frame are covered.
+  assert.ok(topFloorY >= 220 + 110 - 1e-6);
+
+  // The 2x2 totals rest on the safe area (a label + value block is ~77 px tall)
+  // and the floor labels stop above them.
+  const statTexts = strata12Out.texts.filter((t) => t.id.startsWith('strata-stat-'));
+  assert.equal(statTexts.length, 4);
+  for (const t of statTexts) {
+    assert.ok(t.y + 77 <= 1920 - 220 + 1e-6, `stat ${t.id} reaches into the reply bar`);
+  }
+  assert.ok(bottomFloorY <= Math.min(...statTexts.map((t) => t.y)) - 1e-6, 'labels overlap the stats');
 
   // 3. Stretch with dozens of short rides + --toward destination
   const manyRides = Array.from({length: 40}, (_, k) => ({

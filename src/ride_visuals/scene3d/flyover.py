@@ -46,6 +46,7 @@ from ride_visuals.scene3d.track import (
     gaussian_smooth,
     local_xy,
 )
+from ride_visuals.video.instagram import INSTAGRAM_STORY
 
 MIN_RIDE_LENGTH_M = 500.0
 MAX_BEARING_RATE_DEG_S = 24.0  # hard cap; the chase solver aims for 22
@@ -78,10 +79,18 @@ HERO_MIRROR_COST = 0.05
 #: Where the road is drawn above the relief (ROUTE_LIFT_M in flyover.ts).
 ROUTE_LIFT_M = 4.0
 
-#: Screen layout at a 1080 px short side (see _Layout).
+#: Height of a live counter (label line, gap, 60 px value) at a 1080 px short side.
+_COUNTER_TEXT_H = 17.0 + 10.0 + 60.0
+#: Screen layout at a 1080 px short side (see _Layout). Portrait text stays
+#: inside the Instagram Story safe area, like every other 9:16 output.
 LAYOUT_1080: dict = {
     "landscape": {"margin_x": 112.0, "top_y": 88.0, "counters_from_bottom": 162.0, "readout_w": 460.0},
-    "portrait": {"margin_x": 72.0, "top_y": 104.0, "counters_from_bottom": 196.0, "readout_w_frac": 0.6},
+    "portrait": {
+        "margin_x": 72.0,
+        "top_y": float(INSTAGRAM_STORY.profile_safe_px),
+        "counters_from_bottom": INSTAGRAM_STORY.reply_safe_px + _COUNTER_TEXT_H,
+        "readout_w_frac": 0.6,
+    },
     "counter_w": 440.0,
     "counter_h": 110.0,
     #: Readout rows: labels, then the profile strip, then the grade under it.

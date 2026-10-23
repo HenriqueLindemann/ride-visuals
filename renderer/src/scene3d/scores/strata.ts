@@ -1,6 +1,7 @@
 import {type DrawOp, type RGB, rgba} from '../core/draw';
 import {clamp01, lerp, outCubic} from '../core/ease';
 import type {LngLat} from '../core/geo';
+import {metricHeight, STORY_SAFE_BOTTOM, STORY_SAFE_TOP} from '../core/layout';
 import {INK, type TextItem} from '../core/Typography';
 import type {ScoreContext, ScoreOutput} from './index';
 
@@ -29,6 +30,11 @@ export type StrataStory = {
   }[];
 };
 
+/** Portrait totals: a 2x2 block resting on the safe area, the label column stopping above it. */
+const PORTRAIT_STAT_SIZE = 50;
+const PORTRAIT_STAT_ROW_PITCH = 110;
+const LABELS_CLEAR_OF_STATS = 60;
+
 export function strataScore({spec, tracks, channel, projector, width, height, scale}: ScoreContext): ScoreOutput {
   const story = spec.story as unknown as StrataStory;
   const ops: DrawOp[] = [];
@@ -36,7 +42,9 @@ export function strataScore({spec, tracks, channel, projector, width, height, sc
 
   const portrait = height > width;
   const marginX = Math.round((portrait ? 68 : 112) * scale);
-  const topY = Math.round((portrait ? 100 : 84) * scale);
+  const topY = Math.round((portrait ? STORY_SAFE_TOP : 84) * scale);
+  const statsBottomRowY = Math.round(height - (STORY_SAFE_BOTTOM + metricHeight(PORTRAIT_STAT_SIZE)) * scale);
+  const statsTopRowY = Math.round(statsBottomRowY - PORTRAIT_STAT_ROW_PITCH * scale);
 
   const final = channel('final');
   const openingAlpha = channel('opening');
@@ -125,7 +133,7 @@ export function strataScore({spec, tracks, channel, projector, width, height, sc
   if (labelCandidates.length > 0) {
     // Sort bottom-to-top on screen (largest y first).
     labelCandidates.sort((a, b) => b.leftY - a.leftY);
-    const maxY = height - (portrait ? 290 : 210) * scale;
+    const maxY = portrait ? statsTopRowY - LABELS_CLEAR_OF_STATS * scale : height - 210 * scale;
     const minY = topY + (openingAlpha > 0.05 ? 110 : 40) * scale;
     // A tag with its sub-line is ~47 px tall at 1080p: keep a clear gap between them,
     // tightening slightly only when many floors share a short vertical span.
@@ -194,11 +202,9 @@ export function strataScore({spec, tracks, channel, projector, width, height, sc
 
   if (statsAlpha > 0.004 && story.stats.length > 0) {
     if (portrait) {
-      const y0 = Math.round(height - 235 * scale);
-      const y1 = Math.round(height - 125 * scale);
       story.stats.slice(0, 4).forEach((stat, idx) => {
         const rightCol = idx % 2 === 1;
-        const rowY = idx < 2 ? y0 : y1;
+        const rowY = idx < 2 ? statsTopRowY : statsBottomRowY;
         texts.push({
           kind: 'metric',
           id: `strata-stat-${idx}`,
@@ -208,7 +214,7 @@ export function strataScore({spec, tracks, channel, projector, width, height, sc
           value: stat.value,
           unit: stat.unit,
           align: rightCol ? 'right' : 'left',
-          size: 50,
+          size: PORTRAIT_STAT_SIZE,
           opacity: statsAlpha,
         });
       });
