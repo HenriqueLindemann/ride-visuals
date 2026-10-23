@@ -114,9 +114,22 @@ def envelope(t: np.ndarray, start: float, end: float, fade: float) -> np.ndarray
     return np.clip(enter * leave, 0.0, 1.0)
 
 
+#: The closing black curtain falls over the last this many seconds.
+CURTAIN_S = 0.85
+
+
 def fade_through_black(t: np.ndarray, end: float, *, open_s: float, power: float = 3.2) -> np.ndarray:
-    """Black curtain: lifts over ``open_s`` at the start, falls in the last 0.85 s."""
-    return np.maximum(1.0 - glide(span(t, 0.0, open_s), power), ease_in_out_sine(span(t, end - 0.85, end)))
+    """Black curtain: lifts over ``open_s`` at the start, falls in the last ``CURTAIN_S``."""
+    return np.maximum(1.0 - glide(span(t, 0.0, open_s), power), ease_in_out_sine(span(t, end - CURTAIN_S, end)))
+
+
+def reading_hold_s(figures: int) -> float:
+    """Seconds closing figures stay fully legible, between their fade-in and the curtain.
+
+    About a second to read each label and its number, plus a moment to take
+    the block in as a whole.
+    """
+    return 0.6 + 1.2 * figures
 
 
 def lerp_angle(a: np.ndarray | float, b: np.ndarray | float, t: np.ndarray | float):

@@ -12,12 +12,14 @@ import numpy as np
 
 from ride_visuals.i18n import DEFAULT_LOCALE, Translator, sanitize_display_text
 from ride_visuals.scene3d.camera import (
+    CURTAIN_S,
     CameraTrack,
     ease_in_out_sine,
     envelope,
     fade_through_black,
     fit_zoom,
     glide,
+    reading_hold_s,
     span,
     travel,
 )
@@ -135,7 +137,8 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
     beat = 2.6 if resolved_period == "year" else (2.2 if floor_count <= 8 else 1.8)
     t_beats = 3.4
     t_final = t_beats + floor_count * beat + 0.6
-    t_end = t_final + 5.0
+    # The four totals fade in over 1 s, then hold until the curtain.
+    t_end = t_final + 1.0 + reading_hold_s(4) + CURTAIN_S
     frames = max(60, int(round(t_end * fps)))
     t = np.arange(frames, dtype=float) / float(fps)
     beat_start = [t_beats + k * beat for k in range(floor_count)]

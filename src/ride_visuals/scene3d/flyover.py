@@ -11,6 +11,7 @@ import numpy as np
 
 from ride_visuals.i18n import DEFAULT_LOCALE, Translator, sanitize_display_text
 from ride_visuals.scene3d.camera import (
+    CURTAIN_S,
     CameraTrack,
     bearing_deg,
     ease_in_out_sine,
@@ -20,6 +21,7 @@ from ride_visuals.scene3d.camera import (
     lerp_angle,
     limit_rate,
     meters_per_pixel,
+    reading_hold_s,
     smooth_angles,
     span,
     travel,
@@ -713,7 +715,8 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
     # lifts off the land and straightens into its own elevation profile.
     t_side_end = t_ride_end + float(np.clip(1.17 * (TYPICAL_CHASE_ZOOM - side.zoom), 3.6, 5.5))
     t_unfold_end = t_side_end + 4.4
-    t_end = t_unfold_end + 5.5
+    # The three totals (distance, ascent, moving time) fade in by +1.3 s, then hold.
+    t_end = t_unfold_end + 1.3 + reading_hold_s(3) + CURTAIN_S
 
     frames = max(60, int(round(t_end * fps)))
     t = np.arange(frames, dtype=float) / float(fps)

@@ -17,7 +17,7 @@ import pytest
 from PIL import Image
 
 from ride_visuals.cli import build_parser
-from ride_visuals.scene3d.camera import eye_offset
+from ride_visuals.scene3d.camera import eye_offset, reading_hold_s
 from ride_visuals.scene3d.climbs import detect_climbs, featured_climbs, hero_climb
 from ride_visuals.scene3d.flyover import (
     MAX_BEARING_RATE_DEG_S,
@@ -319,6 +319,25 @@ def _synthetic_ride(length_km: float = 45.0, max_climb_m: float = 380.0, with_na
     else:
         alt = 180.0 + max_climb_m * np.exp(-(((s / (length_km * 1000.0)) - 0.45) / 0.12) ** 2)
     return RideTrack.from_arrays(lon, lat, alt, s / 8.0)
+
+
+def _legible_closing_s(spec) -> float:
+    """Seconds the closing stats are fully shown while the curtain is still up."""
+    shown = (spec.channels["stats"] >= 0.999) & (spec.channels["black"] <= 0.001)
+    return float(shown.sum()) / spec.fps
+
+
+def test_closing_stats_hold_long_enough_to_read(tmp_path: Path) -> None:
+    strata = build_strata_spec(_monthly_rides(8), fps=30, places_cache_dir=tmp_path, offline=True).spec
+    flyover = build_flyover_spec(
+        _synthetic_ride(length_km=60.0, max_climb_m=420.0),
+        sampler=_FakeSampler(ridge_height=700.0),
+        fps=30,
+        places_cache_dir=tmp_path,
+        offline=True,
+    )
+    for spec in (strata, flyover):
+        assert _legible_closing_s(spec) >= reading_hold_s(len(spec.story["stats"])) - 0.1
 
 
 def test_flyover_director_invariants_and_terrain_clearance(tmp_path: Path) -> None:
