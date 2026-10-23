@@ -348,8 +348,8 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
 
 /**
  * A climb's trace, centred under the counters: the metres it has gained over
- * the climb's whole profile, there faint from the start at its full size and
- * filled in as it is ridden. Every climb fills the box, so each one gets its
+ * the climb's whole profile, drawn only as it is ridden, with no preview of
+ * the climb ahead. Every climb fills the box, so each one gets its
  * full moment: the figure tells its size, the line its shape. At the summit
  * the figure settles on the whole climb and its length and average grade
  * come in under it.
@@ -379,11 +379,8 @@ function climbTrace(
   const xAt = (i: number) => x0 + (i / (n - 1)) * (x1 - x0);
   const yAt = (m: number) => base - (m / top) * (base - lineTop);
 
-  // The whole climb is there from the start, faint; the ride fills it in.
-  const whole: number[] = [];
-  for (let i = 0; i < n; i++) whole.push(xAt(i), yAt(rise[i]));
+  // Only the baseline is there from the start: the ride draws the line, with no preview of what is ahead.
   ops.push({kind: 'screen-path', xy: [x0, base, x1, base], rgb: INK.paperRGB, alpha: 0.14 * alpha, width: scale});
-  ops.push({kind: 'screen-path', xy: whole, rgb: INK.paperRGB, alpha: 0.28 * alpha, width: 2 * scale});
   const f = clamp01((head - climb.startM) / lengthM);
   const at = f * (n - 1);
   const i0 = Math.floor(at);
