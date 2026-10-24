@@ -6,43 +6,8 @@ import {pointAtDistance} from '../core/track';
 import {INK, type TextItem} from '../core/Typography';
 import type {ScoreContext, ScoreOutput} from './index';
 
-export type StretchRideMeta = {
-  trackIndex: number;
-  lengthM: number;
-  beforeM: number;
-  restAlpha: number;
-  restWidth: number;
-};
-
-export type StretchStory = {
-  home: [number, number];
-  pullBearing: number;
-  totalM: number;
-  totalKm: number;
-  rides: StretchRideMeta[];
-  opening: {
-    label: string;
-    text: string;
-    accent?: string;
-  };
-  counter: {
-    label: string;
-    unit: string;
-  };
-  ending: {
-    label?: string;
-    text: string;
-    accent?: string;
-  };
-  destination?: {
-    name: string;
-    at: [number, number];
-    distanceM: number;
-  } | null;
-};
-
-export function stretchScore({spec, tracks, channel, projector, width, height, scale}: ScoreContext): ScoreOutput {
-  const story = spec.story as unknown as StretchStory;
+export function stretchScore({spec, tracks, channel, projector, width, height, scale}: ScoreContext<'stretch'>): ScoreOutput {
+  const {story} = spec;
   const ops: DrawOp[] = [];
   const texts: TextItem[] = [];
 

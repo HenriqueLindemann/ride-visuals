@@ -4,81 +4,13 @@ import {mercX, mercY} from '../core/geo';
 import {LABEL_LINE, totalsGrid, TYPE} from '../core/layout';
 import {pointAtDistance} from '../core/track';
 import {INK, type TextItem} from '../core/Typography';
+import type {FlyoverClimb, FlyoverStory} from '../stories';
 import type {ScoreContext, ScoreOutput} from './index';
-
-export type FlyoverClimb = {
-  lon: number;
-  lat: number;
-  alt: number;
-  startAlt: number;
-  startM: number;
-  endM: number;
-  hero: boolean;
-  /** Long enough for a trace under the ascent counter (channel `trace<k>`). */
-  trace?: boolean;
-  /** Metres above the climb's foot, evenly spaced along it. */
-  rise?: number[];
-  /** Length and average grade, shown under the trace once the summit is reached. */
-  summary?: string;
-};
-
-/** The vertical plane (facing the level side camera) the route straightens into. */
-export type FlyoverUnfold = {
-  center: [number, number];
-  /** Screen-right unit vector (east, north). */
-  right: [number, number];
-  lineM: number;
-  /** Plane baseline height and vertical scale (exaggerated metres per metre). */
-  baseZ: number;
-  vertical: number;
-  minAlt: number;
-  altRange: number;
-};
-
-/** Screen furniture placement (px), decided by the director (`_Layout` in flyover.py). */
-export type FlyoverLayout = {
-  marginX: number;
-  topY: number;
-  /** Top of the live counters, in the top corners. */
-  countersY: number;
-  /** Height (m) the route is drawn above the relief, so slopes do not shadow their own road. */
-  routeLift: number;
-  /** The climb trace's box, centred under the counters. */
-  trace: [number, number, number, number];
-};
-
-export type FlyoverStat = {
-  label: string;
-  value: string;
-  unit?: string;
-};
-
-export type FlyoverStory = {
-  title: {
-    label?: string;
-    text: string;
-    accent?: string;
-  };
-  labels: {
-    distance: string;
-    ascent: string;
-    kmUnit: string;
-    mUnit: string;
-    peakAlt: string;
-  };
-  unfold: FlyoverUnfold;
-  layout: FlyoverLayout;
-  totalM: number;
-  profile: number[];
-  peakFraction: number;
-  climbs: FlyoverClimb[];
-  stats: FlyoverStat[];
-};
 
 const scratch = new Float64Array(3);
 
-export function flyoverScore({spec, tracks, channel, projector, width, height, scale, textScale}: ScoreContext): ScoreOutput {
-  const story = spec.story as unknown as FlyoverStory;
+export function flyoverScore({spec, tracks, channel, projector, width, height, scale, textScale}: ScoreContext<'flyover'>): ScoreOutput {
+  const {story} = spec;
   const track = tracks[0];
   const ops: DrawOp[] = [];
   const texts: TextItem[] = [];

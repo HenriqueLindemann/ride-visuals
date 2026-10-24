@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import {flyoverStorySchema, strataStorySchema, stretchStorySchema} from './stories';
 
 /**
  * Contract for the 3D scenes (flyover, stretch, strata), written by
@@ -17,9 +18,8 @@ export const encodedTrackSchema = z.object({
   a: z.array(z.number()).nullable().optional(),
 });
 
-export const sceneSpecSchema = z.object({
+const sceneBaseSchema = z.object({
   schemaVersion: z.literal('1.0'),
-  kind: z.enum(['flyover', 'stretch', 'strata']),
   locale: z.enum(['en', 'pt-BR']),
   look: z.enum(['carbon', 'satellite']),
   profile: z.object({
@@ -59,11 +59,18 @@ export const sceneSpecSchema = z.object({
   }),
   channels: z.record(z.string(), series),
   tracks: z.array(encodedTrackSchema),
-  /** Kind-specific facts (labels, stats, plates...), interpreted by each score. */
-  story: z.record(z.string(), z.unknown()),
 });
 
+/** `story` holds the kind-specific facts (labels, stats, plates...), see stories.ts. */
+export const sceneSpecSchema = z.discriminatedUnion('kind', [
+  sceneBaseSchema.extend({kind: z.literal('flyover'), story: flyoverStorySchema}),
+  sceneBaseSchema.extend({kind: z.literal('stretch'), story: stretchStorySchema}),
+  sceneBaseSchema.extend({kind: z.literal('strata'), story: strataStorySchema}),
+]);
+
 export type SceneSpec = z.infer<typeof sceneSpecSchema>;
+export type SceneKind = SceneSpec['kind'];
+export type SceneSpecOf<K extends SceneKind> = Extract<SceneSpec, {kind: K}>;
 
 /** Composition props: the (large) spec is fetched once per tab, not serialised per frame. */
 export const sceneInputSchema = z.object({

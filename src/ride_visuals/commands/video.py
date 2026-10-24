@@ -217,6 +217,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
             "with a discrete GPU and ample RAM)"
         ),
     )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="3D scenes: render from cached map tiles only (no prefetch, no downloads)",
+    )
     add_credits_argument(parser)
     parser.add_argument("--config", type=str, help="Path to config/config.toml")
     add_selection_arguments(parser)

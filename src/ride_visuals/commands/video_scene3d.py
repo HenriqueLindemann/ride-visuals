@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -169,14 +170,38 @@ def _build_scene_spec(
     raise ValueError(f"Unsupported 3D scene type: {args.video_type!r}")
 
 
+def _prefetch(cache: Any, spec_file: Path, *, preview: bool) -> None:
+    """Fetch the scene's tiles before rendering; a final render does not start with gaps."""
+    from ride_visuals.scene3d.prefetch import prefetch_tiles, scene_tiles
+
+    tiles = scene_tiles(json.loads(spec_file.read_text(encoding="utf-8")))
+    total = sum(len(keys) for keys in tiles.values())
+    print(f"[Tiles] Prefetching {total} tiles ({', '.join(f'{k}: {len(v)}' for k, v in tiles.items())})...")
+    step = max(1, total // 20)
+
+    def progress(done: int, count: int) -> None:
+        if done % step == 0 or done == count:
+            print(f"\r[Tiles] {done}/{count}", end="", flush=True)
+
+    report = prefetch_tiles(cache, tiles, progress=progress)
+    print(f"\n[Tiles] {report.cached} cached, {report.downloaded} downloaded, {report.empty} empty upstream.")
+    if report.failed:
+        sample = ", ".join(f"{source} {z}/{x}/{y}" for source, (z, x, y) in report.failed[:5])
+        message = f"{len(report.failed)} tile(s) could not be fetched (e.g. {sample})"
+        if not preview:
+            raise RuntimeError(f"{message}. Retry when the tile services respond, or render with --offline.")
+        print(f"[Warning] {message}; the preview may show gaps.")
+
+
 def render_scene3d(context: VideoCommandContext) -> None:
-    """Build the 3D scene spec, start the local tile server, and render via Remotion."""
+    """Build the 3D scene spec, prefetch its tiles, and render it via Remotion behind a local tile server."""
     from ride_visuals.credits import write_credits
     from ride_visuals.scene3d.tiles import TileCache, TileServer
     from ride_visuals.video.engines.remotion import RemotionVideoEngine
 
     args = context.args
-    cache = TileCache()
+    offline = bool(getattr(args, "offline", False))
+    cache = TileCache(offline=offline)
     # 3D scenes render WebGL terrain frame by frame; the default of 4 workers
     # exhausted a 16 GB / integrated-GPU machine, so default to a safe 2 and
     # let --concurrency raise it where there is headroom.
@@ -191,10 +216,12 @@ def render_scene3d(context: VideoCommandContext) -> None:
         fps = 30 if args.preview else 60
         paths = _scene_paths(context)
         spec = _build_scene_spec(context, width, height, fps, cache)
+        serialized = spec.write(paths.spec_path).resolve()
+        if not offline:
+            _prefetch(cache, serialized, preview=args.preview)
     except (ValueError, FileNotFoundError, RuntimeError) as error:
         print(f"[Error] {error}")
         raise SystemExit(1) from error
-    serialized = spec.write(paths.spec_path).resolve()
 
     engine = RemotionVideoEngine(renderer_dir=context.runtime.renderer_dir)
     with TileServer(cache) as server:
@@ -208,7 +235,11 @@ def render_scene3d(context: VideoCommandContext) -> None:
             concurrency=concurrency,
         )
         failures = server.failures
+        late = sum(len(tiles) for tiles in server.downloaded.values())
+        unsettled = server.unsettled_frames
 
+    if late > 0:
+        print(f"[Tiles] {late} tile(s) were not prefetched and were downloaded during the render.")
     if failures > 0:
         print(f"[Warning] {failures} map tile request(s) failed during render.")
     print(f"[Video] 3D {args.video_type} generated: {output}")
@@ -217,3 +248,8 @@ def render_scene3d(context: VideoCommandContext) -> None:
     credits = write_credits(output, spec.sources)
     if credits:
         print(f"[Credits] {credits}")
+    if unsettled:
+        shown = ", ".join(str(frame) for frame in unsettled[:12]) + (" ..." if len(unsettled) > 12 else "")
+        print(f"[{'Warning' if args.preview else 'Error'}] {len(unsettled)} frame(s) painted before their map tiles loaded: {shown}")
+        if not args.preview:
+            raise SystemExit(1)

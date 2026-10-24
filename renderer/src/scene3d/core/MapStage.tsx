@@ -120,7 +120,10 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
     const check = () => {
       if (done) return;
       if (settled() && (rendered || Date.now() - started > 400)) return finish();
-      if (Date.now() - started > MAP_TIMEOUT_MS / 2) return finish();
+      if (Date.now() - started > MAP_TIMEOUT_MS / 2) {
+        reportUnsettled(spec, frame);
+        return finish();
+      }
       map.triggerRepaint();
       poll = setTimeout(check, 50);
     };
@@ -149,6 +152,21 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
 
   return <div ref={container} style={{position: 'absolute', left: 0, top: 0, width, height}} />;
 };
+
+/**
+ * Tell the tile server (which also serves the tiles) that a frame was painted
+ * before all of its tiles arrived, so the render reports it instead of
+ * shipping a frame with holes in silence.
+ */
+function reportUnsettled(spec: SceneSpec, frame: number) {
+  console.warn(`map frame ${frame}: painted before every tile loaded`);
+  try {
+    const origin = new URL(spec.tiles.dem).origin;
+    fetch(`${origin}/unsettled/frame/${frame}`, {keepalive: true}).catch(() => undefined);
+  } catch {
+    // A relative or custom tile URL (Studio): the console warning has to do.
+  }
+}
 
 function applyState(map: maplibregl.Map, spec: SceneSpec, camera: Camera, state: Applied) {
   if (state.globe !== camera.globe) {

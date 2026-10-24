@@ -10,7 +10,9 @@ Three open sources cover the whole planet:
 The renderer never sees upstream URLs. During a render a small threaded HTTP
 server on 127.0.0.1 answers tile requests from the cache and downloads what is
 missing on first use, so a re-render is offline and every tile is fetched once.
-It also serves the scene spec, which keeps large JSON out of Remotion props.
+It also serves the scene spec, which keeps large JSON out of Remotion props,
+records which tiles a render asked for (see scene3d.prefetch), and collects
+the frames MapStage had to paint before their tiles arrived.
 """
 
 from __future__ import annotations
@@ -197,6 +199,13 @@ class _Handler(BaseHTTPRequestHandler):
             if path is None or not path.exists():
                 return self._send(HTTPStatus.NOT_FOUND)
             return self._send(HTTPStatus.OK, path.read_bytes(), "application/json")
+        if len(parts) == 3 and parts[0] == "unsettled":
+            # MapStage gave up waiting for this frame's tiles and painted it anyway.
+            try:
+                self.server.record_unsettled(int(parts[2]) if parts[1] == "frame" else -1)
+            except ValueError:
+                return self._send(HTTPStatus.BAD_REQUEST)
+            return self._send(HTTPStatus.NO_CONTENT)
         if len(parts) == 5 and parts[0] == "tiles" and parts[1] in TILE_SOURCES:
             source = TILE_SOURCES[parts[1]]
             try:
@@ -204,7 +213,9 @@ class _Handler(BaseHTTPRequestHandler):
                 y = int(parts[4].split(".", 1)[0])
             except ValueError:
                 return self._send(HTTPStatus.BAD_REQUEST)
+            cached = self.server.cache.path(source, z, x, y).exists()
             data = self.server.cache.get(source, z, x, y)
+            self.server.record_request(source.key, (z, x, y), downloaded=not cached and data is not None)
             if data is None:
                 self.server.failures += 1
                 return self._send(HTTPStatus.NOT_FOUND)
@@ -225,6 +236,21 @@ class TileServer:
             self.cache = cache
             self.files: dict[str, Path] = {}
             self.failures = 0
+            #: Every tile served, per source key, and those fetched upstream on demand.
+            self.requested: dict[str, set[tuple[int, int, int]]] = {}
+            self.downloaded: dict[str, set[tuple[int, int, int]]] = {}
+            self.unsettled: set[int] = set()
+            self._record = threading.Lock()
+
+        def record_request(self, key: str, tile: tuple[int, int, int], *, downloaded: bool) -> None:
+            with self._record:
+                self.requested.setdefault(key, set()).add(tile)
+                if downloaded:
+                    self.downloaded.setdefault(key, set()).add(tile)
+
+        def record_unsettled(self, frame: int) -> None:
+            with self._record:
+                self.unsettled.add(frame)
 
         def handle_error(self, request: object, client_address: object) -> None:
             # MapLibre aborts tile requests it no longer needs; that is not an error.
@@ -247,6 +273,21 @@ class TileServer:
     def failures(self) -> int:
         """Tiles that could not be served (upstream down while not cached)."""
         return self._httpd.failures
+
+    @property
+    def requested(self) -> dict[str, set[tuple[int, int, int]]]:
+        """Tiles served so far, per source key."""
+        return self._httpd.requested
+
+    @property
+    def downloaded(self) -> dict[str, set[tuple[int, int, int]]]:
+        """Tiles that were not in the cache and were fetched while serving."""
+        return self._httpd.downloaded
+
+    @property
+    def unsettled_frames(self) -> list[int]:
+        """Frames painted before every tile had loaded (reported by MapStage)."""
+        return sorted(self._httpd.unsettled)
 
     def tile_url(self, key: str) -> str:
         source = TILE_SOURCES[key]

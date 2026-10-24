@@ -2,13 +2,13 @@ import type {DrawOp, Knockout} from '../core/draw';
 import type {Projector} from '../core/projector';
 import type {Track} from '../core/track';
 import type {TextItem} from '../core/Typography';
-import type {SceneSpec} from '../schema';
+import type {SceneKind, SceneSpecOf} from '../schema';
 import {flyoverScore} from './flyover';
 import {strataScore} from './strata';
 import {stretchScore} from './stretch';
 
-export type ScoreContext = {
-  spec: SceneSpec;
+export type ScoreContext<K extends SceneKind = SceneKind> = {
+  spec: SceneSpecOf<K>;
   tracks: Track[];
   frame: number;
   channel: (name: string) => number;
@@ -29,10 +29,15 @@ export type ScoreOutput = {
   knockouts?: Knockout[];
 };
 
-export type Score = (ctx: ScoreContext) => ScoreOutput;
+export type Score<K extends SceneKind> = (ctx: ScoreContext<K>) => ScoreOutput;
 
-export const scores: Record<SceneSpec['kind'], Score> = {
+export const scores: {[K in SceneKind]: Score<K>} = {
   flyover: flyoverScore,
   stretch: stretchScore,
   strata: strataScore,
 };
+
+/** Run the score of the spec's own kind (TS cannot correlate the lookup with the union). */
+export function runScore(ctx: ScoreContext): ScoreOutput {
+  return (scores[ctx.spec.kind] as Score<SceneKind>)(ctx);
+}

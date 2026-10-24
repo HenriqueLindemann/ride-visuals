@@ -173,6 +173,16 @@ def test_tile_cache_and_tile_server_with_local_upstream(tmp_path: Path) -> None:
                 urllib.request.urlopen(f"{server.base_url}/tiles/dem/2/3/3.png", timeout=5)
             assert err.value.code == 404
             assert server.failures == 1
+
+            # Every tile asked for is recorded; none was fetched upstream (offline cache).
+            assert server.requested == {"dem": {(2, 1, 1), (2, 1, 2), (2, 3, 3)}}
+            assert server.downloaded == {}
+
+            # MapStage reports frames it had to paint before their tiles arrived.
+            for frame in (12, 3, 12):
+                with urllib.request.urlopen(f"{server.base_url}/unsettled/frame/{frame}", timeout=5) as resp:
+                    assert resp.status == 204
+            assert server.unsettled_frames == [3, 12]
     finally:
         upstream.shutdown()
         upstream.server_close()
@@ -905,6 +915,16 @@ def test_scene3d_cli_orchestration_and_aspect_validation(
         lambda self, lon, lat, radius_m: np.full(np.shape(lon), 220.0),
     )
 
+    prefetched: list[dict] = []
+
+    def fake_prefetch(cache, tiles, **kwargs):
+        from ride_visuals.scene3d.prefetch import PrefetchReport
+
+        prefetched.append(tiles)
+        return PrefetchReport(tiles=tiles, cached=sum(len(v) for v in tiles.values()))
+
+    monkeypatch.setattr("ride_visuals.scene3d.prefetch.prefetch_tiles", fake_prefetch)
+
     main(
         [
             "video",
@@ -924,3 +944,5 @@ def test_scene3d_cli_orchestration_and_aspect_validation(
     assert out_path.with_name(f"{out_path.stem}.credits.txt").exists()
     spec_file = reference_cli_workspace.outputs_dir / "render-specs" / f"{out_path.stem}.json"
     assert spec_file.exists()
+    # The tiles are fetched from the written spec before the render starts.
+    assert len(prefetched) == 1 and prefetched[0]["dem"] and prefetched[0]["vector"]

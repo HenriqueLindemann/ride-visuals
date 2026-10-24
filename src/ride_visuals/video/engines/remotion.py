@@ -221,6 +221,19 @@ def keyframe_timestamps(
     return (start, mid, end)
 
 
+#: 3D scenes are rendered in chunks of this many seconds of video: a failure
+#: or a stop only loses the chunk in progress (see render_scene3d).
+SCENE3D_CHUNK_S = 15.0
+
+
+def scene3d_chunks(frames: int, chunk_frames: int) -> list[tuple[int, int]]:
+    """Inclusive (first, last) frame ranges covering ``frames``; no tail shorter than half a chunk."""
+    chunk_frames = max(1, chunk_frames)
+    count = max(1, round(frames / chunk_frames))
+    bounds = [round(i * frames / count) for i in range(count + 1)]
+    return [(bounds[i], bounds[i + 1] - 1) for i in range(count) if bounds[i + 1] > bounds[i]]
+
+
 class RemotionVideoEngine:
     name = "remotion"
     capabilities = EngineCapabilities(
@@ -291,14 +304,10 @@ class RemotionVideoEngine:
         video_only = output.with_name(f".{output.stem}.remotion.mp4")
         assert self.node is not None
 
-        render_command = [
-            self.node,
-            str(self.cli),
+        render_command = self._remotion_command(
             "render",
-            str(self.entrypoint),
             composition,
-            str(video_only.resolve()),
-            "--props",
+            video_only,
             str(serialized_spec),
             "--codec",
             "h264",
@@ -308,14 +317,7 @@ class RemotionVideoEngine:
             "bt709",
             "--concurrency",
             "2",
-            "--timeout",
-            "120000",
-            "--overwrite",
-            "--log",
-            "error",
-        ]
-        if self.browser_executable:
-            render_command.extend(["--browser-executable", str(self.browser_executable)])
+        )
         try:
             self._run(render_command, "Remotion render", retries=1)
 
@@ -364,26 +366,16 @@ class RemotionVideoEngine:
         # A reusable static overlay represents the completed activity. Callers
         # may still request an explicit frame for video/keyframe inspection.
         selected_frame = frame if frame is not None else max(0, total_frames - 1)
-        command = [
-            self.node or "node",
-            str(self.cli),
+        command = self._remotion_command(
             "still",
-            str(self.entrypoint),
             composition,
-            str(output.resolve()),
-            "--props",
+            output,
             str(serialized_spec),
             "--frame",
             str(selected_frame),
             "--image-format",
             "png",
-            "--timeout",
-            "120000",
-            "--overwrite",
-            "--log",
-            "error",
-            *self._browser_args(),
-        ]
+        )
         self._run(command, "transparent overlay still", retries=1)
         if spec.presentation == INSTAGRAM_STORY_LANDSCAPE:
             with Image.open(output) as rendered:
@@ -436,28 +428,18 @@ class RemotionVideoEngine:
             if spec.presentation == INSTAGRAM_STORY_LANDSCAPE
             else output
         )
-        command = [
-            self.node or "node",
-            str(self.cli),
+        command = self._remotion_command(
             "render",
-            str(self.entrypoint),
             composition,
-            str(remotion_output.resolve()),
-            "--props",
+            remotion_output,
             str(serialized_spec),
             "--image-format",
             "png",
             "--muted",
             "--concurrency",
             "1",
-            "--timeout",
-            "120000",
-            "--overwrite",
-            "--log",
-            "error",
             *codec_args,
-            *self._browser_args(),
-        ]
+        )
         self._run(command, "transparent overlay video", retries=1)
         if spec.presentation == INSTAGRAM_STORY_LANDSCAPE:
             if suffix == ".webm":
@@ -513,8 +495,16 @@ class RemotionVideoEngine:
         scale: int = 1,
         keyframes_dir: Path | None = None,
         concurrency: int = 2,
+        chunk_seconds: float = SCENE3D_CHUNK_S,
     ) -> tuple[Path, list[Path]]:
-        """Render the ``Scene3D`` composition served by a local ``TileServer``."""
+        """Render the ``Scene3D`` composition served by a local ``TileServer``.
+
+        The video is rendered in chunks of ``chunk_seconds`` from one prebuilt
+        bundle and joined without re-encoding. Finished chunks are kept next to
+        the output until the whole video is valid, so a crash or a stop costs
+        only the chunk in progress: running the same command again resumes.
+        A chunk is reused only for the very same spec and render settings.
+        """
         from ride_visuals.scene3d.tiles import stage_scene3d_assets
 
         errors = self.doctor()
@@ -524,9 +514,6 @@ class RemotionVideoEngine:
 
         output = Path(output_path).resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
-        video_only = output.with_name(f".{output.stem}.remotion.mp4")
-        assert self.node is not None
-
         props_json = json.dumps(
             {
                 "specUrl": spec_url,
@@ -537,15 +524,7 @@ class RemotionVideoEngine:
             },
             separators=(",", ":"),
         )
-        render_command = [
-            self.node,
-            str(self.cli),
-            "render",
-            str(self.entrypoint),
-            "Scene3D",
-            str(video_only.resolve()),
-            "--props",
-            props_json,
+        render_options = [
             "--gl",
             "angle",
             # Lossless frame capture: JPEG lifts the near-black land and
@@ -564,43 +543,85 @@ class RemotionVideoEngine:
             "bt709",
             "--concurrency",
             str(concurrency),
-            "--timeout",
-            "120000",
-            "--overwrite",
-            "--log",
-            "error",
-            *self._browser_args(),
+            *(["--scale", str(scale)] if scale > 1 else []),
         ]
-        if scale > 1:
-            render_command.extend(["--scale", str(scale)])
+        # The spec URL changes with the server port on every run: key the
+        # chunks by the spec's content and the settings that change pixels.
+        digest = hashlib.sha256(
+            json.dumps([spec.to_json(), render_options], separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:16]
+        parts_dir = output.with_name(f".{output.stem}.parts")
+        chunks_dir = parts_dir / digest
+        for stale in parts_dir.glob("*"):
+            if stale != chunks_dir:
+                shutil.rmtree(stale, ignore_errors=True)
+        chunks_dir.mkdir(parents=True, exist_ok=True)
+        ranges = scene3d_chunks(spec.frames, max(1, round(chunk_seconds * spec.fps)))
 
-        mux_command = [
-            self.ffmpeg,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-i",
-            str(video_only),
-            "-map",
-            "0:v:0",
-            "-an",
-            "-c:v",
-            "copy",
-            "-movflags",
-            "+faststart",
-            str(output),
-        ]
+        bundle = chunks_dir / "bundle"
+        shutil.rmtree(bundle, ignore_errors=True)
+        self._run(
+            [self.node or "node", str(self.cli), "bundle", str(self.entrypoint), "--out-dir", str(bundle), "--log", "error"],
+            "Remotion bundle",
+        )
+        chunk_files: list[Path] = []
         try:
-            self._run(render_command, "Remotion 3D scene render", retries=1)
-            self._run(mux_command, "3D scene media normalization")
+            for index, (first, last) in enumerate(ranges):
+                chunk = chunks_dir / f"chunk_{index:04d}.mp4"
+                chunk_files.append(chunk)
+                if chunk.exists():
+                    print(f"[Scene3D] Chunk {index + 1}/{len(ranges)} already rendered, reusing it.")
+                    continue
+                print(f"[Scene3D] Rendering chunk {index + 1}/{len(ranges)} (frames {first}-{last})...")
+                partial = chunk.with_name(f"{chunk.stem}.partial.mp4")
+                command = self._remotion_command(
+                    "render",
+                    "Scene3D",
+                    partial,
+                    props_json,
+                    *render_options,
+                    f"--frames={first}-{last}",
+                    source=bundle,
+                )
+                self._run(command, f"Remotion 3D scene chunk {index + 1}/{len(ranges)}", retries=1)
+                partial.replace(chunk)
         finally:
-            video_only.unlink(missing_ok=True)
+            shutil.rmtree(bundle, ignore_errors=True)
+
+        concat_list = chunks_dir / "chunks.txt"
+        concat_list.write_text("".join(f"file '{path.name}'\n" for path in chunk_files), encoding="utf-8")
+        self._run(
+            [
+                self.ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(concat_list),
+                "-map",
+                "0:v:0",
+                "-an",
+                "-c:v",
+                "copy",
+                "-movflags",
+                "+faststart",
+                str(output),
+            ],
+            "3D scene chunk join",
+        )
 
         total_seconds = spec.frames / spec.fps
         validation = MediaValidator.validate_video(output, expected_duration_s=total_seconds)
         if not validation.get("valid") or validation.get("has_faststart") is not True:
-            raise RuntimeError(f"Rendered 3D video failed validation: {validation}")
+            raise RuntimeError(
+                f"Rendered 3D video failed validation: {validation} (chunks kept in {chunks_dir})"
+            )
+        shutil.rmtree(parts_dir, ignore_errors=True)
 
         keyframes = self._extract_keyframes_by_duration(
             output,
@@ -621,6 +642,37 @@ class RemotionVideoEngine:
             "ActivityMinimalOverlay",
         }:
             raise ValueError(f"Unsupported overlay composition: {composition}")
+
+    def _remotion_command(
+        self,
+        action: str,
+        composition: str,
+        output: Path,
+        props: str,
+        *options: str,
+        source: Path | None = None,
+    ) -> list[str]:
+        """``remotion <action>`` with the flags every render here shares.
+
+        ``source`` is the entrypoint by default, or a prebuilt bundle directory.
+        """
+        return [
+            self.node or "node",
+            str(self.cli),
+            action,
+            str(source or self.entrypoint),
+            composition,
+            str(Path(output).resolve()),
+            "--props",
+            props,
+            "--timeout",
+            "120000",
+            "--overwrite",
+            "--log",
+            "error",
+            *options,
+            *self._browser_args(),
+        ]
 
     def _browser_args(self) -> list[str]:
         if self.browser_executable is None:

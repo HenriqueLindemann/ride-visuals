@@ -45,7 +45,7 @@ const {EARTH_CIRCUMFERENCE, metersPerPixel} = await import('../src/scene3d/core/
 const {frameMargins, PORTRAIT_TEXT, STORY_SAFE, textScaleFor} = await import('../src/scene3d/core/layout.ts');
 const {decodeTrack} = await import('../src/scene3d/core/track.ts');
 const {sceneSpecSchema} = await import('../src/scene3d/schema.ts');
-const {scores} = await import('../src/scene3d/scores/index.ts');
+const {runScore} = await import('../src/scene3d/scores/index.ts');
 
 test('Python 3D directors emit SceneSpecs that validate against sceneSpecSchema and execute in scores', () => {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -95,6 +95,17 @@ print(json.dumps([fly, stretch, strata]))
   const specs = JSON.parse(raw);
   assert.equal(specs.length, 3);
 
+  // Every story field a score reads is part of the contract: dropping one
+  // from a real director's output fails on load, naming the field.
+  for (const [kind, path] of [['flyover', ['layout', 'topY']], ['stretch', ['counter', 'unit']], ['strata', ['floors', 0, 'value']]]) {
+    const broken = structuredClone(specs.find((s) => s.kind === kind));
+    const parent = path.slice(0, -1).reduce((node, key) => node[key], broken.story);
+    delete parent[path.at(-1)];
+    const result = sceneSpecSchema.safeParse(broken);
+    assert.equal(result.success, false, `${kind} story without ${path.join('.')} must not validate`);
+    assert.deepEqual(result.error.issues[0].path, ['story', ...path]);
+  }
+
   for (const unparsed of specs) {
     const spec = sceneSpecSchema.parse(unparsed);
     const decodedTracks = spec.tracks.map(decodeTrack);
@@ -128,7 +139,7 @@ print(json.dumps([fly, stretch, strata]))
       },
       lngLat: (lon, lat, lift = 0) => [960 + (lon - 7.77) * 2000, 540 - (lat - 49.44) * 2000 - lift * 0.02, true],
     };
-    const out = scores[spec.kind]({
+    const out = runScore({
       spec,
       tracks: decodedTracks,
       frame: midFrame,

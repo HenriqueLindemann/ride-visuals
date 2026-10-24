@@ -7,7 +7,7 @@ import type {Camera, Projector} from './core/projector';
 import {decodeTrack, type Track} from './core/track';
 import {FONT_STACK, INK, Typography} from './core/Typography';
 import {type SceneInput, type SceneSpec, sceneSpecSchema} from './schema';
-import {scores, type ScoreOutput} from './scores';
+import {runScore, type ScoreOutput} from './scores';
 
 const LOAD_TIMEOUT_MS = 120_000;
 
@@ -113,7 +113,7 @@ export const Scene3D = ({specUrl, width, height}: SceneInput) => {
   const output: ScoreOutput | null = useMemo(() => {
     if (!scene || !projector || projector.frame !== frame) return null;
     const channels = scene.spec.channels;
-    return scores[scene.spec.kind]({
+    return runScore({
       spec: scene.spec,
       tracks: scene.tracks,
       frame,

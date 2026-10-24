@@ -3,42 +3,15 @@ import {clamp01, lerp, outCubic} from '../core/ease';
 import type {LngLat} from '../core/geo';
 import {frameMargins, LABEL_GAP, LABEL_LINE, metricHeight, totalsGrid, TYPE} from '../core/layout';
 import {INK, type TextItem} from '../core/Typography';
+import type {StrataFloor} from '../stories';
 import type {ScoreContext, ScoreOutput} from './index';
-
-export type StrataFloor = {
-  id: string;
-  /** The period (month or year), set small above its distance. */
-  label: string;
-  /** Distance ridden in the period, formatted, and its unit. */
-  value: string;
-  unit: string;
-  targetLift: number;
-  /** Vertical distance between floors (m); a landing plate starts this far above. */
-  step?: number;
-  trackIndices: number[];
-};
-
-export type StrataStory = {
-  corners: [LngLat, LngLat, LngLat, LngLat];
-  floors: StrataFloor[];
-  opening: {
-    label: string;
-    text: string;
-    accent?: string;
-  };
-  stats: {
-    label: string;
-    value: string;
-    unit?: string;
-  }[];
-};
 
 /** Clear space between two floor blocks, and between the column and the totals (px at scale 1). */
 const FLOOR_GAP = 10;
 const LABELS_CLEAR_OF_TOTALS = 48;
 
-export function strataScore({spec, tracks, channel, projector, width, height, scale, textScale}: ScoreContext): ScoreOutput {
-  const story = spec.story as unknown as StrataStory;
+export function strataScore({spec, tracks, channel, projector, width, height, scale, textScale}: ScoreContext<'strata'>): ScoreOutput {
+  const {story} = spec;
   const ops: DrawOp[] = [];
   const texts: TextItem[] = [];
 
