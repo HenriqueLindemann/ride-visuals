@@ -1,12 +1,14 @@
-"""3D cartographic and terrain scenes (flyover, stretch, strata)."""
+"""3D cartographic and terrain scenes (flyover, stretch, strata, territory, ascent)."""
 
 from __future__ import annotations
 
+from ride_visuals.scene3d.ascent import build_ascent_spec
 from ride_visuals.scene3d.flyover import FlyoverMetadata, build_flyover_spec
 from ride_visuals.scene3d.spec import Look, SceneKind, SceneSpec
 from ride_visuals.scene3d.strata import PeriodMode, StrataBuildResult, build_strata_spec
 from ride_visuals.scene3d.stretch import SceneRide, build_stretch_spec
 from ride_visuals.scene3d.terrain import DemSampler, decode_terrarium
+from ride_visuals.scene3d.territory import TerritoryBuildResult, build_territory_spec
 from ride_visuals.scene3d.tiles import (
     TILE_SOURCES,
     TileCache,
@@ -26,13 +28,16 @@ __all__ = [
     "SceneRide",
     "SceneSpec",
     "StrataBuildResult",
+    "TerritoryBuildResult",
     "TILE_SOURCES",
     "TileCache",
     "TileServer",
     "TileSource",
+    "build_ascent_spec",
     "build_flyover_spec",
     "build_strata_spec",
     "build_stretch_spec",
+    "build_territory_spec",
     "decode_terrarium",
     "stage_scene3d_assets",
 ]

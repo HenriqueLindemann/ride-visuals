@@ -28,6 +28,7 @@ from ride_visuals.scene3d.camera import (
     zoom_for_mpp,
 )
 from ride_visuals.scene3d.climbs import Climb, detect_climbs, featured_climbs, hero_climb
+from ride_visuals.scene3d.highlights import Highlight
 from ride_visuals.scene3d.framing import (
     adaptive_exaggeration,
     occlusion,
@@ -106,6 +107,8 @@ TRACE_SAMPLES = 96
 TRACE_HOLD_S = 2.4
 #: The summary under a trace fades in over this long after the summit.
 TRACE_SUMMIT_S = 1.4
+#: The closing highlight fades in over this long, once the totals are read.
+HIGHLIGHT_FADE_S = 0.9
 #: The climb of the day only gets the hero treatment when it is a real climb.
 HERO_MIN_GAIN_M = 100.0
 #: Sides and bottom of the box the hero climb fills (fractions of the frame);
@@ -306,7 +309,7 @@ def _hero_view(
     zooms = np.array([
         zoom_to_fill(
             cx, cy, mid_alt * exaggeration, pitch, bearing, lat, width, height,
-            px, py, pz * exaggeration, box, zoom_range=(11.0, 14.0),
+            px, py, pz * exaggeration, box, zoom_range=(11.0, 15.5),
         )
         for bearing, pitch in zip(bearings, pitches, strict=True)
     ])
@@ -509,9 +512,9 @@ def _build_head_schedule(
     hero: Climb | None,
     hero_pause_s: float,
 ) -> tuple[np.ndarray, float, float]:
-    """Monotonic distance along the ride, slowed on climbs and pausing at the hero summit.
+    """Monotonic distance along the ride, slowed on climbs and most at the hero summit.
 
-    Each leg cruises at constant (weighted) speed with short eased ends, so
+    One leg cruises at constant (weighted) speed with short eased ends, so
     the flats never peak faster than they have to.
     """
     grid_s = np.linspace(0.0, length_m, 1200)
@@ -525,27 +528,24 @@ def _build_head_schedule(
         head = np.interp(leg(t_start, t_end), cum, grid_s)
         return np.maximum.accumulate(head), 0.0, 0.0
 
-    # Split the ride around the hero summit so the camera can orbit the crest.
+    # One continuous pass: the crest of the hero climb gets hero_pause_s more
+    # time, the rider easing down into the summit and out of it, never stopping.
     crest_start_m = max(hero.start_m + 0.75 * hero.length_m, hero.end_m - min(90.0, 0.12 * hero.length_m))
-    u_crest = float(np.interp(crest_start_m, grid_s, cum))
-    u_summit = float(np.interp(hero.end_m, grid_s, cum))
-    active_dur = max(4.0, (t_end - t_start) - hero_pause_s)
-    leg1_dur = max(2.2, active_dur * max(0.18, min(0.82, u_summit)))
-    t_hero_start = t_start + leg1_dur
-    t_hero_end = min(t_end - 1.2, t_hero_start + hero_pause_s)
-
-    u = np.zeros_like(t)
-    mask1 = (t >= t_start) & (t < t_hero_start)
-    u[mask1] = u_crest * leg(t_start, t_hero_start)[mask1]
-    mask_hero = (t >= t_hero_start) & (t < t_hero_end)
-    u[mask_hero] = u_crest + (u_summit - u_crest) * ease_in_out_sine(
-        span(t[mask_hero], t_hero_start, t_hero_end)
-    )
-    mask2 = t >= t_hero_end
-    u[mask2] = u_summit + (1.0 - u_summit) * leg(t_hero_end, t_end)[mask2]
-    u[t >= t_end] = 1.0
-    head = np.interp(np.clip(u, 0.0, 1.0), cum, grid_s)
-    return np.maximum.accumulate(head), t_hero_start, t_hero_end
+    weights = _time_weights(grid_s, climbs, hero)
+    sigma = max(60.0, hero.end_m - crest_start_m) / max(grid_s[1] - grid_s[0], 1e-9)
+    crest = gaussian_smooth(((grid_s >= crest_start_m) & (grid_s <= hero.end_m)).astype(float), sigma)
+    # Extra weight on the crest so it takes its share of the ride's time plus the pause.
+    ride_s = max(t_end - t_start - hero_pause_s, 1e-6)
+    on_crest, total = float((weights * crest).sum()), float(weights.sum())
+    share = (on_crest / total * ride_s + hero_pause_s) / (ride_s + hero_pause_s)
+    extra = max(0.0, (share * total - on_crest) / max(float((crest * crest).sum()) - share * float(crest.sum()), 1e-9))
+    cum = np.cumsum(weights + extra * crest)
+    cum = (cum - cum[0]) / max(cum[-1] - cum[0], 1e-9)
+    head = np.maximum.accumulate(np.interp(leg(t_start, t_end), cum, grid_s))
+    # When the rider reaches the crest and the summit.
+    t_hero_start = float(t[min(len(t) - 1, int(np.searchsorted(head, crest_start_m)))])
+    t_hero_end = float(t[min(len(t) - 1, int(np.searchsorted(head, hero.end_m)))])
+    return head, t_hero_start, t_hero_end
 
 
 def _ground_below(
@@ -624,6 +624,7 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
     credits_on_screen: bool = False,
     places_cache_dir: Path = DEFAULT_PLACES_CACHE_DIR,
     offline: bool = False,
+    highlight: Highlight | None = None,
 ) -> SceneSpec:
     """Build the frame-by-frame spec for a single-ride 3D flyover."""
     if len(track.lon) < 2 or track.length_m < MIN_RIDE_LENGTH_M:
@@ -654,19 +655,23 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
     # it, from which the camera tilts and dives into the chase. The dive takes
     # longer the farther it falls (and so does the pull-back to the side view),
     # so neither moves faster than ~1.6 zoom levels/s.
-    z_ov = TYPICAL_CHASE_ZOOM - OPENING_ZOOM_DROP
     cx_ov, cy_ov = float(rx[0]), float(ry[0])
     t_open_end = 3.5
-    t_rise_end = t_open_end + float(np.clip(1.17 * (TYPICAL_CHASE_ZOOM - z_ov), 3.3, 5.5))
+    t_rise_end = t_open_end + float(np.clip(1.17 * OPENING_ZOOM_DROP, 3.3, 5.5))
+    # The rider sets off halfway down the dive, once the relief has risen: the
+    # start is never a dot waiting alone, and the land never stretches under the rider.
+    t_go = 0.5 * (t_open_end + t_rise_end)
     base_ride_dur = _ride_duration(total_m, climbs, hero)
     hero_pause_s = 4.4 if hero is not None else 0.0
-    t_ride_end = t_rise_end + base_ride_dur + hero_pause_s
+    t_ride_end = t_go + base_ride_dur + hero_pause_s
     # Ending: the camera comes down beside the ride to the horizon, the route
     # lifts off the land and straightens into its own elevation profile.
-    t_side_end = t_ride_end + float(np.clip(1.17 * (TYPICAL_CHASE_ZOOM - side.zoom), 3.6, 5.5))
+    t_side_end = t_ride_end + float(np.clip(1.17 * abs(TYPICAL_CHASE_ZOOM - side.zoom), 3.6, 5.5))
     t_unfold_end = t_side_end + 4.4
-    # The three totals (distance, ascent, moving time) fade in by +1.3 s, then hold.
-    t_end = t_unfold_end + 1.3 + reading_hold_s(3) + CURTAIN_S
+    # The three totals (distance, ascent, moving time) fade in by +1.3 s, then
+    # hold; a closing highlight comes in once they are read, and holds as long.
+    t_highlight = t_unfold_end + 1.3 + reading_hold_s(1)
+    t_end = (t_highlight + HIGHLIGHT_FADE_S if highlight else t_unfold_end + 1.3) + reading_hold_s(3) + CURTAIN_S
 
     frames = max(60, int(round(t_end * fps)))
     t = np.arange(frames, dtype=float) / float(fps)
@@ -674,7 +679,7 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
     # Head progress & smoothed chase geometry.
     head, t_hero_start, t_hero_end = _build_head_schedule(
         t,
-        t_start=t_rise_end,
+        t_start=t_go,
         t_end=t_ride_end,
         length_m=total_m,
         climbs=climbs,
@@ -686,6 +691,9 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         t, head, prof_d, prof_alt, grid_x, grid_y, lat=origin[1], width=width, height=height, fps=fps
     )
     riding = (t >= t_rise_end) & (t <= t_ride_end)
+    # The establishing shot sits a fixed step above the chase it dives into,
+    # so a 3 km loop opens as close to its start as a 130 km tour does.
+    z_ov = float(np.median(chase.zoom[riding][: max(1, int(1.5 * fps))])) - OPENING_ZOOM_DROP
 
     def ground_xy(x: np.ndarray, y: np.ndarray) -> np.ndarray:
         if sampler is None:
@@ -784,7 +792,7 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
             zoom[i] = (z_ov - 0.05 + open_push) * (1.0 - w_rise) + chase_zoom[i] * w_rise
             pitch[i] = chase_pitch[i] * w_rise
             bearing[i] = float(lerp_angle(0.0, chase_bearing[i], w_rise))
-            terrain[i] = exaggeration * float(travel(span(np.array([ti]), t_open_end, t_rise_end - 0.3)[0]))
+            terrain[i] = exaggeration * float(travel(span(np.array([ti]), t_open_end, t_go)[0]))
             contours[i] = float(ease_in_out_sine(span(np.array([ti]), t_open_end + 0.5, t_rise_end)[0]))
         elif ti < t_ride_end:
             cx[i] = chase_cx[i]
@@ -797,9 +805,13 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         elif ti < t_side_end:
             # Orbit down beside the ride until the view is almost level.
             w_side = float(travel(span(np.array([ti]), t_ride_end, t_side_end)[0]))
-            cx[i] = chase_cx[i] * (1.0 - w_side) + side.cx * w_side
-            cy[i] = chase_cy[i] * (1.0 - w_side) + side.cy * w_side
             zoom[i] = chase_zoom[i] * (1.0 - w_side) + side.zoom * w_side
+            # The centre moves with the scale (metres per pixel), not the clock:
+            # far moves happen once zoomed out, so the land never whips past.
+            res0, res1 = 2.0 ** -chase_zoom[i], 2.0 ** -side.zoom
+            w_pan = w_side if abs(res1 - res0) < 1e-12 else float(np.clip((2.0 ** -zoom[i] - res0) / (res1 - res0), 0.0, 1.0))
+            cx[i] = chase_cx[i] * (1.0 - w_pan) + side.cx * w_pan
+            cy[i] = chase_cy[i] * (1.0 - w_pan) + side.cy * w_pan
             pitch[i] = chase_pitch[i] * (1.0 - w_side) + SIDE_PITCH * w_side
             bearing[i] = float(lerp_angle(chase_bearing[i], side.bearing, w_side))
             terrain[i] = exaggeration * (1.0 - w_side) + SIDE_EXAGGERATION * w_side
@@ -824,12 +836,14 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
     bearing = smooth_angles(bearing, sigma=max(2.0, 0.65 * fps))
     max_rate = np.where(t <= t_ride_end, MAX_BEARING_RATE_DEG_S, SIDE_ORBIT_RATE_DEG_S) / float(fps)
     max_rate[hero_window] = HERO_ORBIT_RATE_DEG_S / float(fps)
-    bearing = limit_rate(bearing, max_rate) % 360.0
+    # Smoothed again after the clamp, so it eases in and out of its limit instead of snapping.
+    bearing = smooth_angles(limit_rate(bearing, max_rate), sigma=max(2.0, 0.5 * fps)) % 360.0
 
     cam = CameraTrack(frames)
     cam.lon, cam.lat = from_local_xy(cx, cy, origin)
     cam.zoom = gaussian_smooth(zoom, max(1.5, 0.25 * fps))
-    cam.pitch = np.where(terrain > 0.005, gaussian_smooth(pitch, max(1.5, 0.25 * fps)), 0.0)
+    # Level while the map is flat, tilting as the relief rises (no first-frame hop).
+    cam.pitch = gaussian_smooth(pitch, max(1.5, 0.25 * fps)) * ease_in_out_sine(np.clip(terrain / max(0.15 * exaggeration, 1e-6), 0.0, 1.0))
     cam.bearing = bearing
     cam.terrain = terrain
     cam.globe = np.zeros(frames)
@@ -869,10 +883,10 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
     # The route is never shown ahead of the rider: it draws itself behind the
     # head and is whole only once the ride is over. The opening marks the start.
     head_dot = np.maximum(
-        envelope(t, 0.45, t_rise_end - 0.45, 0.25),
-        envelope(t, t_rise_end - 0.4, t_ride_end + 0.3, 0.35),
+        envelope(t, 0.45, t_go - 0.45, 0.25),
+        envelope(t, t_go - 0.4, t_ride_end + 0.3, 0.35),
     )
-    counters = envelope(t, t_rise_end - 0.2, t_ride_end + 0.2, 0.45)
+    counters = envelope(t, t_go - 0.2, t_ride_end + 0.2, 0.45)
 
     # Cumulative ascent scaled to the official catalog elevation gain.
     pos_diffs = np.maximum(0.0, np.diff(prof_alt, prepend=prof_alt[0]))
@@ -893,6 +907,7 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
     unfold_ch = travel(span(t, t_side_end, t_unfold_end))
     chart_ch = ease_in_out_sine(span(t, t_unfold_end - 0.5, t_unfold_end + 0.7))
     stats_ch = ease_in_out_sine(span(t, t_unfold_end + 0.2, t_unfold_end + 1.3))
+    highlight_ch = ease_in_out_sine(span(t, t_highlight, t_highlight + HIGHLIGHT_FADE_S)) if highlight else np.zeros(frames)
     black_ch = fade_through_black(t, t_end, open_s=0.7, power=3.4)
 
     channels: dict[str, np.ndarray] = {
@@ -907,6 +922,7 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         "unfold": unfold_ch,
         "chart": chart_ch,
         "stats": stats_ch,
+        "highlight": highlight_ch,
         "black": black_ch,
     }
 
@@ -995,10 +1011,21 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         "peakFraction": peak_fraction,
         "climbs": story_climbs,
         "stats": [
-            {"label": i18n.text("scene3d.distance"), "value": i18n.number(total_km, 1), "unit": "km"},
-            {"label": i18n.text("scene3d.ascent"), "value": f"+{i18n.number(round(official_gain))}", "unit": "m"},
+            {
+                "label": i18n.text("scene3d.distance"),
+                "value": i18n.number(total_km, 1),
+                "unit": "km",
+                "accent": bool(highlight and "distance" in highlight.metrics),
+            },
+            {
+                "label": i18n.text("scene3d.ascent"),
+                "value": f"+{i18n.number(round(official_gain))}",
+                "unit": "m",
+                "accent": bool(highlight and "ascent" in highlight.metrics),
+            },
             {"label": i18n.text("scene3d.moving_time"), "value": hours_val, "unit": hours_unit},
         ],
+        "highlight": highlight.text if highlight else None,
     }
 
     return SceneSpec(

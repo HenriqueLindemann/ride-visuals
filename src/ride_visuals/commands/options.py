@@ -19,6 +19,7 @@ COLLECTION_STYLES = (
 VIDEO_ASPECTS = ("16:9", "9:16", "instagram", "4k")
 SCENE3D_LOOKS = ("carbon", "satellite")
 STRATA_PERIODS = ("auto", "month", "year")
+SCENE3D_TYPES = ("flyover", "stretch", "strata", "territory", "ascent")
 VIDEO_TYPES = (
     "clean",
     "telemetry",
@@ -29,8 +30,6 @@ VIDEO_TYPES = (
     "progress",
     "collection",
     "timeline",
-    "flyover",
-    "stretch",
-    "strata",
+    *SCENE3D_TYPES,
 )
 OVERLAY_FORMATS = ("png", "webm", "mov")

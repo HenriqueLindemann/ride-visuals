@@ -633,6 +633,65 @@ class RemotionVideoEngine:
         )
         return output, keyframes
 
+    def render_scene3d_stills(
+        self,
+        spec: SceneSpec,
+        output_dir: Path,
+        *,
+        spec_url: str,
+        seconds: list[float],
+        scale: int = 1,
+    ) -> list[Path]:
+        """Render single PNG frames of a ``Scene3D`` at the given times, one after another.
+
+        For reviewing a scene without rendering it whole: one bundle, then one
+        browser at a time, so the machine stays usable.
+        """
+        from ride_visuals.scene3d.tiles import stage_scene3d_assets
+
+        errors = self.doctor()
+        if errors:
+            raise RuntimeError("; ".join(errors))
+        stage_scene3d_assets(self.renderer_dir)
+        output_dir = Path(output_dir).resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        props_json = json.dumps(
+            {
+                "specUrl": spec_url,
+                "width": spec.width,
+                "height": spec.height,
+                "fps": spec.fps,
+                "durationInFrames": spec.frames,
+            },
+            separators=(",", ":"),
+        )
+        with tempfile.TemporaryDirectory(prefix="scene3d-bundle-") as bundle:
+            self._run(
+                [self.node or "node", str(self.cli), "bundle", str(self.entrypoint), "--out-dir", bundle, "--log", "error"],
+                "Remotion bundle",
+            )
+            paths: list[Path] = []
+            for second in seconds:
+                frame = min(spec.frames - 1, max(0, round(second * spec.fps)))
+                still = output_dir / f"t{second:07.2f}s.png"
+                command = self._remotion_command(
+                    "still",
+                    "Scene3D",
+                    still,
+                    props_json,
+                    "--gl",
+                    "angle",
+                    "--image-format",
+                    "png",
+                    "--frame",
+                    str(frame),
+                    *(["--scale", str(scale)] if scale > 1 else []),
+                    source=Path(bundle),
+                )
+                self._run(command, f"3D still at {second:.2f} s", retries=1)
+                paths.append(still)
+        return paths
+
     @staticmethod
     def _validate_overlay_composition(composition: str) -> None:
         if composition not in {

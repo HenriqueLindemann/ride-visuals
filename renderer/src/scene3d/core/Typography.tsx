@@ -16,6 +16,9 @@ export const INK = {
 
 export const FONT_STACK = "'Geist', ui-sans-serif, system-ui, sans-serif";
 
+const mix = (a: readonly number[], b: readonly number[], t: number) =>
+  `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * Math.min(1, Math.max(0, t)))).join(',')})`;
+
 const NUMERIC: CSSProperties = {fontVariantNumeric: 'tabular-nums', fontFeatureSettings: "'tnum' 1"};
 
 /** Shared entrance: fade in while settling up a few pixels (opacity drives both). */
@@ -50,6 +53,8 @@ export type MetricItem = {
   unit?: string;
   align?: 'left' | 'center' | 'right';
   size?: number;
+  /** 0..1: the value turns to the accent (the figure a highlight is about). */
+  accent?: number;
   opacity: number;
 };
 
@@ -149,7 +154,9 @@ function Metric({item, scale}: {item: MetricItem; scale: number}) {
       <div style={entrance(item.opacity, scale)}>
         <Label scale={scale}>{item.label}</Label>
         <div style={{whiteSpace: 'nowrap', color: INK.paper, lineHeight: 1}}>
-          <span style={{...NUMERIC, fontSize: size, fontWeight: 300, letterSpacing: '-0.03em'}}>{item.value}</span>
+          <span style={{...NUMERIC, fontSize: size, fontWeight: 300, letterSpacing: '-0.03em', color: item.accent ? mix(INK.paperRGB, INK.accentRGB, item.accent) : undefined}}>
+            {item.value}
+          </span>
           {item.unit ? (
             <span style={{fontSize: Math.max(TYPE.label * scale, size * 0.28), fontWeight: 400, color: INK.paper2, marginLeft: 6 * scale}}>{item.unit}</span>
           ) : null}

@@ -45,8 +45,11 @@ BOTTOM_SAFE_Y = 0.80
 SIDE_SAFE_X = 0.38
 LOOK_AHEAD_S = 2.0
 #: Never frame less road than this: a crawling head would otherwise dive the
-#: camera in, and then pull it out again (an accordion).
+#: camera in, and then pull it out again (an accordion). A short ride frames
+#: a share of its own length instead, down to the floor.
 MIN_WINDOW_M = 1100.0
+MIN_WINDOW_SHARE = 0.3
+MIN_WINDOW_FLOOR_M = 400.0
 MAX_BACKGROUND_PX_S = 300.0
 MAX_BEARING_RATE_DEG_S = 22.0
 #: Zoom levels per second the chase may dolly in or out.
@@ -236,11 +239,12 @@ def solve_chase(
     width: int,
     height: int,
     fps: int,
-    zoom_range: tuple[float, float] = (10.5, 14.0),
+    zoom_range: tuple[float, float] = (10.5, 16.0),
 ) -> ChaseCamera:
     """Solve centre, zoom, pitch and bearing for a head moving along a route."""
     total = float(prof_d[-1])
-    ahead = np.minimum(total, np.maximum(_head_at(t, head, LOOK_AHEAD_S), head + MIN_WINDOW_M))
+    window = float(np.clip(MIN_WINDOW_SHARE * total, MIN_WINDOW_FLOOR_M, MIN_WINDOW_M))
+    ahead = np.minimum(total, np.maximum(_head_at(t, head, LOOK_AHEAD_S), head + window))
     behind = np.maximum(0.0, head - 0.35 * (ahead - head))
 
     # Route relief in each window drives pitch (and, upstream, exaggeration).
@@ -324,6 +328,53 @@ def adaptive_exaggeration(view_width_m: float, route_relief_m: float) -> float:
     """
     relief = max(route_relief_m, 25.0)
     return float(np.clip(0.022 * view_width_m / relief, 1.25, 2.6))
+
+
+def principal_bearing(x: np.ndarray, y: np.ndarray) -> float:
+    """Compass bearing (deg, 0..180) of the long axis of a point cloud."""
+    _, vecs = np.linalg.eigh(np.cov(np.vstack([x - x.mean(), y - y.mean()])))
+    ax, ay = vecs[:, -1]
+    return float(np.degrees(np.arctan2(ax, ay)) % 180.0)
+
+
+def fit_view(
+    px: np.ndarray,
+    py: np.ndarray,
+    pz: np.ndarray,
+    pitch: float,
+    bearing: float,
+    lat: float,
+    width: int,
+    height: int,
+    box: tuple[float, float, float, float],
+    *,
+    lift: bool = False,
+    zoom_range: tuple[float, float] = (3.0, 16.0),
+) -> tuple[float, float, float, float]:
+    """Look-at point (x, y, height) and zoom that fill ``box`` with the points as seen in perspective.
+
+    Each pass moves the projected extent onto the box centre. With ``lift``, a
+    vertical correction raises the look-at point as much as the camera looks
+    across (sin² of the pitch) and moves it forward as much as it looks down.
+    """
+    b = np.radians(bearing)
+    p = np.radians(pitch)
+    share = float(np.sin(p) ** 2) if lift else 0.0
+    cx, cy, cz = float(px.mean()), float(py.mean()), 0.0
+    box_x = 0.5 * (box[0] + box[2]) * width
+    box_y = 0.5 * (box[1] + box[3]) * height
+    for _ in range(6):
+        zoom = zoom_to_fill(cx, cy, cz, pitch, bearing, lat, width, height, px, py, pz, box, zoom_range=zoom_range)
+        sx, sy, _ = project_points(cx, cy, cz, zoom, pitch, bearing, lat, width, height, px, py, pz)
+        mpp = float(meters_per_pixel(zoom, lat))
+        dx = 0.5 * (np.nanmin(sx) + np.nanmax(sx)) - box_x
+        dy = 0.5 * (np.nanmin(sy) + np.nanmax(sy)) - box_y
+        fwd = -(1.0 - share) * dy * mpp / max(np.cos(p), 0.3)
+        cx += 0.8 * (dx * mpp * np.cos(b) + fwd * np.sin(b))
+        cy += 0.8 * (-dx * mpp * np.sin(b) + fwd * np.cos(b))
+        cz = max(0.0, cz - 0.8 * share * dy * mpp / max(np.sin(p), 0.3))
+    zoom = zoom_to_fill(cx, cy, cz, pitch, bearing, lat, width, height, px, py, pz, box, zoom_range=zoom_range)
+    return cx, cy, cz, zoom
 
 
 def project_points(

@@ -33,11 +33,15 @@ wants to see their rides differently.
 | `video flyover <id>` | One ride from above, down into its climbs, ending as its own profile |
 | `video strata` | A season stacked as floors, one per month or year |
 | `video stretch` | A selection laid end to end along a great circle from home |
+| `video territory` | Every different road ridden, each drawn once |
+| `video ascent` | The roads bend up off the map to the height they climbed, beside landmarks at true scale |
 
 ```bash
 make preview-flyover ACTIVITY_ID=<activity-id>
 ride-visuals video strata --year 2026 --period month
 ride-visuals video stretch --year 2026 --look satellite
+ride-visuals video territory --year 2026 --aspect 9:16
+ride-visuals video ascent --start-date 2022-01-01 --end-date 2025-12-31
 ```
 
 ---
@@ -88,7 +92,7 @@ ride-visuals video telemetry <activity-id> --background-image photo.jpg --aspect
 | --- | --- | --- |
 | **Maps** | `map overview`, `map heatmap`, `map effort` (300 DPI) | `outputs/maps/` |
 | **Collection videos** | `video collection`, `video progress`, `video timeline` | `outputs/videos/` |
-| **3D scenes** | `video flyover`, `video stretch`, `video strata` | `outputs/videos/` |
+| **3D scenes** | `video flyover`, `video stretch`, `video strata`, `video territory`, `video ascent` | `outputs/videos/` |
 | **Activity renders** | `video telemetry`, `video minimal`, `video clean`, `video overlay`, `video route-overlay`, `video stats-overlay` | `outputs/videos/` |
 | **Reports** | `report progress`, `report dashboard`, `report timeline` | `outputs/reports/` |
 
@@ -161,7 +165,8 @@ draft first.
   relief shading and contour lines; `--look satellite` mixes in Esri imagery.
   Choose `--period month` or `--period year` for `video strata`, `--toward
   <place|lat,lon>` to aim `video stretch` at a destination, and `--title` to
-  set a custom opening headline.
+  set a custom opening headline. `--highlight` adds a closing line when a
+  flyover ride stands out; `--stills 4,22.5` renders just those seconds as PNGs.
 - **Credits**: every output gets a `<name>.credits.txt` listing its sources and
   licenses; `--credits-on-screen` also draws a short attribution line.
 

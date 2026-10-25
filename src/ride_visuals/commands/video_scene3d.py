@@ -1,4 +1,4 @@
-"""3D cartographic and terrain video orchestration (flyover, stretch, strata)."""
+"""3D cartographic and terrain video orchestration (flyover, stretch, strata, territory, ascent)."""
 
 from __future__ import annotations
 
@@ -7,9 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ride_visuals.commands.options import SCENE3D_TYPES
+
 if TYPE_CHECKING:
     from ride_visuals.commands.video import VideoCommandContext
     from ride_visuals.scene3d.flyover import FlyoverMetadata
+    from ride_visuals.scene3d.highlights import Highlight
     from ride_visuals.scene3d.spec import SceneSpec
     from ride_visuals.scene3d.stretch import SceneRide
 
@@ -33,7 +36,7 @@ def _resolve_canvas(aspect: str, *, preview: bool) -> tuple[int, int, int]:
 
 def _scene_paths(context: VideoCommandContext) -> Scene3DRenderPaths:
     args = context.args
-    if args.video_type not in {"flyover", "stretch", "strata"}:
+    if args.video_type not in SCENE3D_TYPES:
         raise ValueError(f"Unsupported 3D scene type: {args.video_type!r}")
     locale_tag = context.runtime.locale.lower().replace("-", "_")
     look_tag = f"_{args.look}"
@@ -45,7 +48,7 @@ def _scene_paths(context: VideoCommandContext) -> Scene3DRenderPaths:
         period_tag = "" if args.period == "auto" else f"_{args.period}"
         stem = f"strata_{context.selection_tag}{period_tag}{look_tag}_{aspect_tag}_{locale_tag}"
     else:
-        stem = f"stretch_{context.selection_tag}{look_tag}_{aspect_tag}_{locale_tag}"
+        stem = f"{args.video_type}_{context.selection_tag}{look_tag}_{aspect_tag}_{locale_tag}"
 
     output_file = context.outputs_dir / args.video_type / f"{stem}{preview_tag}.mp4"
     spec_path = context.outputs_dir.parent / "render-specs" / f"{stem}{preview_tag}.json"
@@ -78,6 +81,29 @@ def _load_flyover_metadata(catalog_db: Path, activity_id: int) -> FlyoverMetadat
         elevation_gain_m=float(row[3]) if row[3] is not None else None,
         moving_time_s=float(row[4]) if row[4] is not None else None,
     )
+
+
+def _load_highlight(catalog_db: Path, activity_id: int, locale: str) -> Highlight | None:
+    """Where the ride stands among every ride of the same type in the catalog (None if unremarkable)."""
+    if not catalog_db.exists():
+        return None
+    import duckdb
+
+    from ride_visuals.i18n import Translator
+    from ride_visuals.scene3d.highlights import RideRecord, ride_highlight
+
+    with duckdb.connect(str(catalog_db), read_only=True) as connection:
+        rows = connection.execute(
+            """
+            SELECT id, start_date, distance_m, elevation_gain_m FROM activities
+            WHERE activity_type IS NOT DISTINCT FROM
+                (SELECT activity_type FROM activities WHERE id = ?)
+            """,
+            [activity_id],
+        ).fetchall()
+    archive = [RideRecord(int(row[0]), row[1], float(row[2] or 0.0), float(row[3] or 0.0)) for row in rows]
+    ride = next((record for record in archive if record.activity_id == activity_id), None)
+    return ride_highlight(ride, archive, Translator(locale)) if ride else None
 
 
 def _load_collection_rides(context: VideoCommandContext) -> list[SceneRide]:
@@ -128,7 +154,8 @@ def _build_scene_spec(
     cache: Any,
 ) -> SceneSpec:
     from ride_visuals.scene3d.flyover import build_flyover_spec
-    from ride_visuals.scene3d.strata import HOME_REGION_RADIUS_M, build_strata_spec
+    from ride_visuals.scene3d.places import HOME_REGION_RADIUS_M
+    from ride_visuals.scene3d.strata import build_strata_spec
     from ride_visuals.scene3d.stretch import build_stretch_spec
     from ride_visuals.scene3d.terrain import DemSampler
     from ride_visuals.scene3d.track import RideTrack
@@ -152,6 +179,11 @@ def _build_scene_spec(
         return build_flyover_spec(
             RideTrack.from_parquet(parquet_path),
             metadata=_load_flyover_metadata(context.runtime.catalog_db, args.activity_id),
+            highlight=(
+                _load_highlight(context.runtime.catalog_db, args.activity_id, context.runtime.locale)
+                if getattr(args, "highlight", False)
+                else None
+            ),
             sampler=DemSampler(cache, zoom=12),
             **common,
         )
@@ -167,6 +199,19 @@ def _build_scene_spec(
                 f"{result.excluded_rides} outside {HOME_REGION_RADIUS_M / 1000:.0f} km skipped."
             )
         return result.spec
+    if args.video_type == "territory":
+        from ride_visuals.scene3d.territory import build_territory_spec
+
+        territory = build_territory_spec(rides, **common)
+        print(
+            f"[Territory] {territory.kept_rides} rides, {territory.distinct_km:,.0f} km of different roads"
+            + (f"; {territory.excluded_rides} outside the home region skipped." if territory.excluded_rides else ".")
+        )
+        return territory.spec
+    if args.video_type == "ascent":
+        from ride_visuals.scene3d.ascent import build_ascent_spec
+
+        return build_ascent_spec(rides, **common)
     raise ValueError(f"Unsupported 3D scene type: {args.video_type!r}")
 
 
@@ -191,6 +236,40 @@ def _prefetch(cache: Any, spec_file: Path, *, preview: bool) -> None:
         if not preview:
             raise RuntimeError(f"{message}. Retry when the tile services respond, or render with --offline.")
         print(f"[Warning] {message}; the preview may show gaps.")
+
+
+def parse_stills(raw: str) -> list[float]:
+    """Times (s) from a comma-separated ``--stills`` value; an empty or negative entry is an error."""
+    try:
+        seconds = [float(part) for part in raw.split(",") if part.strip()]
+    except ValueError as error:
+        raise ValueError(f"--stills takes comma-separated seconds, got {raw!r}") from error
+    if not seconds or any(value < 0 for value in seconds):
+        raise ValueError(f"--stills takes comma-separated seconds, got {raw!r}")
+    return seconds
+
+
+def _render_stills(
+    context: VideoCommandContext,
+    engine: Any,
+    cache: Any,
+    spec: SceneSpec,
+    serialized: Path,
+) -> None:
+    """``--stills``: PNG frames at the asked times instead of the video, into outputs/stills/<scene>/."""
+    from ride_visuals.scene3d.tiles import TileServer
+
+    try:
+        seconds = parse_stills(context.args.stills)
+    except ValueError as error:
+        print(f"[Error] {error}")
+        raise SystemExit(1) from error
+    _, _, scale = _resolve_canvas(context.args.aspect, preview=context.args.preview)
+    stills_dir = context.outputs_dir.parent / "stills" / _scene_paths(context).output_file.stem
+    with TileServer(cache) as server:
+        spec_url = server.publish("scene.json", serialized)
+        written = engine.render_scene3d_stills(spec, stills_dir, spec_url=spec_url, seconds=seconds, scale=scale)
+    print(f"[Stills] {len(written)} frame(s) of {spec.frames / spec.fps:.1f} s at: {stills_dir}")
 
 
 def render_scene3d(context: VideoCommandContext) -> None:
@@ -224,6 +303,10 @@ def render_scene3d(context: VideoCommandContext) -> None:
         raise SystemExit(1) from error
 
     engine = RemotionVideoEngine(renderer_dir=context.runtime.renderer_dir)
+    if getattr(args, "stills", None):
+        _render_stills(context, engine, cache, spec, serialized)
+        return
+
     with TileServer(cache) as server:
         spec_url = server.publish("scene.json", serialized)
         output, keyframes = engine.render_scene3d(

@@ -674,7 +674,9 @@ def test_flyover_chase_stays_close_without_accordion(tmp_path: Path) -> None:
         track, sampler=_FakeSampler(700.0), fps=30, places_cache_dir=tmp_path, offline=True
     )
     cam = spec.camera
-    chase = spec.channels["counters"] > 0.99
+    riding = spec.channels["counters"] > 0.99
+    # The rider sets off during the dive into the chase, which is over 2 s later.
+    chase = riding & (np.arange(spec.frames) >= np.argmax(riding) + 2 * spec.fps)
     hero = spec.channels["beat"] > 0.001
     # Close enough to read the relief and the progress, never diving past z14.
     assert float(np.median(cam.zoom[chase])) >= 11.8

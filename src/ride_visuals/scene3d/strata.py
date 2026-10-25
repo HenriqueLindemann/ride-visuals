@@ -10,7 +10,7 @@ from typing import Literal
 
 import numpy as np
 
-from ride_visuals.i18n import DEFAULT_LOCALE, Translator, sanitize_display_text
+from ride_visuals.i18n import DEFAULT_LOCALE, Translator
 from ride_visuals.scene3d.camera import (
     CURTAIN_S,
     CameraTrack,
@@ -26,15 +26,14 @@ from ride_visuals.scene3d.camera import (
 from ride_visuals.scene3d.framing import frame_points
 from ride_visuals.scene3d.places import (
     DEFAULT_PLACES_CACHE_DIR,
-    home_cluster,
-    nearest_place,
+    home_region,
+    home_title,
 )
 from ride_visuals.scene3d.spec import Look, SceneSpec
 from ride_visuals.scene3d.stretch import SceneRide
-from ride_visuals.scene3d.track import from_local_xy, gaussian_smooth, haversine_m, local_xy
+from ride_visuals.scene3d.track import from_local_xy, gaussian_smooth, local_xy
 
 PeriodMode = Literal["auto", "month", "year"]
-HOME_REGION_RADIUS_M = 150_000.0
 
 
 @dataclass(frozen=True)
@@ -66,13 +65,8 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
         raise ValueError("No valid rides with GPS tracks found for the selected scope")
 
     i18n = Translator(locale)
-    starts = [(float(r.track.lon[0]), float(r.track.lat[0])) for r in valid_rides]
-    home_lon, home_lat = home_cluster(starts)
-
-    start_lons = np.array([s[0] for s in starts], dtype=float)
-    start_lats = np.array([s[1] for s in starts], dtype=float)
-    dists = haversine_m(np.full(len(valid_rides), home_lon), np.full(len(valid_rides), home_lat), start_lons, start_lats)
-    regional = [r for r, d in zip(valid_rides, dists.tolist(), strict=True) if d <= HOME_REGION_RADIUS_M]
+    (home_lon, home_lat), near = home_region([(float(r.track.lon[0]), float(r.track.lat[0])) for r in valid_rides])
+    regional = [r for r, keep in zip(valid_rides, near.tolist(), strict=True) if keep]
     if not regional:
         regional = list(valid_rides)
     excluded_count = len(valid_rides) - len(regional)
@@ -246,25 +240,10 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
         )
 
     extra_sources: list[str] = []
-    if title_override is not None and title_override.strip():
-        # The user's title replaces the place name, so do not consult or credit
-        # the gazetteer for this scene.
-        opening_text = sanitize_display_text(title_override.strip())
-    else:
-        home_place = nearest_place(
-            home_lon,
-            home_lat,
-            max_distance_km=30.0,
-            cache_dir=places_cache_dir,
-            offline=offline,
-        )
-        if home_place is not None and home_place.place.source:
-            extra_sources.append(home_place.place.source)
-        opening_text = (
-            home_place.place.name
-            if home_place is not None
-            else i18n.text("scene3d.rides_count", count=len(regional))
-        )
+    opening_text, home_sources = home_title(
+        (home_lon, home_lat), title_override, i18n.text("scene3d.rides_count", count=len(regional)), cache_dir=places_cache_dir, offline=offline
+    )
+    extra_sources.extend(home_sources)
 
     total_km = sum((r.distance_m if r.distance_m > 0 else r.track.length_m) for r in regional) / 1000.0
     total_gain = sum(max(0.0, r.elevation_gain_m) for r in regional)

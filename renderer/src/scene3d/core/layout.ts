@@ -2,7 +2,7 @@
  * The shared frame layout and type scale of the 3D scenes. Sizes are px at a
  * 1080 px short side: scores multiply layout by `scale` and text by `textScale`.
  */
-import type {MetricItem} from './Typography';
+import type {MetricItem, TextItem} from './Typography';
 
 /**
  * Instagram Story safe area at 1080x1920: the profile row on top and the reply
@@ -63,7 +63,7 @@ export function totalsGrid(
     opacity: number;
     id: string;
   },
-): {items: MetricItem[]; top: number} {
+): {items: MetricItem[]; top: number; bottom: number} {
   const rows = portrait && stats.length === 4 ? 2 : 1;
   const cols = Math.ceil(stats.length / rows);
   // The number size, unless the longest value would not fit its column.
@@ -84,5 +84,54 @@ export function totalsGrid(
     size,
     opacity,
   }));
-  return {items, top: y0};
+  return {items, top: y0, bottom: y0 + blockHeight};
+}
+
+/**
+ * The top row of a collection scene: a live counter on the left, the period
+ * being drawn on the right, and at the end the other totals joining the
+ * counter's row at its size (the first total replaces the live value).
+ */
+export function counterRow(
+  stats: Total[],
+  {id, counter, live, period, x0, x1, top, textScale, counterAlpha, statsAlpha}: {
+    id: string;
+    counter: {label: string; unit: string};
+    live: string;
+    period?: string;
+    x0: number;
+    x1: number;
+    top: number;
+    textScale: number;
+    counterAlpha: number;
+    statsAlpha: number;
+  },
+): TextItem[] {
+  const items: TextItem[] = [];
+  const colW = (x1 - x0) / stats.length;
+  const longest = Math.max(...stats.map((s) => s.value.length + 0.5 * (s.unit?.length ?? 0)), live.length, 1);
+  const size = Math.min(TYPE.number, (0.86 * colW) / textScale / (0.56 * longest + 0.3));
+  if (counterAlpha > 0.004) {
+    items.push({
+      kind: 'metric',
+      id: `${id}-counter`,
+      x: x0,
+      y: top,
+      label: counter.label,
+      value: statsAlpha > 0 ? stats[0].value : live,
+      unit: counter.unit,
+      align: 'left',
+      size,
+      opacity: counterAlpha,
+    });
+    if (period && statsAlpha < 0.996) {
+      items.push({kind: 'caption', id: `${id}-period`, x: x1, y: top, label: period, text: '', align: 'right', opacity: counterAlpha * (1 - statsAlpha)});
+    }
+  }
+  if (statsAlpha > 0.004) {
+    stats.slice(1).forEach((stat, k) => {
+      items.push({kind: 'metric', id: `${id}-stat-${k + 1}`, x: x0 + (k + 1) * colW, y: top, label: stat.label, value: stat.value, unit: stat.unit, align: 'left', size, opacity: statsAlpha});
+    });
+  }
+  return items;
 }

@@ -136,3 +136,30 @@ export function lodFor(track: Track, metersPerPx: number): Uint32Array {
   for (const level of track.lod) if (level.tol <= metersPerPx * 0.6) best = level.idx;
   return best;
 }
+
+/** Running extent of a track from its start: per vertex, the min and max lon and lat so far. */
+type Extent = {lon0: Float64Array; lon1: Float64Array; lat0: Float64Array; lat1: Float64Array};
+const extents = new WeakMap<Track, Extent>();
+
+/** [west, south, east, north] of a track's first `dist` metres. */
+export function extentUpTo(track: Track, dist: number): [number, number, number, number] {
+  let e = extents.get(track);
+  if (!e) {
+    const n = track.n;
+    e = {lon0: new Float64Array(n), lon1: new Float64Array(n), lat0: new Float64Array(n), lat1: new Float64Array(n)};
+    for (let i = 0; i < n; i++) {
+      e.lon0[i] = i ? Math.min(e.lon0[i - 1], track.lon[i]) : track.lon[i];
+      e.lon1[i] = i ? Math.max(e.lon1[i - 1], track.lon[i]) : track.lon[i];
+      e.lat0[i] = i ? Math.min(e.lat0[i - 1], track.lat[i]) : track.lat[i];
+      e.lat1[i] = i ? Math.max(e.lat1[i - 1], track.lat[i]) : track.lat[i];
+    }
+    extents.set(track, e);
+  }
+  const i = indexAtDistance(track, dist);
+  const j = Math.min(track.n - 1, i + 1);
+  const span = track.d[j] - track.d[i];
+  const f = span > 0 ? Math.min(1, Math.max(0, (dist - track.d[i]) / span)) : 0;
+  const lon = track.lon[i] + (track.lon[j] - track.lon[i]) * f;
+  const lat = track.lat[i] + (track.lat[j] - track.lat[i]) * f;
+  return [Math.min(e.lon0[i], lon), Math.min(e.lat0[i], lat), Math.max(e.lon1[i], lon), Math.max(e.lat1[i], lat)];
+}

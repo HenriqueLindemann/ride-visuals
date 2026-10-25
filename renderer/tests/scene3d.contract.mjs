@@ -55,8 +55,9 @@ test('Python 3D directors emit SceneSpecs that validate against sceneSpecSchema 
 import datetime, json, numpy as np
 from ride_visuals.scene3d import (
     FlyoverMetadata, RideTrack, SceneRide,
-    build_flyover_spec, build_strata_spec, build_stretch_spec,
+    build_ascent_spec, build_flyover_spec, build_strata_spec, build_stretch_spec, build_territory_spec,
 )
+from ride_visuals.scene3d.highlights import Highlight
 
 s = np.linspace(0.0, 20000.0, 200)
 lon = 7.77 + (s / 111320.0) * 0.7
@@ -69,6 +70,7 @@ fly = build_flyover_spec(
     metadata=FlyoverMetadata(activity_id=1, name="Test", distance_m=20000.0, elevation_gain_m=360.0, moving_time_s=2500.0),
     fps=10,
     offline=True,
+    highlight=Highlight("Most climbing in a ride yet", ("ascent",)),
 ).to_json()
 
 rides = [
@@ -84,7 +86,9 @@ rides = [
 ]
 stretch = build_stretch_spec(rides, fps=10, toward="49.50,8.40", offline=True).to_json()
 strata = build_strata_spec(rides, fps=10, period="month", offline=True).spec.to_json()
-print(json.dumps([fly, stretch, strata]))
+territory = build_territory_spec(rides, fps=10, offline=True).spec.to_json()
+ascent = build_ascent_spec(rides, fps=10, offline=True).to_json()
+print(json.dumps([fly, stretch, strata, territory, ascent]))
 `;
   const raw = execFileSync(pythonBin, ['-c', script], {
     cwd: repoRoot,
@@ -93,11 +97,11 @@ print(json.dumps([fly, stretch, strata]))
     maxBuffer: 32 * 1024 * 1024,
   });
   const specs = JSON.parse(raw);
-  assert.equal(specs.length, 3);
+  assert.equal(specs.length, 5);
 
   // Every story field a score reads is part of the contract: dropping one
   // from a real director's output fails on load, naming the field.
-  for (const [kind, path] of [['flyover', ['layout', 'topY']], ['stretch', ['counter', 'unit']], ['strata', ['floors', 0, 'value']]]) {
+  for (const [kind, path] of [['flyover', ['layout', 'topY']], ['stretch', ['counter', 'unit']], ['strata', ['floors', 0, 'value']], ['territory', ['rides', 0, 'fresh']], ['ascent', ['heights']]]) {
     const broken = structuredClone(specs.find((s) => s.kind === kind));
     const parent = path.slice(0, -1).reduce((node, key) => node[key], broken.story);
     delete parent[path.at(-1)];

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ride_visuals.i18n import DEFAULT_LOCALE, Translator, sanitize_display_text
+from ride_visuals.i18n import DEFAULT_LOCALE, Translator
 from ride_visuals.scene3d.camera import (
     EARTH_CIRCUMFERENCE_M,
     CameraTrack,
@@ -25,7 +25,7 @@ from ride_visuals.scene3d.places import (
     destination_for_distance,
     great_circle_destination,
     home_cluster,
-    nearest_place,
+    home_title,
 )
 from ride_visuals.scene3d.spec import Look, SceneSpec
 from ride_visuals.scene3d.track import RideTrack, gaussian_smooth, haversine_m, local_xy
@@ -202,25 +202,10 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
     # The total distance is the counter's punchline: the copy never states it
     # ahead of the count, nor repeats it after.
     kicker = i18n.text("scene3d.rides_count", count=len(ordered))
-    if title_override is not None and title_override.strip():
-        # The user's title replaces the place name, so do not consult or credit
-        # the gazetteer for this scene.
-        opening_text = sanitize_display_text(title_override.strip())
-    else:
-        home_place = nearest_place(
-            home_lon,
-            home_lat,
-            max_distance_km=30.0,
-            cache_dir=places_cache_dir,
-            offline=offline,
-        )
-        if home_place is not None and home_place.place.source:
-            extra_sources.append(home_place.place.source)
-        opening_text = (
-            home_place.place.name
-            if home_place is not None
-            else kicker
-        )
+    opening_text, home_sources = home_title(
+        (home_lon, home_lat), title_override, kicker, cache_dir=places_cache_dir, offline=offline
+    )
+    extra_sources.extend(home_sources)
 
     ending_accent: str | None = None
     dest_story = None

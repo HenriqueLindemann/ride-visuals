@@ -3,12 +3,55 @@ import {clamp01, lerp, outCubic} from '../core/ease';
 import type {LngLat} from '../core/geo';
 import {frameMargins, LABEL_GAP, LABEL_LINE, metricHeight, totalsGrid, TYPE} from '../core/layout';
 import {INK, type TextItem} from '../core/Typography';
+import {extentUpTo, type Track} from '../core/track';
 import type {StrataFloor} from '../stories';
 import type {ScoreContext, ScoreOutput} from './index';
 
 /** Clear space between two floor blocks, and between the column and the totals (px at scale 1). */
 const FLOOR_GAP = 10;
 const LABELS_CLEAR_OF_TOTALS = 48;
+
+type Box = [number, number, number, number];
+
+const boxOf = (corners: readonly LngLat[]): Box => [
+  Math.min(...corners.map((c) => c[0])),
+  Math.min(...corners.map((c) => c[1])),
+  Math.max(...corners.map((c) => c[0])),
+  Math.max(...corners.map((c) => c[1])),
+];
+
+/** Smallest plate, and the margin around what it holds, as shares of the whole stack's span. */
+const PLATE_MIN = 0.12;
+const PLATE_PAD = 0.035;
+
+/** Corners of the box around what is drawn of these rides, padded, clamped to `bounds`. */
+function plateFor(drawn: ({track: Track; p: number} | null)[], bounds: Box): [LngLat, LngLat, LngLat, LngLat] {
+  let [w, s, e, n] = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const ride of drawn) {
+    if (!ride) continue;
+    const [w1, s1, e1, n1] = extentUpTo(ride.track, Math.max(0, ride.p) * ride.track.length);
+    w = Math.min(w, w1);
+    s = Math.min(s, s1);
+    e = Math.max(e, e1);
+    n = Math.max(n, n1);
+  }
+  const spanX = bounds[2] - bounds[0];
+  const spanY = bounds[3] - bounds[1];
+  if (!Number.isFinite(w)) [w, s, e, n] = [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2];
+  // Grow a small box evenly to the minimum size, then pad it.
+  const growX = Math.max(0, PLATE_MIN * spanX - (e - w)) / 2 + PLATE_PAD * spanX;
+  const growY = Math.max(0, PLATE_MIN * spanY - (n - s)) / 2 + PLATE_PAD * spanY;
+  const x0 = Math.max(bounds[0], w - growX);
+  const x1 = Math.min(bounds[2], e + growX);
+  const y0 = Math.max(bounds[1], s - growY);
+  const y1 = Math.min(bounds[3], n + growY);
+  return [
+    [x0, y0],
+    [x1, y0],
+    [x1, y1],
+    [x0, y1],
+  ];
+}
 
 export function strataScore({spec, tracks, channel, projector, width, height, scale, textScale}: ScoreContext<'strata'>): ScoreOutput {
   const {story} = spec;
@@ -46,6 +89,7 @@ export function strataScore({spec, tracks, channel, projector, width, height, sc
     alpha: number;
   }[] = [];
 
+  const bounds = boxOf(story.corners);
   story.floors.forEach((floor, k) => {
     const arrive = spec.channels[`floor${k}`] ? channel(`floor${k}`) : 0;
     if (arrive <= 0.001) return;
@@ -61,26 +105,31 @@ export function strataScore({spec, tracks, channel, projector, width, height, sc
       lerp(INK.warmRGB[2], INK.accentRGB[2], tColor),
     ];
 
+    // The period's rides draw one after another; settled floors stay legible,
+    // the floor in focus is brightest, and at the end all floors even out.
+    const n = floor.trackIndices.length;
+    const drawn = floor.trackIndices.map((ti, j) => {
+      const startFrac = n > 1 ? (j / n) * 0.6 : 0;
+      return ti >= 0 && ti < tracks.length ? {track: tracks[ti], p: outCubic(clamp01((drawK - startFrac) / 0.4))} : null;
+    });
+    // Each plate is as large as the period reached in each direction, and
+    // grows with its rides as they draw (within the whole stack's bounds).
+    const plate = plateFor(drawn, bounds);
+
     // Nearly clear plates: the floors below stay visible through them.
     ops.push({
       kind: 'plate',
-      corners: story.corners,
+      corners: plate,
       lift,
       fill: rgba([12, 12, 11], 0.14 * arrive * fade),
       stroke: rgba(INK.paperRGB, lerp(0.16, 0.42, focus) * arrive * fade),
       strokeWidth: lerp(1.0, 1.4, focus) * scale,
     });
 
-    // The period's rides draw one after another; settled floors stay legible,
-    // the floor in focus is brightest, and at the end all floors even out.
-    const n = floor.trackIndices.length;
     const level = Math.max(lerp(0.3, 0.95, focus), 0.8 * final);
-    floor.trackIndices.forEach((ti, j) => {
-      if (ti < 0 || ti >= tracks.length) return;
-      const tr = tracks[ti];
-      const startFrac = n > 1 ? (j / n) * 0.6 : 0;
-      const p = outCubic(clamp01((drawK - startFrac) / 0.4));
-      if (p <= 0) return;
+    drawn.forEach((ride) => {
+      if (!ride || ride.p <= 0) return;
+      const {track: tr, p} = ride;
       const hot = p < 1;
       ops.push({
         kind: 'track',
@@ -92,14 +141,14 @@ export function strataScore({spec, tracks, channel, projector, width, height, sc
         width: (hot ? 2.1 : lerp(1.3, 1.9, Math.max(focus, final))) * scale,
         head: hot ? 0.75 : 0,
         lift,
-        clip: story.corners,
+        clip: plate,
       });
     });
 
     if (labelAlpha > 0.005) {
       let bestX = Infinity;
       let bestY = height * 0.5;
-      for (const [lon, lat] of story.corners) {
+      for (const [lon, lat] of plate) {
         const [px, py, ok] = projector.lngLat(lon, lat, lift);
         if (ok && px < bestX) {
           bestX = px;
@@ -190,5 +239,5 @@ export function strataScore({spec, tracks, channel, projector, width, height, sc
 
   if (statsAlpha > 0.004) texts.push(...totals.items);
 
-  return {ops, texts, black};
+  return {ops, texts, black, scrim: {top: openingAlpha, bottom: statsAlpha}};
 }

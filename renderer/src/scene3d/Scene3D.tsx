@@ -1,6 +1,7 @@
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {AbsoluteFill, cancelRender, continueRender, delayRender, staticFile, useCurrentFrame} from 'remotion';
 import {drawKnockouts, drawOps} from './core/draw';
+import {Scrim} from './core/Scrim';
 import {textScaleFor} from './core/layout';
 import {MapStage} from './core/MapStage';
 import type {Camera, Projector} from './core/projector';
@@ -156,6 +157,7 @@ export const Scene3D = ({specUrl, width, height}: SceneInput) => {
       {scene && camera ? (
         <MapStage spec={scene.spec} frame={frame} camera={camera} width={width} height={height} onProjector={setProjector} />
       ) : null}
+      {output?.scrim ? <Scrim {...output.scrim} /> : null}
       <canvas ref={canvasRef} style={{position: 'absolute', left: 0, top: 0, width, height}} />
       {output ? <Typography ref={textRef} items={output.texts} scale={textScale} /> : null}
       {/* Cinematic vignette: draws the eye to the centre and keeps edges quiet. */}

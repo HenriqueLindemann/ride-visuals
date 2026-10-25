@@ -1,8 +1,8 @@
 import {z} from 'zod';
-import {flyoverStorySchema, strataStorySchema, stretchStorySchema} from './stories';
+import {ascentStorySchema, flyoverStorySchema, strataStorySchema, stretchStorySchema, territoryStorySchema} from './stories';
 
 /**
- * Contract for the 3D scenes (flyover, stretch, strata), written by
+ * Contract for the 3D scenes, written by
  * `src/ride_visuals/scene3d/spec.py`. The Python "director" owns the timing:
  * it sends the camera and every animated scalar ("channel") as one value per
  * frame, so the renderer is a deterministic player and the choreography can be
@@ -66,6 +66,8 @@ export const sceneSpecSchema = z.discriminatedUnion('kind', [
   sceneBaseSchema.extend({kind: z.literal('flyover'), story: flyoverStorySchema}),
   sceneBaseSchema.extend({kind: z.literal('stretch'), story: stretchStorySchema}),
   sceneBaseSchema.extend({kind: z.literal('strata'), story: strataStorySchema}),
+  sceneBaseSchema.extend({kind: z.literal('territory'), story: territoryStorySchema}),
+  sceneBaseSchema.extend({kind: z.literal('ascent'), story: ascentStorySchema}),
 ]);
 
 export type SceneSpec = z.infer<typeof sceneSpecSchema>;

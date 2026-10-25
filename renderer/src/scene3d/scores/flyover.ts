@@ -262,6 +262,7 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
     }
 
     if (statsAlpha > 0.004) {
+      const highlight = spec.channels.highlight ? channel('highlight') : 0;
       const totals = totalsGrid(story.stats, {
         x0,
         x1,
@@ -271,11 +272,30 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
         opacity: statsAlpha,
         id: 'stat',
       });
+      // The figure the highlight is about turns to the accent as the line comes in.
+      totals.items.forEach((item, idx) => {
+        if (story.stats[idx].accent) item.accent = highlight;
+      });
       texts.push(...totals.items);
+      if (story.highlight && highlight > 0.004) {
+        texts.push({
+          kind: 'caption',
+          id: 'highlight',
+          x: 0.5 * (x0 + x1),
+          y: totals.bottom + 44 * textScale,
+          text: story.highlight,
+          size: TYPE.tag,
+          align: 'center',
+          maxWidth: x1 - x0,
+          opacity: highlight,
+        });
+      }
     }
   }
 
-  return {ops, texts, black, knockouts};
+  // Text along the top reads over darkened land while the map is there.
+  const scrimTop = Math.max(titleAlpha, countersAlpha) * (1 - smootherstep(unfold / 0.3));
+  return {ops, texts, black, knockouts, scrim: {top: scrimTop}};
 }
 
 /**
@@ -321,7 +341,7 @@ function climbTrace(
     const xy: number[] = [];
     for (let i = 0; i <= i0; i++) xy.push(xAt(i), yAt(rise[i]));
     xy.push(xAt(at), yAt(gained));
-    ops.push({kind: 'screen-path', xy, rgb: INK.accentRGB, alpha: 0.96 * alpha, width: 2 * scale, head: alpha});
+    ops.push({kind: 'screen-path', xy, rgb: INK.accentRGB, alpha: 0.96 * alpha, width: 2 * scale, head: alpha, smooth: true});
   }
 
   const figure = `+${new Intl.NumberFormat(locale, {maximumFractionDigits: 0}).format(Math.max(0, Math.round(gained)))} m`;

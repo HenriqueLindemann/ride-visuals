@@ -23,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ride_visuals.i18n import sanitize_display_text
 from ride_visuals.scene3d.tiles import USER_AGENT
 from ride_visuals.scene3d.track import EARTH_RADIUS_M, haversine_m
 
@@ -237,6 +238,24 @@ def nearest_place(
     return _nearest_in(load_places(cache_dir, offline=offline), lon, lat, max_distance_km)
 
 
+def home_title(
+    home: tuple[float, float],
+    title_override: str | None,
+    fallback: str,
+    *,
+    cache_dir: Path = DEFAULT_PLACES_CACHE_DIR,
+    offline: bool = False,
+) -> tuple[str, tuple[str, ...]]:
+    """Opening headline of a collection scene and its credited sources: the user's title, else home's town."""
+    if title_override is not None and title_override.strip():
+        # The user's title replaces the place name: the gazetteer is neither consulted nor credited.
+        return sanitize_display_text(title_override.strip()), ()
+    match = nearest_place(home[0], home[1], max_distance_km=30.0, cache_dir=cache_dir, offline=offline)
+    if match is None:
+        return fallback, ()
+    return match.place.name, (match.place.source,) if match.place.source else ()
+
+
 def _parse_lat_lon(text: str) -> tuple[float, float] | None:
     parts = [part.strip() for part in text.split(",")]
     if len(parts) != 2:
@@ -387,6 +406,18 @@ def destination_for_distance(  # noqa: PLR0913
         distance_m=float(dists[best_idx]),
         bearing_deg=great_circle_bearing(origin_lon, origin_lat, chosen.lon, chosen.lat),
     )
+
+
+#: Rides starting farther than this from home belong to another region.
+HOME_REGION_RADIUS_M = 150_000.0
+
+
+def home_region(starts: Sequence[tuple[float, float]]) -> tuple[tuple[float, float], np.ndarray]:
+    """Home (see home_cluster) and which of the start points lie within HOME_REGION_RADIUS_M of it."""
+    home = home_cluster(starts)
+    pts = np.asarray(starts, dtype=float)
+    dists = haversine_m(np.full(len(pts), home[0]), np.full(len(pts), home[1]), pts[:, 0], pts[:, 1])
+    return home, dists <= HOME_REGION_RADIUS_M
 
 
 def home_cluster(starts: Sequence[tuple[float, float]]) -> tuple[float, float]:

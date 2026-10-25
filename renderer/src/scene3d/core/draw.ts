@@ -1,4 +1,4 @@
-import {destination, type LngLat, mercX, mercY} from './geo';
+import {destination, EARTH_CIRCUMFERENCE, type LngLat, mercX, mercY} from './geo';
 import type {Projector} from './projector';
 import {indexAtDistance, lodFor, type Track} from './track';
 
@@ -16,18 +16,30 @@ export type TrackOp = {
   width: number;
   /** 0..1: position marker at the `to` end. */
   head?: number;
+  /** A plain paper dot of this radius (px) instead of the accent marker, for many heads at once. */
+  dot?: number;
   /** Height above the map in metres (unscaled), e.g. a stacked plate. */
   lift?: number;
+  /** Lifted further the nearer it runs to a peak (see Tent). */
+  tent?: Tent;
   /** Sit on the rendered relief and hide what the relief hides from the camera. */
   occlude?: boolean;
   /** Cut the line at this lifted polygon (e.g. the plate it lies on). */
   clip?: readonly LngLat[];
 };
 
+/** The map pulled up at `center` to `height` metres: a point `r` metres away is lifted `height * exp(-r / width)`. */
+export type Tent = {center: LngLat; height: number; width: number};
+
+/** Metres per Web Mercator unit at a latitude. */
+const mercMeters = (lat: number) => EARTH_CIRCUMFERENCE * Math.cos((lat * Math.PI) / 180);
+
 /** A free geographic polyline computed per frame (e.g. a ride pulled straight). */
 export type PathOp = {
   kind: 'path';
   pts: LngLat[];
+  /** Height of each point above the map (m). */
+  lifts?: number[];
   rgb: RGB;
   alpha: number;
   width: number;
@@ -48,6 +60,8 @@ export type ScreenPathOp = {
   dash?: number[];
   /** 0..1: position marker at the last point. */
   head?: number;
+  /** Curve through the midpoints of the segments instead of joining the points with corners. */
+  smooth?: boolean;
 };
 
 /**
@@ -84,11 +98,37 @@ export type PlateOp = {
 };
 
 /** A circle on the ground (metres), e.g. the reach of a collection. */
-export type RingOp = {kind: 'ring'; center: LngLat; radius: number; rgb: RGB; alpha: number; width: number; dash?: number[]};
+export type RingOp = {
+  kind: 'ring';
+  center: LngLat;
+  radius: number;
+  rgb: RGB;
+  alpha: number;
+  width: number;
+  dash?: number[];
+  /** Height above the map (m): a level in the air. */
+  lift?: number;
+  /** 0..1: drawn on both ways from its screen-rightmost point, closing at the far side. */
+  sweep?: number;
+};
 
-export type DrawOp = TrackOp | PathOp | ScreenPathOp | StemOp | DotOp | PulseOp | PlateOp | RingOp;
+/**
+ * Stretches of many flat-drawn tracks stroked as one path, so where they meet
+ * or touch the alpha does not double up: one even layer (e.g. a territory).
+ */
+export type SlicesOp = {
+  kind: 'slices';
+  slices: Pick<TrackOp, 'track' | 'from' | 'to' | 'tent'>[];
+  rgb: RGB;
+  alpha: number;
+  width: number;
+};
+
+export type DrawOp = TrackOp | PathOp | ScreenPathOp | StemOp | DotOp | PulseOp | PlateOp | RingOp | SlicesOp;
 
 const tmp = new Float64Array(3);
+
+export const mixRGB = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
 export const rgba = (c: RGB, a: number) => `rgba(${c[0]},${c[1]},${c[2]},${Math.max(0, Math.min(1, a))})`;
 
@@ -103,7 +143,12 @@ function traceTrack(p: Projector, op: TrackOp): Traced {
   const idx = lodFor(t, p.resolution);
   const i0 = indexAtDistance(t, from);
   const i1 = indexAtDistance(t, to);
-  const lift = op.lift ?? 0;
+  const base = op.lift ?? 0;
+  const tent = op.tent;
+  const cx = tent ? mercX(tent.center[0]) : 0;
+  const cy = tent ? mercY(tent.center[1]) : 0;
+  const unit = tent ? mercMeters(tent.center[1]) : 0;
+  const liftAt = (mx: number, my: number) => (tent ? base + tent.height * Math.exp(-(Math.hypot(mx - cx, my - cy) * unit) / tent.width) : base);
   const relief = op.occlude ? p.onRelief : undefined;
   // With occlusion, keep (x, y, depth) per vertex for perspective tapering;
   // NaN marks a break where the relief hides the line.
@@ -112,7 +157,8 @@ function traceTrack(p: Projector, op: TrackOp): Traced {
   let any = false;
   let lastX = 0;
   let lastY = 0;
-  const emit = (mx: number, my: number) => {
+  const plot = (mx: number, my: number) => {
+    const lift = liftAt(mx, my);
     const ok = relief ? relief(mx, my, lift, tmp) === 1 : p.merc(mx, my, lift, tmp);
     if (!ok) {
       if (pen && pts) pts.push(NaN, NaN, NaN);
@@ -134,6 +180,19 @@ function traceTrack(p: Projector, op: TrackOp): Traced {
     lastY = y;
     any = true;
   };
+  // Near a tent's peak a straight run is lifted along a curve: split it finely enough to follow.
+  let prevX = NaN;
+  let prevY = NaN;
+  const emit = (mx: number, my: number) => {
+    if (tent && !Number.isNaN(prevX)) {
+      const near = Math.min(Math.hypot(prevX - cx, prevY - cy), Math.hypot(mx - cx, my - cy)) * unit;
+      const steps = near < 6 * tent.width ? Math.min(48, Math.floor((Math.hypot(mx - prevX, my - prevY) * unit * 8) / tent.width)) : 0;
+      for (let s = 1; s < steps; s++) plot(prevX + ((mx - prevX) * s) / steps, prevY + ((my - prevY) * s) / steps);
+    }
+    plot(mx, my);
+    prevX = mx;
+    prevY = my;
+  };
   const at = (i: number, dist: number): [number, number] => {
     const j = Math.min(t.n - 1, i + 1);
     const spanM = t.d[j] - t.d[i];
@@ -151,6 +210,7 @@ function traceTrack(p: Projector, op: TrackOp): Traced {
   for (let k = lo; k < idx.length && idx[k] <= i1; k++) emit(t.mx[idx[k]], t.my[idx[k]]);
   // Always land exactly on the head, even within the dedupe threshold.
   const [hx, hy] = at(i1, to);
+  const lift = liftAt(hx, hy);
   const ok = relief ? relief(hx, hy, lift, tmp) === 1 : p.merc(hx, hy, lift, tmp);
   const head: [number, number] | null = ok ? [tmp[0], tmp[1]] : null;
   if (head && pen) {
@@ -272,15 +332,39 @@ function drawTrack(ctx: CanvasRenderingContext2D, p: Projector, op: TrackOp) {
     ctx.lineWidth = op.width;
     ctx.stroke(path);
   }
-  if (head && op.head) drawHead(ctx, head[0], head[1], op.rgb, op.head * Math.min(1, op.alpha * 1.4));
+  if (head && op.head) {
+    if (op.dot) {
+      ctx.fillStyle = rgba([255, 252, 247], op.head);
+      ctx.beginPath();
+      ctx.arc(head[0], head[1], op.dot, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      drawHead(ctx, head[0], head[1], op.rgb, op.head * Math.min(1, op.alpha * 1.4));
+    }
+  }
+}
+
+function drawSlices(ctx: CanvasRenderingContext2D, p: Projector, op: SlicesOp) {
+  const all = new Path2D();
+  let any = false;
+  for (const slice of op.slices) {
+    const traced = traceTrack(p, {...slice, kind: 'track', rgb: op.rgb, alpha: 1, width: op.width});
+    if (!traced.any) continue;
+    all.addPath(traced.path);
+    any = true;
+  }
+  if (!any) return;
+  ctx.strokeStyle = rgba(op.rgb, op.alpha);
+  ctx.lineWidth = op.width;
+  ctx.stroke(all);
 }
 
 function drawPath(ctx: CanvasRenderingContext2D, p: Projector, op: PathOp) {
   const path = new Path2D();
   let pen = false;
   let last: [number, number] | null = null;
-  for (const [lon, lat] of op.pts) {
-    const [x, y, ok] = p.lngLat(lon, lat);
+  for (const [i, [lon, lat]] of op.pts.entries()) {
+    const [x, y, ok] = p.lngLat(lon, lat, op.lifts?.[i]);
     if (!ok) {
       pen = false;
       last = null;
@@ -297,6 +381,17 @@ function drawPath(ctx: CanvasRenderingContext2D, p: Projector, op: PathOp) {
   if (last && op.head) drawHead(ctx, last[0], last[1], op.rgb, op.head * Math.min(1, op.alpha * 1.4));
 }
 
+/** The polyline as quadratic curves through its segment midpoints, ending on the exact end points. */
+function smoothPath(ctx: CanvasRenderingContext2D | Path2D, xy: number[], first: boolean) {
+  const n = xy.length / 2;
+  if (first) ctx.moveTo(xy[0], xy[1]);
+  else ctx.lineTo(xy[0], xy[1]);
+  for (let i = 1; i < n - 1; i++) {
+    ctx.quadraticCurveTo(xy[i * 2], xy[i * 2 + 1], 0.5 * (xy[i * 2] + xy[i * 2 + 2]), 0.5 * (xy[i * 2 + 1] + xy[i * 2 + 3]));
+  }
+  ctx.lineTo(xy[(n - 1) * 2], xy[(n - 1) * 2 + 1]);
+}
+
 function drawScreenPath(ctx: CanvasRenderingContext2D, op: ScreenPathOp) {
   const n = op.xy.length / 2;
   if (n < 2) return;
@@ -309,7 +404,8 @@ function drawScreenPath(ctx: CanvasRenderingContext2D, op: ScreenPathOp) {
     ctx.fillStyle = gradient;
     ctx.beginPath();
     ctx.moveTo(op.xy[0], op.fillTo);
-    for (let i = 0; i < n; i++) ctx.lineTo(op.xy[i * 2], op.xy[i * 2 + 1]);
+    if (op.smooth) smoothPath(ctx, op.xy, false);
+    else for (let i = 0; i < n; i++) ctx.lineTo(op.xy[i * 2], op.xy[i * 2 + 1]);
     ctx.lineTo(op.xy[(n - 1) * 2], op.fillTo);
     ctx.closePath();
     ctx.fill();
@@ -319,8 +415,11 @@ function drawScreenPath(ctx: CanvasRenderingContext2D, op: ScreenPathOp) {
     ctx.strokeStyle = rgba(op.rgb, op.alpha);
     ctx.lineWidth = op.width;
     ctx.beginPath();
-    ctx.moveTo(op.xy[0], op.xy[1]);
-    for (let i = 1; i < n; i++) ctx.lineTo(op.xy[i * 2], op.xy[i * 2 + 1]);
+    if (op.smooth) smoothPath(ctx, op.xy, true);
+    else {
+      ctx.moveTo(op.xy[0], op.xy[1]);
+      for (let i = 1; i < n; i++) ctx.lineTo(op.xy[i * 2], op.xy[i * 2 + 1]);
+    }
     ctx.stroke();
     ctx.setLineDash([]);
   }
@@ -388,23 +487,59 @@ function drawPlate(ctx: CanvasRenderingContext2D, p: Projector, op: PlateOp) {
   ctx.stroke();
 }
 
+type ProjectedRing = {xy: ([number, number] | null)[]; left: number; right: number};
+
+const RING_STEPS = 180;
+
+/** A circle `radius` metres round `center`, `lift` metres up, on screen: its points and leftmost/rightmost ones. */
+function projectRing(p: Projector, center: LngLat, radius: number, lift = 0): ProjectedRing {
+  const xy: ProjectedRing['xy'] = [];
+  let left = -1;
+  let right = -1;
+  for (let i = 0; i < RING_STEPS; i++) {
+    const [lon, lat] = destination(center, (i * 360) / RING_STEPS, radius);
+    const [x, y, ok] = p.lngLat(lon, lat, lift);
+    xy.push(ok ? [x, y] : null);
+    if (!ok) continue;
+    if (left < 0 || x < xy[left]![0]) left = i;
+    if (right < 0 || x > xy[right]![0]) right = i;
+  }
+  return {xy, left, right};
+}
+
+/** The screen-leftmost and rightmost points of a lifted circle (null when not drawn). */
+export function ringEdges(p: Projector, center: LngLat, radius: number, lift = 0) {
+  const {xy, left, right} = projectRing(p, center, radius, lift);
+  return {left: left < 0 ? null : xy[left], right: right < 0 ? null : xy[right]};
+}
+
 function drawRing(ctx: CanvasRenderingContext2D, p: Projector, op: RingOp) {
+  const {xy, right} = projectRing(p, op.center, op.radius, op.lift);
+  if (right < 0) return;
+  // Both ends run from the rightmost point round to meet at the far side,
+  // the last step cut short so the sweep glides.
+  const reach = Math.max(0, Math.min(1, op.sweep ?? 1)) * (RING_STEPS / 2);
+  const at = (k: number) => xy[(((right + k) % RING_STEPS) + RING_STEPS) % RING_STEPS];
   const path = new Path2D();
-  let pen = false;
-  for (let i = 0; i <= 180; i++) {
-    const [lon, lat] = destination(op.center, i * 2, op.radius);
-    const [x, y, ok] = p.lngLat(lon, lat);
-    if (!ok) {
-      pen = false;
-      continue;
+  for (const dir of [1, -1]) {
+    let pen = false;
+    for (let k = 0; k <= Math.ceil(reach); k++) {
+      let pt = at(dir * k);
+      const prev = at(dir * (k - 1));
+      if (pt && prev && k > reach) pt = [prev[0] + (pt[0] - prev[0]) * (reach - k + 1), prev[1] + (pt[1] - prev[1]) * (reach - k + 1)];
+      if (!pt) {
+        pen = false;
+        continue;
+      }
+      if (!pen) path.moveTo(pt[0], pt[1]);
+      else path.lineTo(pt[0], pt[1]);
+      pen = true;
     }
-    if (!pen) path.moveTo(x, y);
-    else path.lineTo(x, y);
-    pen = true;
   }
   ctx.setLineDash(op.dash ?? []);
   ctx.strokeStyle = rgba(op.rgb, op.alpha);
   ctx.lineWidth = op.width;
+  ctx.lineCap = 'round';
   ctx.stroke(path);
   ctx.setLineDash([]);
 }
@@ -423,6 +558,7 @@ export function drawOps(ctx: CanvasRenderingContext2D, p: Projector, ops: DrawOp
     else if (op.kind === 'stem') drawStem(ctx, p, op);
     else if (op.kind === 'plate') drawPlate(ctx, p, op);
     else if (op.kind === 'ring') drawRing(ctx, p, op);
+    else if (op.kind === 'slices') drawSlices(ctx, p, op);
     else if (op.kind === 'dot') {
       const visible = op.occlude && p.onRelief
         ? p.onRelief(mercX(op.at[0]), mercY(op.at[1]), op.lift ?? 0, tmp) === 1

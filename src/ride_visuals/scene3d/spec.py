@@ -14,7 +14,7 @@ from ride_visuals.scene3d.camera import CameraTrack
 from ride_visuals.scene3d.tiles import TILE_SOURCES
 
 SCENE_SPEC_VERSION = "1.0"
-SceneKind = Literal["flyover", "stretch", "strata"]
+SceneKind = Literal["flyover", "stretch", "strata", "territory", "ascent"]
 Look = Literal["carbon", "satellite"]
 
 

@@ -23,6 +23,8 @@ const stat = z.object({
   label: z.string(),
   value: z.string(),
   unit: optional(z.string()),
+  /** The figure a closing highlight is about: its value takes the accent. */
+  accent: optional(z.boolean()),
 });
 
 export const flyoverClimbSchema = z.object({
@@ -82,6 +84,8 @@ export const flyoverStorySchema = z.object({
   peakFraction: z.number(),
   climbs: z.array(flyoverClimbSchema),
   stats: z.array(stat),
+  /** One closing line on where the ride stands among the others (opt-in, often absent). */
+  highlight: optional(z.string()),
 });
 
 export const stretchStorySchema = z.object({
@@ -130,10 +134,61 @@ export const strataStorySchema = z.object({
   stats: z.array(stat),
 });
 
+export const territoryStorySchema = z.object({
+  home: lngLat,
+  rides: z.array(
+    z.object({
+      trackIndex: z.number().int(),
+      /** When the ride starts drawing, and for how long (s). */
+      t0: z.number(),
+      dur: z.number(),
+      /** Stretches (m along the ride) on roads never ridden before. */
+      fresh: z.array(z.tuple([z.number(), z.number()])),
+      /** Its month, shown while it is drawn. */
+      period: z.string(),
+      /** Per new stretch, per equal piece of it: when the piece reaches each next wear level (s). */
+      wear: z.array(z.array(z.array(z.number()))).default([]),
+    }),
+  ),
+  /** Rides over a piece at each wear level (the first is 1). */
+  wearCounts: z.array(z.number()).default([1]),
+  opening: heading.extend({label: z.string()}),
+  counter: z.object({label: z.string(), unit: z.string()}),
+  stats: z.array(stat),
+});
+
+export const ascentStorySchema = z.object({
+  home: lngLat,
+  rides: z.array(
+    z.object({
+      /** tracks[k] is rides[k]. Drawn from t0 for dur (s), while the counter takes its climbing. */
+      t0: z.number(),
+      dur: z.number(),
+      /** Ridden away from home: moved to start there, kept off the map. */
+      away: z.boolean(),
+      period: z.string(),
+    }),
+  ),
+  /** Each year's stretch of the line ends at `to` (m), complete at `t` (s); multi-year only. */
+  years: z.array(z.object({to: z.number(), t: z.number(), label: z.string()})),
+  /**
+   * Known heights the line passes: drawn from t0, reached at t. With an outline (strokes of [right of home, up] m,
+   * facing the camera) a thing standing beside the line; without, a level round it.
+   */
+  heights: z.array(
+    z.object({at: z.number(), outline: z.array(z.array(z.tuple([z.number(), z.number()]))), t0: z.number(), t: z.number(), name: z.string(), value: z.string()}),
+  ),
+  opening: heading.extend({label: z.string()}),
+  counter: z.object({label: z.string(), unit: z.string()}),
+  stats: z.array(stat),
+});
+
 export const storySchemas = {
   flyover: flyoverStorySchema,
   stretch: stretchStorySchema,
   strata: strataStorySchema,
+  territory: territoryStorySchema,
+  ascent: ascentStorySchema,
 } as const;
 
 export type FlyoverClimb = z.infer<typeof flyoverClimbSchema>;
@@ -144,3 +199,5 @@ export type StretchStory = z.infer<typeof stretchStorySchema>;
 export type StretchRideMeta = StretchStory['rides'][number];
 export type StrataStory = z.infer<typeof strataStorySchema>;
 export type StrataFloor = StrataStory['floors'][number];
+export type TerritoryStory = z.infer<typeof territoryStorySchema>;
+export type AscentStory = z.infer<typeof ascentStorySchema>;

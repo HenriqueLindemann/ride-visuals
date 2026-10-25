@@ -18,6 +18,7 @@ from ride_visuals.commands.options import (
     MAP_DETAILS,
     OVERLAY_FORMATS,
     SCENE3D_LOOKS,
+    SCENE3D_TYPES,
     STRATA_PERIODS,
     THEMES,
     VIDEO_ASPECTS,
@@ -194,7 +195,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--look",
         choices=SCENE3D_LOOKS,
         default="carbon",
-        help="3D cartographic look: carbon or satellite (for flyover, stretch, strata)",
+        help="3D scenes: carbon or satellite look",
     )
     parser.add_argument(
         "--toward",
@@ -218,6 +219,18 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     parser.add_argument(
+        "--highlight",
+        action="store_true",
+        help="video flyover: closing line when the ride stands out (a record, a first)",
+    )
+    parser.add_argument(
+        "--stills",
+        type=str,
+        default=None,
+        metavar="SECONDS",
+        help="3D scenes: render PNGs at these seconds (e.g. 4,22.5) instead of the video",
+    )
+    parser.add_argument(
         "--offline",
         action="store_true",
         help="3D scenes: render from cached map tiles only (no prefetch, no downloads)",
@@ -233,7 +246,7 @@ def run(args: argparse.Namespace) -> None:
     if getattr(args, "minimal", False) and args.video_type == "telemetry":
         args.video_type = "minimal"
     context = VideoCommandContext.from_args(args)
-    if args.video_type in {"flyover", "stretch", "strata"}:
+    if args.video_type in SCENE3D_TYPES:
         from ride_visuals.commands.video_scene3d import render_scene3d
 
         return render_scene3d(context)

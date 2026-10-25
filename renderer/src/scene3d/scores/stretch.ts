@@ -220,5 +220,5 @@ export function stretchScore({spec, tracks, channel, projector, width, height, s
     });
   }
 
-  return {ops, texts, black};
+  return {ops, texts, black, scrim: {top: Math.max(openingAlpha, counterAlpha, endingAlpha) * fade}};
 }

@@ -52,7 +52,9 @@ interface InternalMap {
   terrain?: {
     getElevationForLngLat: (lngLat: maplibregl.LngLat, transform: unknown) => number;
     /** Rendered DEM tiles; `maxElevation` is exaggerated metres plus a small pad. */
-    getCoverageIndex?: () => {maxElevation: number} | null;
+    getCoverageIndex?: () => {maxElevation: number; zooms: number[]; samplerPerTile: Map<string, unknown>} | null;
+    getElevationForLngLatZoom: (lngLat: maplibregl.LngLat, zoom: number) => number;
+    tileManager: {minzoom: number; maxzoom: number};
   };
   _camera?: {transform?: {isLocationOccluded?: (lngLat: maplibregl.LngLat) => boolean}};
 }
@@ -115,10 +117,37 @@ function makeRelief(
   const eyeY = inv[9] / ew;
   const eyeZ = inv[10] / ew;
   const probe = new maplibregl.LngLat(0, 0);
+  // Off the rendered tiles, getElevationForLngLat re-covers the screen on every
+  // call (~0.2 ms); its fallback zoom only depends on the frame, so find it once.
+  let fallbackZoom = -1;
+  const fallbackZ = () => {
+    if (fallbackZoom < 0) {
+      const {minzoom, maxzoom} = terrain.tileManager;
+      let zoom = 0;
+      for (const tile of map.coveringTiles({maxzoom, minzoom, tileSize: 512, terrain} as never)) {
+        if (tile.canonical.z > zoom) zoom = Math.min(tile.canonical.z, maxzoom);
+      }
+      fallbackZoom = zoom;
+    }
+    return fallbackZoom;
+  };
   const ground = (mx: number, my: number) => {
     probe.lng = mx * 360 - 180;
     probe.lat = unmercLat(my);
-    return terrain.getElevationForLngLat(probe, transform);
+    const index = terrain.getCoverageIndex?.();
+    const merc = index ? maplibregl.MercatorCoordinate.fromLngLat(probe) : null;
+    if (index && merc && merc.y >= 0 && merc.y < 1) {
+      const wrap = Math.floor(merc.x);
+      const wrappedX = merc.x - wrap;
+      for (const z of index.zooms) {
+        const scale = 1 << z;
+        const key = `${wrap}/${z}/${Math.floor(wrappedX * scale)}/${Math.floor(merc.y * scale)}`;
+        if (!index.samplerPerTile.has(key)) continue;
+        if (index.samplerPerTile.get(key)) return terrain.getElevationForLngLat(probe, transform);
+        break;
+      }
+    }
+    return terrain.getElevationForLngLatZoom(probe, fallbackZ());
   };
   const metersPerWorldPx = (my: number) =>
     (EARTH_CIRCUMFERENCE * Math.cos((unmercLat(my) * Math.PI) / 180)) / worldSize;
