@@ -50,5 +50,10 @@ The 3D scenes use:
 
 Each output's `.credits.txt` sidecar lists exactly the sources it used.
 
+`video ascent` draws landmarks at true scale: the Eiffel Tower from a silhouette by
+GDJ ([openclipart](https://openclipart.org), CC0), the Burj Khalifa from a profile by
+MJBurrage ([Wikimedia Commons](https://commons.wikimedia.org), public domain), Fuji and
+Everest from Mapzen Terrain Tiles skylines.
+
 This source repository does not include third-party packages, FFmpeg, fonts,
 map tiles, or generated media.

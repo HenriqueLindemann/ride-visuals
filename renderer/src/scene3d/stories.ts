@@ -2,10 +2,10 @@ import {z} from 'zod';
 
 /**
  * Per-kind `story` contracts, written by the Python directors (flyover.py,
- * stretch.py, strata.py). The scene loader parses the story of its kind, so a
- * renamed or missing field fails on load with its path instead of drawing
- * `undefined` somewhere in the middle of a render. Optional facts arrive as
- * `null` from Python and are read as `undefined`.
+ * stretch.py, strata.py, territory.py, ascent.py). The scene loader parses the
+ * story of its kind, so a renamed or missing field fails on load with its path
+ * instead of drawing `undefined` somewhere in the middle of a render. Optional
+ * facts arrive as `null` from Python and are read as `undefined`.
  */
 
 const lngLat = z.tuple([z.number(), z.number()]);
@@ -157,27 +157,50 @@ export const territoryStorySchema = z.object({
   stats: z.array(stat),
 });
 
+const ascentSpan = z.object({label: z.string(), x: z.tuple([z.number(), z.number()]), z: z.tuple([z.number(), z.number()]), value: z.string(), t: z.number()});
+
 export const ascentStorySchema = z.object({
   home: lngLat,
+  /** The profile stands in the vertical plane through home toward `axis` (deg); `scale` plane metres per metre ridden. */
+  axis: z.number(),
+  scale: z.number(),
+  /** Every ride's climbing over its distance, chained: plane x and height (m), delta-coded in decimetres. */
+  profile: z.object({x: z.array(z.number()), z: z.array(z.number())}),
   rides: z.array(
     z.object({
-      /** tracks[k] is rides[k]. Drawn from t0 for dur (s), while the counter takes its climbing. */
-      t0: z.number(),
-      dur: z.number(),
-      /** Ridden away from home: moved to start there, kept off the map. */
-      away: z.boolean(),
+      /** Where its climbing starts on the profile (plane m). */
+      x0: z.number(),
+      /** tracks[track] is the ride on the map; absent when ridden away from home. */
+      track: optional(z.number().int()),
       period: z.string(),
     }),
   ),
-  /** Each year's stretch of the line ends at `to` (m), complete at `t` (s); multi-year only. */
-  years: z.array(z.object({to: z.number(), t: z.number(), label: z.string()})),
+  /** Each year or month: its stretch of the profile [x0, x1], heights [z0, z1], climbing, and when done. */
+  periods: z.array(ascentSpan),
+  /** Months over several years: the years they fall in, named in their place. */
+  groups: z.array(ascentSpan),
   /**
-   * Known heights the line passes: drawn from t0, reached at t. With an outline (strokes of [right of home, up] m,
-   * facing the camera) a thing standing beside the line; without, a level round it.
+   * Known heights the line passes, left of home at true scale: drawn from t0, reached at t. Strokes are [x, z] in the
+   * plane: a building's outline, a mountain's skyline, or a level (one stroke from its far end to where it is crossed).
    */
   heights: z.array(
-    z.object({at: z.number(), outline: z.array(z.array(z.tuple([z.number(), z.number()]))), t0: z.number(), t: z.number(), name: z.string(), value: z.string()}),
+    z.object({
+      key: z.string(),
+      at: z.number(),
+      shape: z.enum(['outline', 'skyline', 'level']),
+      strokes: z.array(z.array(z.tuple([z.number(), z.number()]))),
+      t0: z.number(),
+      t: z.number(),
+      /** When its name comes in: one name at a time, each given time to be read. */
+      named: z.number(),
+      /** A level's emblem, too small for true scale: a side view in metres, nose at x=0, axis at z=0. */
+      glyph: optional(z.array(z.array(z.tuple([z.number(), z.number()])))),
+      name: z.string(),
+      value: z.string(),
+    }),
   ),
+  /** Folded, the line is ruled in the last thing's height `at`, `count` times over (an Everesting count). */
+  ruler: optional(z.object({at: z.number(), count: z.number().int()})),
   opening: heading.extend({label: z.string()}),
   counter: z.object({label: z.string(), unit: z.string()}),
   stats: z.array(stat),

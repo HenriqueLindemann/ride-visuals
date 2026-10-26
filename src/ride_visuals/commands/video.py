@@ -18,8 +18,8 @@ from ride_visuals.commands.options import (
     MAP_DETAILS,
     OVERLAY_FORMATS,
     SCENE3D_LOOKS,
+    SCENE3D_PERIODS,
     SCENE3D_TYPES,
-    STRATA_PERIODS,
     THEMES,
     VIDEO_ASPECTS,
     VIDEO_TYPES,
@@ -205,9 +205,15 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     parser.add_argument(
         "--period",
-        choices=STRATA_PERIODS,
+        choices=SCENE3D_PERIODS,
         default="auto",
-        help="Stacking period for video strata (auto, month, or year)",
+        help="Period for video strata and ascent (auto, month, or year)",
+    )
+    parser.add_argument(
+        "--home",
+        type=str,
+        default=None,
+        help="3D scenes: home as a place or 'lat,lon' (default: where most rides start)",
     )
     parser.add_argument(
         "--concurrency",

@@ -16,7 +16,7 @@ import json
 import math
 import urllib.request
 import zipfile
-from collections import Counter
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -256,7 +256,7 @@ def home_title(
     return match.place.name, (match.place.source,) if match.place.source else ()
 
 
-def _parse_lat_lon(text: str) -> tuple[float, float] | None:
+def _parse_lat_lon(text: str, option: str = "--toward") -> tuple[float, float] | None:
     parts = [part.strip() for part in text.split(",")]
     if len(parts) != 2:
         return None
@@ -266,7 +266,7 @@ def _parse_lat_lon(text: str) -> tuple[float, float] | None:
     except ValueError:
         return None
     if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
-        raise ValueError(f"Coordinates out of range in --toward: {text!r}")
+        raise ValueError(f"Coordinates out of range in {option}: {text!r}")
     return lon, lat
 
 
@@ -412,28 +412,36 @@ def destination_for_distance(  # noqa: PLR0913
 HOME_REGION_RADIUS_M = 150_000.0
 
 
-def home_region(starts: Sequence[tuple[float, float]]) -> tuple[tuple[float, float], np.ndarray]:
-    """Home (see home_cluster) and which of the start points lie within HOME_REGION_RADIUS_M of it."""
-    home = home_cluster(starts)
+def home_region(
+    starts: Sequence[tuple[float, float]],
+    *,
+    home: tuple[float, float] | None = None,
+    weights: Sequence[float] | None = None,
+) -> tuple[tuple[float, float], np.ndarray]:
+    """Home (given, else see home_cluster) and which of the start points lie within HOME_REGION_RADIUS_M of it."""
+    home = home or home_cluster(starts, weights)
     pts = np.asarray(starts, dtype=float)
     dists = haversine_m(np.full(len(pts), home[0]), np.full(len(pts), home[1]), pts[:, 0], pts[:, 1])
     return home, dists <= HOME_REGION_RADIUS_M
 
 
-def home_cluster(starts: Sequence[tuple[float, float]]) -> tuple[float, float]:
-    """Median (lon, lat) of the densest ~2 km cluster of ride start points."""
+def home_cluster(starts: Sequence[tuple[float, float]], weights: Sequence[float] | None = None) -> tuple[float, float]:
+    """Median (lon, lat) of the densest ~2 km cluster of ride start points (each start counts its weight, else 1)."""
     if not starts:
         raise ValueError("Cannot compute home cluster from an empty ride list")
     pts = np.asarray(starts, dtype=float)
     if len(pts) == 1:
         return float(pts[0, 0]), float(pts[0, 1])
+    w = np.ones(len(pts)) if weights is None else np.maximum(np.asarray(weights, dtype=float), 0.0) + 1e-6
     cell_lat = np.round(pts[:, 1] / 0.02).astype(int)
     cos_lat = np.maximum(0.1, np.cos(np.radians(pts[:, 1])))
     cell_lon = np.round(pts[:, 0] * cos_lat / 0.02).astype(int)
-    counts = Counter(zip(cell_lon.tolist(), cell_lat.tolist(), strict=True))
+    counts: dict[tuple[int, int], float] = defaultdict(float)
+    for key, weight in zip(zip(cell_lon.tolist(), cell_lat.tolist(), strict=True), w.tolist(), strict=True):
+        counts[key] += weight
     best_cell: tuple[int, int] | None = None
-    best_score = -1
-    for cx, cy in counts:
+    best_score = -1.0
+    for cx, cy in list(counts):
         score = sum(
             counts.get((cx + dx, cy + dy), 0)
             for dx in (-1, 0, 1)
@@ -446,3 +454,34 @@ def home_cluster(starts: Sequence[tuple[float, float]]) -> tuple[float, float]:
     mask = (np.abs(cell_lon - best_cell[0]) <= 1) & (np.abs(cell_lat - best_cell[1]) <= 1)
     cluster = pts[mask]
     return float(np.median(cluster[:, 0])), float(np.median(cluster[:, 1]))
+
+
+#: A home given by name settles on the most common start within this distance of it.
+HOME_SNAP_M = 25_000.0
+
+
+def resolve_home(
+    text: str,
+    starts: Sequence[tuple[float, float]],
+    weights: Sequence[float] | None = None,
+    *,
+    cache_dir: Path = DEFAULT_PLACES_CACHE_DIR,
+    offline: bool = False,
+) -> tuple[float, float]:
+    """``--home``: 'lat,lon' exactly, or a place, settled on the most common start near it."""
+    coords = _parse_lat_lon(text.strip(), option="--home")
+    if coords is not None:
+        return coords
+    candidates = _match_named_place(load_places(cache_dir, offline=offline), text) or _match_named_place(
+        load_towns(cache_dir, offline=offline), text
+    )
+    if not candidates:
+        raise ValueError(f"Unknown place for --home: {text!r}")
+    place = max(candidates, key=lambda p: (p.pop_max, -p.scalerank))
+    pts = np.asarray(starts, dtype=float).reshape(-1, 2)
+    near = haversine_m(np.full(len(pts), place.lon), np.full(len(pts), place.lat), pts[:, 0], pts[:, 1]) <= HOME_SNAP_M
+    if not near.any():
+        return place.lon, place.lat
+    return home_cluster(
+        [tuple(pt) for pt in pts[near].tolist()], None if weights is None else np.asarray(weights, dtype=float)[near]
+    )

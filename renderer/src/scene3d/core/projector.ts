@@ -15,6 +15,8 @@ export interface Camera {
   satellite: number;
   /** Hillshade contrast multiplier. */
   shade: number;
+  /** Buildings standing in 3D, 0..1. */
+  buildings: number;
 }
 
 /** Visibility of a projected point: off-screen/behind, visible, or hidden by the relief. */
@@ -38,6 +40,8 @@ export interface Projector {
   lngLat(lon: number, lat: number, lift?: number): [number, number, boolean];
   /** Depth (clip w) of the camera centre, the reference for perspective tapering. */
   centerDepth: number;
+  /** Where the camera is: Mercator x, y and metres above the map (flat views only). */
+  eye?: {mx: number; my: number; z: number};
   /** 3D terrain only: a point on the rendered relief (+lift), with line-of-sight occlusion. */
   onRelief?: (mx: number, my: number, lift: number, out: Float64Array) => Visibility;
   /** 3D terrain only: a point at an absolute exaggerated height, with occlusion. */
@@ -95,13 +99,12 @@ export function invert4(m: Matrix): Float64Array | null {
 }
 
 /**
- * Line-of-sight occlusion against the rendered relief. The eye is recovered
- * from the inverse matrix; a point is hidden when the ray from the eye dips
- * under the terrain anywhere before reaching it.
+ * Line-of-sight occlusion against the rendered relief: a point is hidden when
+ * the ray from the eye dips under the terrain anywhere before reaching it.
  */
 function makeRelief(
   map: maplibregl.Map,
-  matrix: Matrix,
+  eye: NonNullable<Projector['eye']>,
   worldSize: number,
   width: number,
   height: number,
@@ -110,12 +113,10 @@ function makeRelief(
   const internal = map as unknown as InternalMap;
   const terrain = internal.terrain;
   const transform = internal._camera?.transform;
-  const inv = invert4(matrix);
-  if (!terrain || !transform || !inv) return {};
-  const ew = inv[11];
-  const eyeX = inv[8] / ew;
-  const eyeY = inv[9] / ew;
-  const eyeZ = inv[10] / ew;
+  if (!terrain || !transform) return {};
+  const eyeX = eye.mx * worldSize;
+  const eyeY = eye.my * worldSize;
+  const eyeZ = eye.z;
   const probe = new maplibregl.LngLat(0, 0);
   // Off the rendered tiles, getElevationForLngLat re-covers the screen on every
   // call (~0.2 ms); its fallback zoom only depends on the frame, so find it once.
@@ -222,9 +223,10 @@ export function makeProjector(
   const scratch = new Float64Array(3);
   project(mercX(camera.center[0]), mercY(camera.center[1]), camera.elevation, scratch);
   const centerDepth = scratch[2] || 1;
-  const relief = !camera.globe && matrix && camera.terrain > 0
-    ? makeRelief(map, matrix, worldSize, width, height, project)
-    : {};
+  // The eye, recovered from the inverse matrix (world pixels for x, y; metres for z).
+  const inv = !camera.globe && matrix ? invert4(matrix) : null;
+  const eye = inv ? {mx: inv[8] / inv[11] / worldSize, my: inv[9] / inv[11] / worldSize, z: inv[10] / inv[11]} : undefined;
+  const relief = eye && camera.terrain > 0 ? makeRelief(map, eye, worldSize, width, height, project) : {};
   return {
     frame,
     camera,
@@ -234,6 +236,7 @@ export function makeProjector(
     exaggeration: camera.terrain,
     resolution: groundResolution(camera.zoom, camera.center[1], camera.pitch),
     centerDepth,
+    eye,
     merc: project,
     lngLat(lon, lat, lift = 0) {
       const ok = project(mercX(lon), mercY(lat), lift, scratch);

@@ -203,6 +203,23 @@ export function buildStyle(look: Look, tiles: TileSet): StyleSpecification {
           'line-dasharray': [2, 2.5],
         },
       },
+      // Last, so nothing flat paints over a building standing in front of it.
+      {
+        id: 'buildings-3d',
+        type: 'fill-extrusion',
+        source: 'omt',
+        'source-layer': 'building',
+        // Down to the level that still holds buildings: the further out the map
+        // keeps them, the later the city has to give way to the flat map.
+        minzoom: 13,
+        layout: {visibility: 'none'},
+        paint: {
+          'fill-extrusion-color': '#2c2a27',
+          'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 6],
+          'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
+          'fill-extrusion-opacity': 0,
+        },
+      },
     ],
   };
   if (look === 'satellite' && tiles.satellite) {

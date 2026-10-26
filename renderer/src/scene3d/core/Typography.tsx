@@ -67,9 +67,17 @@ export type TagItem = {
   y: number;
   /** Leader length (px); the text sits at its far end. */
   leader: number;
-  direction: 'up' | 'left' | 'right';
+  /** Omit the straight DOM leader when the score draws an angled leader on canvas. */
+  customLeader?: boolean;
+  direction: 'up' | 'down' | 'left' | 'right';
   text: string;
   sub?: string;
+  /** Font size of `text` (px at scale 1); defaults to `TYPE.tag`. */
+  size?: number;
+  /** 0..1: the sub line comes in on its own (e.g. a figure once it is final). */
+  subOpacity?: number;
+  /** Wrap the name (balanced) to stay this wide (px), e.g. inside the frame's margin. */
+  maxWidth?: number;
   opacity: number;
 };
 
@@ -170,7 +178,9 @@ function Tag({item, scale}: {item: TagItem; scale: number}) {
   const leader = item.leader * item.opacity;
   const textStyle: CSSProperties = {
     position: 'absolute',
-    whiteSpace: 'nowrap',
+    whiteSpace: item.maxWidth ? 'normal' : 'nowrap',
+    maxWidth: item.maxWidth,
+    textWrap: item.maxWidth ? 'balance' : undefined,
     opacity: item.opacity,
     textAlign: item.direction === 'left' ? 'right' : item.direction === 'right' ? 'left' : 'center',
   };
@@ -178,6 +188,9 @@ function Tag({item, scale}: {item: TagItem; scale: number}) {
   if (item.direction === 'up') {
     line = {left: item.x - 0.5, top: item.y - leader, width: 1, height: leader};
     Object.assign(textStyle, {left: item.x, top: item.y - leader - 8 * scale, transform: 'translate(-50%, -100%)'});
+  } else if (item.direction === 'down') {
+    line = {left: item.x - 0.5, top: item.y, width: 1, height: leader};
+    Object.assign(textStyle, {left: item.x, top: item.y + leader + 6 * scale, transform: 'translate(-50%, 0)'});
   } else {
     const sign = item.direction === 'left' ? -1 : 1;
     line = {left: sign < 0 ? item.x - leader : item.x, top: item.y - 0.5, width: leader, height: 1};
@@ -187,13 +200,14 @@ function Tag({item, scale}: {item: TagItem; scale: number}) {
       transform: sign < 0 ? 'translate(-100%, -50%)' : 'translate(0, -50%)',
     });
   }
+  const tagSize = item.size ?? TYPE.tag;
   return (
     <>
-      <div style={{position: 'absolute', background: INK.hairline, ...line}} />
+      {!item.customLeader && leader > 0 ? <div style={{position: 'absolute', background: INK.hairline, ...line}} /> : null}
       <div data-text-id={item.id} style={textStyle}>
-        <div style={{...NUMERIC, fontSize: TYPE.tag * scale, fontWeight: 400, color: INK.paper, lineHeight: 1.15}}>{item.text}</div>
+        <div style={{...NUMERIC, fontSize: tagSize * scale, fontWeight: 400, color: INK.paper, lineHeight: 1.15}}>{item.text}</div>
         {item.sub ? (
-          <div style={{...NUMERIC, fontSize: TYPE.label * scale, fontWeight: 500, letterSpacing: '0.08em', color: INK.paper2, marginTop: 4 * scale}}>
+          <div style={{...NUMERIC, fontSize: TYPE.label * scale, fontWeight: 500, letterSpacing: '0.08em', color: INK.paper2, marginTop: 4 * (tagSize / TYPE.tag) * scale, opacity: item.subOpacity ?? 1}}>
             {item.sub}
           </div>
         ) : null}

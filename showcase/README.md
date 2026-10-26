@@ -10,14 +10,16 @@ This directory holds the images and GIFs used by the root `README.md`, plus
 | `collection-minimal.gif` | Hero: season accumulating in real elapsed time, minimal layout, density palette, plain canvas | `video collection --minimal --motion elapsed --style density --aspect 16:9` |
 | `flyover.gif` | 3D, one ride: the Kalmit climb up to its top, then the ending that unfolds the ride into its profile | `video flyover 19949741255 --preview --aspect 16:9` |
 | `strata.gif` | 3D, a season: the 2026 rides stacked as floors, one per month | `video strata --year 2026 --period month --preview --aspect 16:9` |
+| `stretch.gif` | 3D, a season: the 2026 rides laid end to end across the globe | `video stretch --year 2026 --preview --aspect 16:9` |
+| `ascent.gif` | 3D, all years: the whole archive's climbing as one profile, year by year, beside landmarks at true scale | `video ascent --period year --preview --aspect 16:9` |
 | `activity-telemetry.png` | Full ride telemetry over a satellite basemap, mid-ride frame | `video telemetry 19666115840 --basemap satellite --aspect 16:9` |
 | `activity-overlay.png` | Combined transparent overlay (route + telemetry) | `video overlay 19949741255 --overlay-format png --aspect 16:9` |
 | `activity-overlay-layers.gif` | Route and statistics layers side by side, composited for display | `video route-overlay` and `video stats-overlay 19949741255 --overlay-format webm` |
 
 Transparent renders keep their alpha in `outputs/`; the files in this directory
 are composited over `#161616` so the white telemetry stays readable on GitHub.
-The two 3D GIFs sit side by side at 640 px; their size budget and how each is
-kept small is noted next to `flyover_gif` and `strata_gif` in `generate.sh`.
+The four 3D GIFs sit two by two at 640 px; their size budget and how each is
+kept small is noted next to `flyover_gif`, `strata_gif`, `line_gif` and `city_gif` in `generate.sh`.
 
 ## Personal defaults
 

@@ -30,7 +30,7 @@ export type ScoreOutput = {
   /** Fixed text the drawn lines give way to (legibility). */
   knockouts?: Knockout[];
   /** 0..1: the land darkens towards the top / bottom edge, under the lines, so text there reads. */
-  scrim?: {top?: number; bottom?: number};
+  scrim?: {top?: number; bottom?: number; strength?: number; far?: number};
 };
 
 export type Score<K extends SceneKind> = (ctx: ScoreContext<K>) => ScoreOutput;

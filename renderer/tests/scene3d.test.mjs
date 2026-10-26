@@ -44,7 +44,7 @@ const {destination, greatCircle, groundResolution, mercX, mercY, metersPerPixel,
   '../src/scene3d/core/geo.ts'
 );
 const {decodeTrack, indexAtDistance, lodFor, pointAtDistance} = await import('../src/scene3d/core/track.ts');
-const {PORTRAIT_TEXT} = await import('../src/scene3d/core/layout.ts');
+const {PORTRAIT_TEXT, spread} = await import('../src/scene3d/core/layout.ts');
 const {sceneSpecSchema} = await import('../src/scene3d/schema.ts');
 const {scores} = await import('../src/scene3d/scores/index.ts');
 
@@ -469,4 +469,101 @@ test('edge-case scores: flat flyover, 12-month portrait strata, and multi-ride s
   assert.ok(stretchOut.ops.some((op) => op.kind === 'pulse'));
   assert.ok(stretchOut.texts.some((t) => t.id === 'stretch-ending'));
   assert.ok(stretchOut.texts.some((t) => t.id === 'dest-tag'));
+
+  // 4. 12-month ascent with extreme low-gain months (+6 m, +28 m, +303 m) in 16:9 and 9:16
+  assert.deepEqual(spread([100, 102, 104], 20, 50, 300), [82, 102, 122]);
+  const monthGains = [4660, 303, 2800, 5449, 28, 6, 4208, 6616, 7126, 3724, 2418, 1900];
+  let zAcc = 0;
+  let xAcc = 0;
+  const profX = [0];
+  const profZ = [0];
+  const ascentPeriods = monthGains.map((g, k) => {
+    const x0 = xAcc;
+    const x1 = xAcc + (g < 100 ? 120 : 3000);
+    const z0 = zAcc;
+    const z1 = zAcc + g;
+    xAcc = x1;
+    zAcc = z1;
+    profX.push(Math.round((x1 - x0) * 10));
+    profZ.push(Math.round((z1 - z0) * 10));
+    return {
+      label: months[k].toUpperCase(),
+      x: [x0, x1],
+      z: [z0, z1],
+      value: `+${g} m`,
+      t: 4 + k * 2,
+    };
+  });
+  for (const [w, h, tScale] of [
+    [1920, 1080, 1],
+    [1080, 1920, PORTRAIT_TEXT],
+  ]) {
+    const ascentSpec = sceneSpecSchema.parse({
+      ...flatFlySpec,
+      kind: 'ascent',
+      profile: {width: w, height: h, fps: 30, durationInFrames: 1200},
+      channels: {
+        opening: [0],
+        counter: [1],
+        climbed: [zAcc],
+        head: [xAcc],
+        tail: [xAcc],
+        live: [0],
+        fold: [0],
+        ruler: [1],
+        stats: [1],
+        fade: [1],
+        black: [0],
+      },
+      story: {
+        home: [7.77, 49.44],
+        axis: 90,
+        scale: 0.1,
+        profile: {x: profX, z: profZ},
+        rides: [{x0: 0, track: 0, period: 'December'}],
+        periods: ascentPeriods,
+        groups: [{label: '2026', x: [0, xAcc], z: [0, zAcc], value: `+${zAcc} m`, t: 28}],
+        heights: [],
+        ruler: {at: 8849, count: 4},
+        opening: {label: '2026', text: 'Kaiserslautern'},
+        counter: {label: 'Ascent', unit: 'm'},
+        stats: [{label: 'Ascent', value: `+${zAcc}`, unit: 'm'}],
+      },
+    });
+    const climbOut = scores.ascent({
+      spec: ascentSpec,
+      tracks: [track],
+      frame: 900,
+      channel: (name) => (name === 'fold' ? 0 : ascentSpec.channels[name][0]),
+      projector: makeProjector(w, h),
+      width: w,
+      height: h,
+      scale: 1,
+      textScale: tScale,
+    });
+    const baseTags = climbOut.texts.filter((t) => /^ascent-period-\d+$/.test(t.id));
+    assert.equal(baseTags.length, 12, `all 12 months must appear on base (${w}x${h})`);
+    for (let i = 0; i < baseTags.length; i++) {
+      assert.equal(baseTags[i].opacity, 1, `month ${i} on base must have full uniform opacity`);
+      if (i > 0) assert.ok(baseTags[i].x - baseTags[i - 1].x >= 35 * tScale, `month ${i} overlaps month ${i - 1} on base`);
+    }
+
+    const foldOut = scores.ascent({
+      spec: ascentSpec,
+      tracks: [track],
+      frame: 1100,
+      channel: (name) => (name === 'fold' ? 1 : ascentSpec.channels[name][0]),
+      projector: makeProjector(w, h),
+      width: w,
+      height: h,
+      scale: 1,
+      textScale: tScale,
+    });
+    const lineTags = foldOut.texts.filter((t) => t.id.startsWith('ascent-period-line-')).sort((a, b) => a.y - b.y);
+    assert.equal(lineTags.length, 12, `all 12 months must appear on folded line (${w}x${h})`);
+    for (let i = 0; i < lineTags.length; i++) {
+      assert.equal(lineTags[i].opacity, 1, `month ${i} on folded line must have full uniform opacity`);
+      if (i > 0) assert.ok(lineTags[i].y - lineTags[i - 1].y >= 38 * tScale, `month ${i} overlaps on folded line`);
+    }
+  }
 });

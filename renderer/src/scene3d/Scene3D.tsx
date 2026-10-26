@@ -67,6 +67,7 @@ function cameraAt(spec: SceneSpec, frame: number): Camera {
     contours: c.contours[i],
     satellite: c.satellite[i],
     shade: c.shade?.[i] ?? 1,
+    buildings: c.buildings?.[i] ?? 0,
   };
 }
 

@@ -48,7 +48,7 @@ GIF_FPS="${GIF_FPS:-15}"
 GIF_COLORS="${GIF_COLORS:-192}"
 # GIF playback speed relative to the final render.
 GIF_SPEED="${GIF_SPEED:-2}"
-# The 3D GIFs sit side by side in the README.
+# The 3D GIFs sit two by two in the README.
 SCENE_GIF_WIDTH="${SCENE_GIF_WIDTH:-640}"
 
 RUN=(env PYTHONPATH=src "$PYTHON" -m ride_visuals.cli)
@@ -227,6 +227,32 @@ strata_gif() {
     -loop 0 "$destination"
 }
 
+# Ascent and stretch are lines on a near-black map: the same black mapping as
+# strata keeps them crisp, and a lower frame rate keeps the loop small.
+line_gif() {
+  local source="$1" destination="$2" start="${3:-0}"
+  local black='if(lt(val\,15)\,0\,if(lt(val\,20)\,(val-15)*4\,val))'
+  ffmpeg -y -v error -ss "$start" -i "$source" -filter_complex "
+    setpts=PTS/$GIF_SPEED,fps=10,scale=$SCENE_GIF_WIDTH:-1:flags=lanczos,format=rgb24,
+    lutrgb=r=$black:g=$black:b=$black,tpad=stop_mode=clone:stop_duration=1.5,split[a][b];
+    [a]palettegen=max_colors=64:stats_mode=full[p];
+    [b][p]paletteuse=dither=none:diff_mode=rectangle" \
+    -loop 0 "$destination"
+}
+
+# Ascent's streets fade into the dark through values the black mapping above
+# would crush into bands that flip from frame to frame. Temporal denoising
+# keeps that fade steady (and the dense city light enough for a GIF) instead.
+city_gif() {
+  local source="$1" destination="$2"
+  ffmpeg -y -v error -i "$source" -filter_complex "
+    setpts=PTS/$GIF_SPEED,fps=10,scale=$SCENE_GIF_WIDTH:-1:flags=lanczos,hqdn3d=6:6:10:10,
+    tpad=stop_mode=clone:stop_duration=1.5,split[a][b];
+    [a]palettegen=max_colors=64:stats_mode=full[p];
+    [b][p]paletteuse=dither=none:diff_mode=rectangle" \
+    -loop 0 "$destination"
+}
+
 scene3d() {
   log "3D: flyover ($ACTIVITY_FLYOVER)"
   render video flyover "$ACTIVITY_FLYOVER" --preview --aspect 16:9
@@ -239,6 +265,18 @@ scene3d() {
   strata_gif \
     "$OUTPUTS/videos/strata/strata_years-${STRATA_YEAR}_month_carbon_16_9_${LOCALE_TAG}_preview.mp4" \
     "$SHOWCASE/strata.gif"
+
+  log "3D: stretch ($STRATA_YEAR)"
+  render video stretch --year "$STRATA_YEAR" --preview --aspect 16:9
+  line_gif \
+    "$OUTPUTS/videos/stretch/stretch_years-${STRATA_YEAR}_carbon_16_9_${LOCALE_TAG}_preview.mp4" \
+    "$SHOWCASE/stretch.gif"
+
+  log "3D: ascent (all by year)"
+  render video ascent --period year --preview --aspect 16:9
+  city_gif \
+    "$OUTPUTS/videos/ascent/ascent_all_year_carbon_16_9_${LOCALE_TAG}_preview.mp4" \
+    "$SHOWCASE/ascent.gif"
 }
 
 # --- Ride films --------------------------------------------------------------

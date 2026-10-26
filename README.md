@@ -25,6 +25,8 @@ wants to see their rides differently.
 <p align="center">
   <img src="showcase/flyover.gif" width="49%" alt="One ride in 3D: climbing the Kalmit, then the ride unfolding into its own elevation profile">
   <img src="showcase/strata.gif" width="49%" alt="A season in 3D: rides stacked as floors, one per month, over the home region"><br>
+  <img src="showcase/stretch.gif" width="49%" alt="A season in 3D: the rides laid end to end across the globe">
+  <img src="showcase/ascent.gif" width="49%" alt="All years in 3D: the archive's climbing as one profile, year by year, beside landmarks at true scale"><br>
   <sub>Terrain: Mapzen Terrain Tiles · Map data © OpenMapTiles © OpenStreetMap contributors</sub>
 </p>
 
@@ -32,9 +34,9 @@ wants to see their rides differently.
 | --- | --- |
 | `video flyover <id>` | One ride from above, down into its climbs, ending as its own profile |
 | `video strata` | A season stacked as floors, one per month or year |
-| `video stretch` | A selection laid end to end along a great circle from home |
+| `video stretch` | The rides laid end to end across the globe, from home |
 | `video territory` | Every different road ridden, each drawn once |
-| `video ascent` | The roads bend up off the map to the height they climbed, beside landmarks at true scale |
+| `video ascent` | All the climbing as one profile, beside landmarks at true scale |
 
 ```bash
 make preview-flyover ACTIVITY_ID=<activity-id>

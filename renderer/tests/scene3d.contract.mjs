@@ -101,7 +101,7 @@ print(json.dumps([fly, stretch, strata, territory, ascent]))
 
   // Every story field a score reads is part of the contract: dropping one
   // from a real director's output fails on load, naming the field.
-  for (const [kind, path] of [['flyover', ['layout', 'topY']], ['stretch', ['counter', 'unit']], ['strata', ['floors', 0, 'value']], ['territory', ['rides', 0, 'fresh']], ['ascent', ['heights']]]) {
+  for (const [kind, path] of [['flyover', ['layout', 'topY']], ['stretch', ['counter', 'unit']], ['strata', ['floors', 0, 'value']], ['territory', ['rides', 0, 'fresh']], ['ascent', ['periods', 0, 'value']]]) {
     const broken = structuredClone(specs.find((s) => s.kind === kind));
     const parent = path.slice(0, -1).reduce((node, key) => node[key], broken.story);
     delete parent[path.at(-1)];

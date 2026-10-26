@@ -298,6 +298,13 @@ def rate_limited_floor(values: np.ndarray, max_step: float) -> np.ndarray:
     return out
 
 
+def smooth_cover(values: np.ndarray, sigma: float) -> np.ndarray:
+    """A smooth curve over ``values``: their running maximum over ±3 sigma, Gaussian smoothed."""
+    radius = max(1, int(3 * sigma))
+    padded = np.pad(np.asarray(values, dtype=float), radius, mode="edge")
+    return gaussian_smooth(np.lib.stride_tricks.sliding_window_view(padded, 2 * radius + 1).max(axis=1), sigma)
+
+
 def pitch_for_zoom(zoom: np.ndarray) -> np.ndarray:
     """Pitch ceiling (deg): ~42 at z11 (wide transit), ~66 at z13 and closer."""
     return np.clip(42.0 + 12.0 * (np.asarray(zoom) - 11.0), 36.0, 68.0)
@@ -357,24 +364,102 @@ def fit_view(
     vertical correction raises the look-at point as much as the camera looks
     across (sin² of the pitch) and moves it forward as much as it looks down.
     """
-    b = np.radians(bearing)
-    p = np.radians(pitch)
-    share = float(np.sin(p) ** 2) if lift else 0.0
     cx, cy, cz = float(px.mean()), float(py.mean()), 0.0
     box_x = 0.5 * (box[0] + box[2]) * width
     box_y = 0.5 * (box[1] + box[3]) * height
     for _ in range(6):
         zoom = zoom_to_fill(cx, cy, cz, pitch, bearing, lat, width, height, px, py, pz, box, zoom_range=zoom_range)
         sx, sy, _ = project_points(cx, cy, cz, zoom, pitch, bearing, lat, width, height, px, py, pz)
-        mpp = float(meters_per_pixel(zoom, lat))
-        dx = 0.5 * (np.nanmin(sx) + np.nanmax(sx)) - box_x
-        dy = 0.5 * (np.nanmin(sy) + np.nanmax(sy)) - box_y
-        fwd = -(1.0 - share) * dy * mpp / max(np.cos(p), 0.3)
-        cx += 0.8 * (dx * mpp * np.cos(b) + fwd * np.sin(b))
-        cy += 0.8 * (-dx * mpp * np.sin(b) + fwd * np.cos(b))
-        cz = max(0.0, cz - 0.8 * share * dy * mpp / max(np.sin(p), 0.3))
+        shift = (0.5 * (np.nanmin(sx) + np.nanmax(sx)) - box_x, 0.5 * (np.nanmin(sy) + np.nanmax(sy)) - box_y)
+        cx, cy, cz = _recentre(cx, cy, cz, shift, zoom, pitch, bearing, lat, lift=lift)
     zoom = zoom_to_fill(cx, cy, cz, pitch, bearing, lat, width, height, px, py, pz, box, zoom_range=zoom_range)
     return cx, cy, cz, zoom
+
+
+def _recentre(  # noqa: PLR0913
+    cx: float,
+    cy: float,
+    cz: float,
+    shift: tuple[float, float],
+    zoom: float,
+    pitch: float,
+    bearing: float,
+    lat: float,
+    *,
+    lift: bool,
+) -> tuple[float, float, float]:
+    """Look-at point moved (damped) so the view shifts by ``shift`` px: sideways, and forward or up (see fit_view)."""
+    b = np.radians(bearing)
+    p = np.radians(pitch)
+    share = float(np.sin(p) ** 2) if lift else 0.0
+    mpp = float(meters_per_pixel(zoom, lat))
+    dx, dy = shift
+    fwd = -(1.0 - share) * dy * mpp / max(np.cos(p), 0.3)
+    cx += 0.8 * (dx * mpp * np.cos(b) + fwd * np.sin(b))
+    cy += 0.8 * (-dx * mpp * np.sin(b) + fwd * np.cos(b))
+    cz = max(0.0, cz - 0.8 * share * dy * mpp / max(np.sin(p), 0.3))
+    return cx, cy, cz
+
+
+def hold_at(  # noqa: PLR0913
+    point: tuple[float, float, float],
+    target: tuple[float, float],
+    zoom: float,
+    pitch: float,
+    bearing: float,
+    lat: float,
+    width: int,
+    height: int,
+    start: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    *,
+    lift: bool = False,
+) -> tuple[float, float, float]:
+    """Look-at point (x, y, height) that puts ``point`` at screen ``target`` (px) at this zoom."""
+    cx, cy, cz = start
+    one = [np.array([v]) for v in point]
+    for _ in range(12):
+        sx, sy, _ = project_points(cx, cy, cz, zoom, pitch, bearing, lat, width, height, *one)
+        shift = (float(sx[0]) - target[0], float(sy[0]) - target[1])
+        if abs(shift[0]) + abs(shift[1]) < 0.05:
+            break
+        cx, cy, cz = _recentre(cx, cy, cz, shift, zoom, pitch, bearing, lat, lift=lift)
+    return cx, cy, cz
+
+
+def fit_held(  # noqa: PLR0913
+    px: np.ndarray,
+    py: np.ndarray,
+    pz: np.ndarray,
+    pitch: float,
+    bearing: float,
+    lat: float,
+    width: int,
+    height: int,
+    box: tuple[float, float, float, float],
+    point: tuple[float, float, float],
+    target: tuple[float, float],
+    *,
+    lift: bool = False,
+    zoom_range: tuple[float, float] = (3.0, 16.0),
+) -> float:
+    """Closest zoom (within ``zoom_range``) at which, with ``point`` held at ``target``, the points all lie inside ``box``."""
+    x0, y0, x1, y1 = box[0] * width, box[1] * height, box[2] * width, box[3] * height
+    start = (float(point[0]), float(point[1]), float(point[2]))
+
+    def fits(zoom: float) -> bool:
+        c = hold_at(point, target, zoom, pitch, bearing, lat, width, height, start, lift=lift)
+        sx, sy, ok = project_points(*c, zoom, pitch, bearing, lat, width, height, px, py, pz)
+        return bool(ok.all()) and sx.min() >= x0 and sx.max() <= x1 and sy.min() >= y0 and sy.max() <= y1
+
+    lo, hi = zoom_range
+    if fits(hi):
+        return hi
+    if not fits(lo):
+        return lo
+    while hi - lo > 2e-3:
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if fits(mid) else (lo, mid)
+    return lo
 
 
 def project_points(

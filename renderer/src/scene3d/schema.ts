@@ -56,6 +56,8 @@ const sceneBaseSchema = z.object({
     satellite: series,
     /** Hillshade contrast multiplier; older specs omit it (1). */
     shade: series.optional(),
+    /** Buildings standing in 3D, 0..1; older specs omit it (0). */
+    buildings: series.optional(),
   }),
   channels: z.record(z.string(), series),
   tracks: z.array(encodedTrackSchema),

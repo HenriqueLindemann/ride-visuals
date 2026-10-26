@@ -140,6 +140,7 @@ class SceneSpec:
                 "contours": _series(cam.contours, 3),
                 "satellite": _series(cam.satellite, 3),
                 "shade": _series(cam.shade, 3),
+                "buildings": _series(cam.buildings, 3),
             },
             "channels": {name: _series(values, 4) for name, values in self.channels.items()},
             "tracks": self.tracks,

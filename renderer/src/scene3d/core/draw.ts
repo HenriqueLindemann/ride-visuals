@@ -1,4 +1,4 @@
-import {destination, EARTH_CIRCUMFERENCE, type LngLat, mercX, mercY} from './geo';
+import {destination, EARTH_CIRCUMFERENCE, type LngLat, mercX, mercY, unmercY} from './geo';
 import type {Projector} from './projector';
 import {indexAtDistance, lodFor, type Track} from './track';
 
@@ -124,7 +124,35 @@ export type SlicesOp = {
   width: number;
 };
 
-export type DrawOp = TrackOp | PathOp | ScreenPathOp | StemOp | DotOp | PulseOp | PlateOp | RingOp | SlicesOp;
+/** A vertical plane through `origin`: `x` metres toward `bearing` (deg), `z` metres up. */
+export type Plane = {origin: LngLat; bearing: number};
+
+/** Strokes in a vertical plane (flat x, z pairs): a profile, a building's outline, a skyline, a level. */
+export type PlaneOp = {
+  kind: 'plane';
+  plane: Plane;
+  strokes: ArrayLike<number>[];
+  rgb: RGB;
+  alpha: number;
+  width: number;
+  /** Fill the closed strokes at this alpha (even-odd: openings stay open). */
+  fill?: number;
+  /** Shade from the first stroke down to the ground: this alpha at its top, none at the ground. */
+  shade?: number;
+  /** Fade out over these shares of its screen width at the left and right ends. */
+  taper?: [number, number];
+  /** Fill and shade only up to this height (m): a thing filling up as a line climbs past it. */
+  upTo?: number;
+  /** The stroke at full alpha only up to this height (m), dimmer above: a ridge lit as a line climbs past it. */
+  lit?: number;
+  /** 0..1: position marker at the last point. */
+  head?: number;
+};
+
+/** The Earth's limb seen from the camera, with space above it: alpha of space, of the limb's hairline, and of the air over it. */
+export type HorizonOp = {kind: 'horizon'; alpha: number; limb: number; air?: number};
+
+export type DrawOp = TrackOp | PathOp | ScreenPathOp | StemOp | DotOp | PulseOp | PlateOp | RingOp | SlicesOp | PlaneOp | HorizonOp;
 
 const tmp = new Float64Array(3);
 
@@ -544,13 +572,196 @@ function drawRing(ctx: CanvasRenderingContext2D, p: Projector, op: RingOp) {
   ctx.setLineDash([]);
 }
 
+/** Projects plane coordinates (x along, z up, metres) to the screen. */
+export function planeProjector(p: Projector, plane: Plane) {
+  const unit = mercMeters(plane.origin[1]);
+  const b = (plane.bearing * Math.PI) / 180;
+  const ox = mercX(plane.origin[0]);
+  const oy = mercY(plane.origin[1]);
+  const dx = Math.sin(b) / unit;
+  const dy = -Math.cos(b) / unit;
+  return (x: number, z: number, out: Float64Array) => p.merc(ox + x * dx, oy + x * dy, z, out);
+}
+
+/** A plane point on screen: [x, y, visible]. */
+export function planePoint(p: Projector, plane: Plane, x: number, z: number): [number, number, boolean] {
+  const ok = planeProjector(p, plane)(x, z, tmp);
+  return [tmp[0], tmp[1], ok];
+}
+
+function drawPlane(ctx: CanvasRenderingContext2D, p: Projector, op: PlaneOp) {
+  const project = planeProjector(p, op.plane);
+  const path = new Path2D();
+  let last: [number, number] | null = null;
+  let top = Infinity;
+  let base = -Infinity;
+  let left = Infinity;
+  let right = -Infinity;
+  for (const xz of op.strokes) {
+    let pen = false;
+    for (let i = 0; i + 1 < xz.length; i += 2) {
+      if (!project(xz[i], xz[i + 1], tmp)) {
+        pen = false;
+        continue;
+      }
+      // Points closer than a third of a pixel add nothing but work.
+      if (pen && last && Math.abs(tmp[0] - last[0]) + Math.abs(tmp[1] - last[1]) < 0.35 && i + 2 < xz.length) continue;
+      if (!pen) path.moveTo(tmp[0], tmp[1]);
+      else path.lineTo(tmp[0], tmp[1]);
+      pen = true;
+      last = [tmp[0], tmp[1]];
+      top = Math.min(top, tmp[1]);
+      left = Math.min(left, tmp[0]);
+      right = Math.max(right, tmp[0]);
+    }
+  }
+  if (!last) return;
+  // Tapered ends are drawn apart and faded out across the screen, so nothing ends on an edge.
+  const taper = op.taper && right - left > 1 ? op.taper : null;
+  const layer = taper ? scratch(ctx) : ctx;
+  if (layer !== ctx) {
+    layer.save();
+    layer.setTransform(1, 0, 0, 1, 0, 0);
+    layer.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+    layer.restore();
+  }
+  // The plane below a height, across the strokes' span, as a screen polygon.
+  const below = (height: number) => {
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    for (const xz of op.strokes) for (let i = 0; i < xz.length; i += 2) [x0, x1] = [Math.min(x0, xz[i]), Math.max(x1, xz[i])];
+    const pad = 0.05 * (x1 - x0) + 1;
+    const area = new Path2D();
+    for (const [x, z] of [[x0 - pad, -pad], [x1 + pad, -pad], [x1 + pad, height], [x0 - pad, height]]) {
+      if (project(x, z, tmp)) area.lineTo(tmp[0], tmp[1]);
+    }
+    return area;
+  };
+  const clipped = op.upTo !== undefined && Number.isFinite(left);
+  if (clipped) {
+    layer.save();
+    layer.clip(below(op.upTo!));
+  }
+  if (op.shade && op.shade > 0.002) {
+    // The first stroke and its foot on the ground, shaded from its top down to nothing.
+    const xz = op.strokes[0];
+    const area = new Path2D(path);
+    for (let i = xz.length - 2; i >= 0; i -= 2) {
+      if (!project(xz[i], 0, tmp)) continue;
+      area.lineTo(tmp[0], tmp[1]);
+      base = Math.max(base, tmp[1]);
+    }
+    area.closePath();
+    if (base > top + 1) {
+      // Most of it near the top, thinning out like haze toward the ground.
+      const gradient = layer.createLinearGradient(0, top, 0, base);
+      for (const [stop, share] of [[0, 1], [0.2, 0.55], [0.45, 0.2], [0.75, 0.05], [1, 0]]) gradient.addColorStop(stop, rgba(op.rgb, op.shade * share));
+      layer.fillStyle = gradient;
+      layer.fill(area);
+    }
+  }
+  if (op.fill && op.fill > 0.002) {
+    layer.fillStyle = rgba(op.rgb, op.fill);
+    layer.fill(path, 'evenodd');
+  }
+  if (clipped) layer.restore();
+  if (op.alpha > 0.002) {
+    layer.lineWidth = op.width;
+    layer.lineCap = 'round';
+    layer.lineJoin = 'round';
+    layer.strokeStyle = rgba(op.rgb, op.lit === undefined ? op.alpha : op.alpha / 3);
+    layer.stroke(path);
+    if (op.lit !== undefined && op.lit > 0) {
+      layer.save();
+      layer.clip(below(op.lit));
+      layer.strokeStyle = rgba(op.rgb, op.alpha);
+      layer.stroke(path);
+      layer.restore();
+    }
+  }
+  if (taper) {
+    const mask = layer.createLinearGradient(left, 0, right, 0);
+    mask.addColorStop(0, 'rgba(0,0,0,0)');
+    mask.addColorStop(Math.min(0.5, taper[0]), 'rgba(0,0,0,1)');
+    mask.addColorStop(Math.max(0.5, 1 - taper[1]), 'rgba(0,0,0,1)');
+    mask.addColorStop(1, 'rgba(0,0,0,0)');
+    layer.save();
+    layer.globalCompositeOperation = 'destination-in';
+    layer.fillStyle = mask;
+    layer.fillRect(left - 1, -p.height, right - left + 2, 3 * p.height);
+    layer.restore();
+    // Outside the strokes' span the mask leaves the layer as it was: clear it.
+    layer.clearRect(-p.width, -p.height, left - 1 + p.width, 3 * p.height);
+    layer.clearRect(right + 1, -p.height, 2 * p.width, 3 * p.height);
+  }
+  if (layer !== ctx) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(layer.canvas, 0, 0);
+    ctx.restore();
+  }
+  if (op.head) drawHead(ctx, last[0], last[1], op.rgb, op.head * Math.min(1, op.alpha * 1.4));
+}
+
+const EARTH_RADIUS = 6_371_008.8;
+
+/**
+ * The true horizon: from the eye's height, the ground curves away and the
+ * limb lies below eye level (about 4° from 18 km up, 10° from 100 km). The
+ * flat map runs on past it, so space is laid over what lies beyond, and the
+ * limb is drawn as one hairline.
+ */
+function drawHorizon(ctx: CanvasRenderingContext2D, p: Projector, op: HorizonOp) {
+  const eye = p.eye;
+  if (!eye || eye.z < 1) return;
+  const angle = Math.acos(EARTH_RADIUS / (EARTH_RADIUS + eye.z));
+  const reach = EARTH_RADIUS * Math.sin(angle);
+  const drop = EARTH_RADIUS * (1 - Math.cos(angle));
+  const unit = mercMeters(unmercY(eye.my));
+  const limb: [number, number][] = [];
+  // Round the eye, starting behind it, so the arc in view comes out in one piece.
+  for (let k = 0; k <= 720; k++) {
+    const az = ((p.camera.bearing + 180 + k * 0.5) * Math.PI) / 180;
+    if (p.merc(eye.mx + (reach * Math.sin(az)) / unit, eye.my - (reach * Math.cos(az)) / unit, -drop, tmp)) limb.push([tmp[0], tmp[1]]);
+  }
+  if (limb.length < 2 || limb.every(([, y]) => y < 0)) return;
+  const far = 4 * Math.max(p.width, p.height);
+  const arc = new Path2D();
+  limb.forEach(([x, y], i) => (i ? arc.lineTo(x, y) : arc.moveTo(x, y)));
+  const space = new Path2D();
+  space.moveTo(limb[0][0] - far, limb[0][1]);
+  limb.forEach(([x, y]) => space.lineTo(x, y));
+  space.lineTo(limb[limb.length - 1][0] + far, limb[limb.length - 1][1]);
+  space.lineTo(limb[limb.length - 1][0] + far, -far);
+  space.lineTo(limb[0][0] - far, -far);
+  space.closePath();
+  ctx.fillStyle = `rgba(0,0,0,${Math.min(1, op.alpha)})`;
+  ctx.fill(space);
+  if (op.air && op.air > 0.002) {
+    // The air seen edge-on over the limb: a thin haze fading up into space.
+    const thick = 0.022 * p.height;
+    ctx.save();
+    ctx.clip(space);
+    ctx.filter = `blur(${thick.toFixed(1)}px)`;
+    ctx.strokeStyle = rgba([243, 239, 232], 0.11 * op.air);
+    ctx.lineWidth = thick;
+    ctx.stroke(arc);
+    ctx.restore();
+  }
+  ctx.strokeStyle = rgba([243, 239, 232], op.limb);
+  ctx.lineWidth = 1;
+  ctx.stroke(arc);
+}
+
 export function drawOps(ctx: CanvasRenderingContext2D, p: Projector, ops: DrawOp[]) {
   ctx.clearRect(0, 0, p.width, p.height);
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   for (const op of ops) {
-    const fillOnly = op.kind === 'screen-path' && (op.fillAlpha ?? 0) > 0.002;
+    const fillOnly =
+      (op.kind === 'screen-path' && (op.fillAlpha ?? 0) > 0.002) ||
+      (op.kind === 'plane' && Math.max(op.fill ?? 0, op.shade ?? 0) > 0.002);
     if (op.kind !== 'plate' && op.alpha <= 0.002 && !fillOnly) continue;
     if (op.kind === 'track') drawTrack(ctx, p, op);
     else if (op.kind === 'path') drawPath(ctx, p, op);
@@ -559,6 +770,8 @@ export function drawOps(ctx: CanvasRenderingContext2D, p: Projector, ops: DrawOp
     else if (op.kind === 'plate') drawPlate(ctx, p, op);
     else if (op.kind === 'ring') drawRing(ctx, p, op);
     else if (op.kind === 'slices') drawSlices(ctx, p, op);
+    else if (op.kind === 'plane') drawPlane(ctx, p, op);
+    else if (op.kind === 'horizon') drawHorizon(ctx, p, op);
     else if (op.kind === 'dot') {
       const visible = op.occlude && p.onRelief
         ? p.onRelief(mercX(op.at[0]), mercY(op.at[1]), op.lift ?? 0, tmp) === 1

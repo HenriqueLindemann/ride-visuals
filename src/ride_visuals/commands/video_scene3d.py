@@ -44,9 +44,9 @@ def _scene_paths(context: VideoCommandContext) -> Scene3DRenderPaths:
     preview_tag = "_preview" if args.preview else ""
     if args.video_type == "flyover":
         stem = f"flyover_{args.activity_id}{look_tag}_{aspect_tag}_{locale_tag}"
-    elif args.video_type == "strata":
+    elif args.video_type in ("strata", "ascent"):
         period_tag = "" if args.period == "auto" else f"_{args.period}"
-        stem = f"strata_{context.selection_tag}{period_tag}{look_tag}_{aspect_tag}_{locale_tag}"
+        stem = f"{args.video_type}_{context.selection_tag}{period_tag}{look_tag}_{aspect_tag}_{locale_tag}"
     else:
         stem = f"{args.video_type}_{context.selection_tag}{look_tag}_{aspect_tag}_{locale_tag}"
 
@@ -189,6 +189,13 @@ def _build_scene_spec(
         )
 
     rides = _load_collection_rides(context)
+    if args.home:
+        from ride_visuals.scene3d.places import resolve_home
+
+        # A place settles on the most common start near it; the ascent counts climbing, not rides.
+        starts = [(float(r.track.lon[0]), float(r.track.lat[0])) for r in rides]
+        weights = [r.elevation_gain_m for r in rides] if args.video_type == "ascent" else None
+        common["home"] = resolve_home(args.home, starts, weights, offline=bool(getattr(args, "offline", False)))
     if args.video_type == "stretch":
         return build_stretch_spec(rides, toward=args.toward, **common)
     if args.video_type == "strata":
@@ -211,7 +218,7 @@ def _build_scene_spec(
     if args.video_type == "ascent":
         from ride_visuals.scene3d.ascent import build_ascent_spec
 
-        return build_ascent_spec(rides, **common)
+        return build_ascent_spec(rides, period=args.period, **common)
     raise ValueError(f"Unsupported 3D scene type: {args.video_type!r}")
 
 

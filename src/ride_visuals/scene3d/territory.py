@@ -285,6 +285,7 @@ def build_territory_spec(  # noqa: PLR0913, PLR0915
     width: int = 1920,
     height: int = 1080,
     fps: int = 60,
+    home: tuple[float, float] | None = None,
     title_override: str | None = None,
     credits_on_screen: bool = False,
     places_cache_dir: Path = DEFAULT_PLACES_CACHE_DIR,
@@ -296,7 +297,7 @@ def build_territory_spec(  # noqa: PLR0913, PLR0915
         raise ValueError("No valid rides with GPS tracks found for the selected scope")
     i18n = Translator(locale)
 
-    (home_lon, home_lat), near = home_region([(float(r.track.lon[0]), float(r.track.lat[0])) for r in valid])
+    (home_lon, home_lat), near = home_region([(float(r.track.lon[0]), float(r.track.lat[0])) for r in valid], home=home)
     regional = sorted((r for r, keep in zip(valid, near.tolist(), strict=True) if keep), key=lambda r: r.start_date)
     excluded = len(valid) - len(regional)
     origin = (home_lon, home_lat)

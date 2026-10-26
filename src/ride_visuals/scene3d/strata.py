@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -36,6 +37,12 @@ from ride_visuals.scene3d.track import from_local_xy, gaussian_smooth, local_xy
 PeriodMode = Literal["auto", "month", "year"]
 
 
+def resolve_period(first: datetime, last: datetime, period: PeriodMode) -> Literal["month", "year"]:
+    """``auto`` is months for up to 14 of them, else years."""
+    months = (last.year - first.year) * 12 + (last.month - first.month) + 1
+    return ("month" if months <= 14 else "year") if period == "auto" else period
+
+
 @dataclass(frozen=True)
 class StrataBuildResult:
     """Built strata scene spec and count of rides outside the home region."""
@@ -54,6 +61,7 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
     width: int = 1920,
     height: int = 1080,
     fps: int = 60,
+    home: tuple[float, float] | None = None,
     title_override: str | None = None,
     credits_on_screen: bool = False,
     places_cache_dir: Path = DEFAULT_PLACES_CACHE_DIR,
@@ -65,7 +73,7 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
         raise ValueError("No valid rides with GPS tracks found for the selected scope")
 
     i18n = Translator(locale)
-    (home_lon, home_lat), near = home_region([(float(r.track.lon[0]), float(r.track.lat[0])) for r in valid_rides])
+    (home_lon, home_lat), near = home_region([(float(r.track.lon[0]), float(r.track.lat[0])) for r in valid_rides], home=home)
     regional = [r for r, keep in zip(valid_rides, near.tolist(), strict=True) if keep]
     if not regional:
         regional = list(valid_rides)
@@ -74,10 +82,7 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
     regional.sort(key=lambda r: r.start_date)
     first_dt = regional[0].start_date
     last_dt = regional[-1].start_date
-    months_span = (last_dt.year - first_dt.year) * 12 + (last_dt.month - first_dt.month) + 1
-    resolved_period: Literal["month", "year"] = (
-        ("month" if months_span <= 14 else "year") if period == "auto" else period
-    )
+    resolved_period = resolve_period(first_dt, last_dt, period)
     multi_year = first_dt.year != last_dt.year
 
     # Group chronologically into floors.

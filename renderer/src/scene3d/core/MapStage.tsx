@@ -33,7 +33,7 @@ type Props = {
 };
 
 /** Keys of the map state applied incrementally, so unchanged values cost nothing. */
-type Applied = {globe: boolean | null; terrain: number; opacity: number; contours: number; satellite: number; shade: number};
+type Applied = {globe: boolean | null; terrain: number; opacity: number; contours: number; satellite: number; shade: number; buildings: number};
 
 /**
  * One MapLibre instance per render tab, driven frame by frame: jumpTo(camera),
@@ -44,7 +44,7 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const matrixRef = useRef<Float64Array | null>(null);
-  const applied = useRef<Applied>({globe: null, terrain: -1, opacity: -1, contours: -1, satellite: -1, shade: -1});
+  const applied = useRef<Applied>({globe: null, terrain: -1, opacity: -1, contours: -1, satellite: -1, shade: -1, buildings: 0});
   const [ready, setReady] = useState(false);
   const [initHandle] = useState(() => delayRender('map init', {timeoutInMilliseconds: MAP_TIMEOUT_MS}));
 
@@ -202,6 +202,13 @@ function applyState(map: maplibregl.Map, spec: SceneSpec, camera: Camera, state:
       map.setPaintProperty('contours', prop as 'line-opacity', value as number);
     }
     state.contours = contours;
+  }
+  const buildings = Math.round(camera.buildings * 100) / 100;
+  if (state.buildings !== buildings) {
+    // Fully off: hidden, so flat scenes pay nothing for it.
+    map.setLayoutProperty('buildings-3d', 'visibility', buildings > 0 ? 'visible' : 'none');
+    map.setPaintProperty('buildings-3d', 'fill-extrusion-opacity', buildings);
+    state.buildings = buildings;
   }
   if (spec.look === 'satellite' && spec.tiles.satellite && state.satellite !== satellite) {
     // Fully off: hide the imagery so its tiles are not even requested.

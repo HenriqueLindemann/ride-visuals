@@ -41,6 +41,37 @@ export const textScaleFor = (width: number, height: number) =>
 /** Height of a metric block (label line, gap, value line), px at text scale 1. */
 export const metricHeight = (size: number) => LABEL_LINE + LABEL_GAP + size;
 
+/**
+ * Places ascending 1D targets as close to their natural positions as possible
+ * while keeping at least `gap` between neighbours and staying inside `[lo, hi]`.
+ */
+export function spread(positions: number[], gap: number, lo: number, hi: number): number[] {
+  const n = positions.length;
+  if (n === 0) return [];
+  if (n === 1) return [Math.max(lo, Math.min(hi, positions[0]))];
+  const step = Math.max(0, Math.min(gap, (hi - lo) / (n - 1)));
+  const maxBase = Math.max(lo, hi - (n - 1) * step);
+  const blocks: {sum: number; count: number}[] = [];
+  for (let i = 0; i < n; i++) {
+    blocks.push({sum: positions[i] - i * step, count: 1});
+    while (blocks.length >= 2) {
+      const b = blocks[blocks.length - 1];
+      const a = blocks[blocks.length - 2];
+      if (a.sum / a.count <= b.sum / b.count) break;
+      a.sum += b.sum;
+      a.count += b.count;
+      blocks.pop();
+    }
+  }
+  const out: number[] = [];
+  let idx = 0;
+  for (const block of blocks) {
+    const base = Math.max(lo, Math.min(maxBase, block.sum / block.count));
+    for (let k = 0; k < block.count; k++, idx++) out.push(base + idx * step);
+  }
+  return out;
+}
+
 /** Vertical gap between two rows of totals, px at text scale 1. */
 const TOTALS_ROW_GAP = 34;
 

@@ -139,6 +139,7 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
     height: int = 1080,
     fps: int = 60,
     toward: str | None = None,
+    home: tuple[float, float] | None = None,
     title_override: str | None = None,
     credits_on_screen: bool = False,
     places_cache_dir: Path = DEFAULT_PLACES_CACHE_DIR,
@@ -151,7 +152,7 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
 
     i18n = Translator(locale)
     starts = [(float(r.track.lon[0]), float(r.track.lat[0])) for r in valid_rides]
-    home_lon, home_lat = home_cluster(starts)
+    home_lon, home_lat = home or home_cluster(starts)
 
     # The biggest loops unfurl first, slowly, at regional scale.
     ordered, home_loops = _home_loops_first(valid_rides, (home_lon, home_lat))

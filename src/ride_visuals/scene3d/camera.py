@@ -155,9 +155,11 @@ class CameraTrack:
     satellite: np.ndarray = field(init=False)
     #: Hillshade contrast multiplier (1 = the flat-map default).
     shade: np.ndarray = field(init=False)
+    #: Buildings standing in 3D, 0..1 (only drawn from map zoom 13 in).
+    buildings: np.ndarray = field(init=False)
 
     def __post_init__(self) -> None:
-        for name in ("lon", "lat", "zoom", "pitch", "bearing", "elevation", "terrain", "globe", "contours", "satellite"):
+        for name in ("lon", "lat", "zoom", "pitch", "bearing", "elevation", "terrain", "globe", "contours", "satellite", "buildings"):
             setattr(self, name, np.zeros(self.frames))
         self.map_opacity = np.ones(self.frames)
         self.shade = np.ones(self.frames)
