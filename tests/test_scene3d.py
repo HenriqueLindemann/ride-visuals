@@ -732,17 +732,40 @@ def test_strata_stack_fills_the_frame_and_camera_only_backs_off(width: int, heig
     assert np.all(np.diff(cam.zoom[peak:]) <= 1e-9)
     # The finished stack: inside the frame, clear of the totals, and filling it.
     origin = (float(cam.lon[-1]), float(cam.lat[-1]))
-    corners = np.array(spec.story["corners"], dtype=float)
+    floors = spec.story["floors"]
+    corners = np.array([c for f in floors for c in f["corners"]], dtype=float)
     kx, ky = local_xy(corners[:, 0], corners[:, 1], origin)
-    top = max(float(f["targetLift"]) for f in spec.story["floors"])
+    lifts = np.repeat([float(f["targetLift"]) for f in floors], 4)
     sx, sy, ok = project_points(
         0.0, 0.0, float(cam.elevation[-1]), float(cam.zoom[-1]), float(cam.pitch[-1]), float(cam.bearing[-1]),
-        origin[1], width, height, np.tile(kx, 2), np.tile(ky, 2), np.repeat([0.0, top], 4),
+        origin[1], width, height, kx, ky, lifts,
     )
     assert ok.all()
     assert sx.min() >= 0.0 and sx.max() <= width
     assert sy.min() >= 0.04 * height and sy.max() <= 0.82 * height
     assert max((sx.max() - sx.min()) / width, (sy.max() - sy.min()) / height) > 0.55
+
+
+def test_strata_plates_hold_every_ride_and_the_camera_opens_up_to_a_long_day_out(tmp_path: Path) -> None:
+    rides = _monthly_rides(4)
+    # A long day out in March: out 80 km east and back, starting from home.
+    base = rides[2].track
+    out = np.concatenate([np.linspace(0.0, 1.1, len(base.lon) // 2), np.linspace(1.1, 0.0, len(base.lon) - len(base.lon) // 2)])
+    long_day = RideTrack.from_arrays(base.lon + out, base.lat, base.alt, base.dist * 4)
+    rides[2] = SceneRide(activity_id=3, start_date=rides[2].start_date, track=long_day, distance_m=long_day.length_m)
+    spec = build_strata_spec(rides, fps=30, places_cache_dir=tmp_path, offline=True).spec
+    floors = spec.story["floors"]
+    for floor in floors:
+        corners = np.array(floor["corners"], dtype=float)
+        for i in floor["trackIndices"]:
+            lon = np.cumsum(spec.tracks[i]["x"]) * 1e-6
+            lat = np.cumsum(spec.tracks[i]["y"]) * 1e-6
+            assert corners[:, 0].min() <= lon.min() and lon.max() <= corners[:, 0].max()
+            assert corners[:, 1].min() <= lat.min() and lat.max() <= corners[:, 1].max()
+    # March's plate is the widest, and the camera backs off as it lands.
+    widths = [np.ptp(np.array(f["corners"])[:, 0]) for f in floors]
+    assert int(np.argmax(widths)) == 2
+    assert spec.camera.zoom[-1] < spec.camera.zoom[int(spec.fps * 2)] - 0.5
 
 
 def test_stretch_line_accelerates_smoothly_and_keeps_true_boundaries(tmp_path: Path) -> None:

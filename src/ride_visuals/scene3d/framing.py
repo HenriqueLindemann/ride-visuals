@@ -533,6 +533,15 @@ def zoom_to_fill(
     return lo
 
 
+#: Half zoom levels frame_points may back off for points behind the camera.
+MAX_BACK_OFF = 16
+
+
+def _row(points: np.ndarray, i: int) -> np.ndarray:
+    """Frame ``i``'s row of per-frame points, or the points themselves when they hold still."""
+    return points[i] if points.ndim == 2 else points
+
+
 def frame_points(
     cx: np.ndarray,
     cy: np.ndarray,
@@ -557,21 +566,30 @@ def frame_points(
     along the camera's own right and forward axes) and scaled to ``fill`` of
     it. The result is smoothed as one calm move and finally guarded by
     :func:`keep_points_in_frame`, so the smoothing never pushes points out.
-    ``pz`` and ``safe`` follow the conventions of that function.
+    The points and ``safe`` follow the conventions of that function.
     """
     bx0, by0, bx1, by1 = (np.asarray(v, dtype=float) * s for v, s in zip(safe, (width, height, width, height), strict=True))
     cx, cy, out = (np.asarray(v, dtype=float).copy() for v in (cx, cy, zoom))
     b = np.radians(bearing)
     for i in range(len(out)):
-        z_i = pz[i] if pz.ndim == 2 else pz
+        # Each frame starts from the last one's answer: the scene moves little
+        # between frames, even when it ends up far from where it began.
+        if i > 0:
+            cx[i], cy[i], out[i] = cx[i - 1], cy[i - 1], out[i - 1]
         for _ in range(iterations):
             sx, sy, ok = project_points(
                 float(cx[i]), float(cy[i]), float(cz[i]), float(out[i]), float(pitch[i]), float(bearing[i]),
-                lat, width, height, px, py, z_i,
+                lat, width, height, _row(px, i), _row(py, i), _row(pz, i),
             )
-            if not ok.all():
+            # Back off until every point is in front of the camera, then frame them.
+            for _ in range(MAX_BACK_OFF):
+                if ok.all():
+                    break
                 out[i] -= 0.5
-                continue
+                sx, sy, ok = project_points(
+                    float(cx[i]), float(cy[i]), float(cz[i]), float(out[i]), float(pitch[i]), float(bearing[i]),
+                    lat, width, height, _row(px, i), _row(py, i), _row(pz, i),
+                )
             mpp = float(meters_per_pixel(out[i], lat))
             dx = 0.5 * (sx.min() + sx.max()) - 0.5 * (bx0[i] + bx1[i])
             dy = 0.5 * (sy.min() + sy.max()) - 0.5 * (by0[i] + by1[i])
@@ -610,7 +628,8 @@ def keep_points_in_frame(
 ) -> np.ndarray:
     """Pull the zoom back wherever any of the points leaves its safe box.
 
-    ``pz`` is one height per point, or one row per frame for things that grow.
+    ``px``, ``py`` and ``pz`` are one value per point, or one row per frame
+    for things that grow.
     ``safe`` holds per-frame (x0, y0, x1, y1) fractions of the frame, so the
     box can widen or narrow as labels come and go. Zoom only ever decreases,
     and the correction is smoothed so it reads as one calm dolly.
@@ -622,7 +641,7 @@ def keep_points_in_frame(
         for i in range(len(out)):
             sx, sy, ok = project_points(
                 float(cx[i]), float(cy[i]), float(cz[i]), float(out[i]), float(pitch[i]), float(bearing[i]),
-                lat, width, height, px, py, pz[i] if pz.ndim == 2 else pz,
+                lat, width, height, _row(px, i), _row(py, i), _row(pz, i),
             )
             bad[i] = (
                 not ok.all()

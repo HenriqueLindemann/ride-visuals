@@ -22,6 +22,13 @@ maplibregl.RasterDEMTileSource.prototype.loadTile = async function (tile) {
 };
 
 const MAP_TIMEOUT_MS = 120_000;
+/**
+ * Pitched far tiles come at coarser levels, and buildings only exist from level
+ * 13: a city standing in 3D would stop at an edge. While it stands, the map's
+ * tiles span one level on screen, at up to this many times the tiles of a flat
+ * view (MapLibre's defaults: about 9 levels, 3 times). Mirrored in prefetch.py.
+ */
+const TILE_LOD = {city: [1, 30], flat: [9.314, 3]} as const;
 
 type Props = {
   spec: SceneSpec;
@@ -33,7 +40,7 @@ type Props = {
 };
 
 /** Keys of the map state applied incrementally, so unchanged values cost nothing. */
-type Applied = {globe: boolean | null; terrain: number; opacity: number; contours: number; satellite: number; shade: number; buildings: number};
+type Applied = {globe: boolean | null; terrain: number; opacity: number; contours: number; satellite: number; shade: number; buildings: number; city: boolean};
 
 /**
  * One MapLibre instance per render tab, driven frame by frame: jumpTo(camera),
@@ -44,7 +51,7 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const matrixRef = useRef<Float64Array | null>(null);
-  const applied = useRef<Applied>({globe: null, terrain: -1, opacity: -1, contours: -1, satellite: -1, shade: -1, buildings: 0});
+  const applied = useRef<Applied>({globe: null, terrain: -1, opacity: -1, contours: -1, satellite: -1, shade: -1, buildings: 0, city: false});
   const [ready, setReady] = useState(false);
   const [initHandle] = useState(() => delayRender('map init', {timeoutInMilliseconds: MAP_TIMEOUT_MS}));
 
@@ -209,6 +216,11 @@ function applyState(map: maplibregl.Map, spec: SceneSpec, camera: Camera, state:
     map.setLayoutProperty('buildings-3d', 'visibility', buildings > 0 ? 'visible' : 'none');
     map.setPaintProperty('buildings-3d', 'fill-extrusion-opacity', buildings);
     state.buildings = buildings;
+  }
+  if (state.city !== buildings > 0) {
+    const [levels, ratio] = TILE_LOD[buildings > 0 ? 'city' : 'flat'];
+    map.setSourceTileLodParams(levels, ratio, 'omt');
+    state.city = buildings > 0;
   }
   if (spec.look === 'satellite' && spec.tiles.satellite && state.satellite !== satellite) {
     // Fully off: hide the imagery so its tiles are not even requested.

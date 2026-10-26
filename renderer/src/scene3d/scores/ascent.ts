@@ -16,17 +16,21 @@ const ROAD = {alpha: 0.3, width: 1};
  * shade, and fades out toward its ends: a range has no edge.
  */
 const THING = {alpha: 0.75, width: 1, fill: 0.08, shade: 0.1, inS: 0.9, gone: [5, 12], taper: 0.2};
-/** A level, drawn from where the line crosses it out to its far end; it gives way once the next is drawn. */
-const LEVEL = {alpha: 0.4, width: 1, drawS: 1.2, outS: 1.2};
-/** A period's divider, from the ground up to the profile; folded, a tick of this many px right of the line (minor: a share). */
-const DIVIDER = {alpha: 0.3, width: 1, tick: 6, minor: 0.5};
+/** A level: a hairline drawn out from where the line crosses it to its name, and gone with the name. */
+const LEVEL = {alpha: 0.4, width: 1, drawS: 1.2};
+/**
+ * A period done: a post rising from the ground to the profile where it ends (over `riseS`), running on
+ * `leader` px below the ground to its name, which follows `nameLagS` later; the ground under the profile
+ * is a fainter hairline. Folded, a tick of this many px right of the line (minor: a share).
+ */
+const POST = {alpha: 0.3, ground: 0.16, width: 1, riseS: 0.7, nameLagS: 0.15, leader: 12, tick: 6, minor: 0.5};
 /** Folded, a tick left of the line at each multiple of the measure's height, drawn up one after another. */
 const RULER = {alpha: 0.6, tick: 8};
 /**
- * A level's glyph (something everyone knows at that height, too small for true scale): a quiet
- * silhouette leading the line out, nose first, and resting at its end; every glyph at one px per metre.
+ * A level's glyph (something everyone knows at that height, too small for true scale): seen from above,
+ * nose toward its name, `gap` px clear of the level's end; every glyph at one scale, so their sizes compare.
  */
-const GLYPH = {fill: 0.7, pxPerM: 0.75};
+const GLYPH = {fill: 0.85, pxPerM: 1.2, gap: 8};
 /** Seconds a name takes to come in or give way, and stays before it does (folded, the last ones come back). */
 const TAG_FADE_S = 0.6;
 const NAME_HOLD_S = 4;
@@ -99,9 +103,12 @@ function stretch(profile: Profile, from: number, to: number, squash: number): nu
   return out;
 }
 
-/** How much of a height's mark is in (0..1): a thing fades in whole, a level is drawn out. */
+/** How much of a height's mark is in (0..1): a thing fades in whole; a level is drawn out to its name as it comes in. */
 function drawn(h: Height, now: number): number {
-  if (h.shape === 'level') return glide(span(now, h.t, h.t + LEVEL.drawS));
+  if (h.shape === 'level') {
+    const start = Math.max(h.t, h.named - TAG_FADE_S);
+    return glide(span(now, start, start + LEVEL.drawS));
+  }
   return inOutSine(span(now, h.t0, h.t0 + THING.inS));
 }
 
@@ -130,7 +137,7 @@ export function ascentScore({spec, tracks, frame, channel, projector, width, hei
   const at = (x: number, z: number) => planePoint(projector, plane, x, z);
   const total = profile.z[profile.z.length - 1];
   const hairline = (strokes: number[][], alpha: number) =>
-    ops.push({kind: 'plane', plane, strokes, rgb: INK.paperRGB, alpha: alpha * fade, width: DIVIDER.width * scale});
+    ops.push({kind: 'plane', plane, strokes, rgb: INK.paperRGB, alpha: alpha * fade, width: POST.width * scale});
   // A name beside its mark wraps rather than run past the side margin.
   const sideRoom = (direction: TagItem['direction'], x: number, leader: number) =>
     direction === 'left' ? x - leader - 10 * scale - marginX : direction === 'right' ? width - marginX - x - leader - 10 * scale : undefined;
@@ -158,34 +165,36 @@ export function ascentScore({spec, tracks, frame, channel, projector, width, hei
     }
   }
 
-  // How it grew: each year (or month) divided off along the base and named
-  // under its stretch, with its climbing once done. Months over several
-  // years divide the base more finely, and their years are named. Folded,
-  // the dividers become ticks on the line, the names beside it, riding the
-  // line in as it straightens.
+  // How it grew: each year (or month), once done, marked where it ends by a
+  // post rising from the ground to the profile, named under its foot with its
+  // climbing; the post runs on as the name's leader, one line in one move.
+  // Months over several years divide only the folded line, and their years
+  // are named. Folded, the posts become ticks on the line, the names beside
+  // them, riding the line in as it straightens.
   const lineLabels = smootherstep(span(fold, 0.45, 0.95));
   const baseLabels = 1 - smootherstep(span(fold, 0.05, 0.55));
   // Metres per pixel along the folded line, for things drawn a set size on screen.
   const mPerPx = total / Math.max(1, Math.abs(at(0, 0)[1] - at(0, total)[1]));
+  const risen = (period: Span) => glide(span(now, period.t, period.t + POST.riseS));
+  if (story.periods.length && baseLabels > 0.004 && head > 0) {
+    hairline([[0, 0, head * squash, 0]], POST.ground * counterAlpha * baseLabels);
+  }
   const divide = (spans: Span[], id: string, minor: boolean) => {
+    const done = spans.map((period, k) => ({period, k, rise: risen(period)})).filter(({rise}) => rise > 0);
+    const weight = minor ? POST.minor : 1;
     let lastTickY = Infinity;
-    spans.forEach((period, k) => {
-      const [x0] = period.x;
-      const [z0] = period.z;
-      if (head <= x0) return;
-      const enter = k ? inOutSine(span(now, spans[k - 1].t, spans[k - 1].t + TAG_FADE_S)) : counterAlpha;
-      const weight = minor ? DIVIDER.minor : 1;
-      // Months within years divide only the folded line: along the base they would be a comb.
-      if (k && !minor && baseLabels > 0.004) hairline([[x0 * squash, 0, x0 * squash, z0]], DIVIDER.alpha * enter * baseLabels);
-      if (k && lineLabels > 0.004) {
-        const x = x0 * squash;
-        const [, ty] = at(x, z0);
+    for (const {period, rise} of done) {
+      const x = period.x[1] * squash;
+      const z = period.z[1];
+      if (!minor && baseLabels > 0.004) hairline([[x, 0, x, z * rise]], POST.alpha * baseLabels);
+      if (lineLabels > 0.004) {
+        const [, ty] = at(x, z);
         if (Math.abs(ty - lastTickY) >= 1.5 * scale) {
           lastTickY = ty;
-          hairline([[x, z0, x + DIVIDER.tick * weight * scale * mPerPx, z0]], 2 * DIVIDER.alpha * weight * lineLabels);
+          hairline([[x, z, x + POST.tick * weight * scale * mPerPx, z]], 2 * POST.alpha * weight * lineLabels);
         }
       }
-    });
+    }
     if (minor) return;
     if (baseLabels > 0.004) {
       const compactBase = spans.length > 5;
@@ -193,40 +202,34 @@ export function ascentScore({spec, tracks, frame, channel, projector, width, hei
       const minDx = compactBase ? 2.45 * baseSize * textScale : 82 * textScale;
       const loX = marginX + 0.45 * minDx;
       const hiX = width - marginX - 0.45 * minDx;
-      const baseItems: {k: number; period: Span; ax: number; ay: number; enter: number; done: number; alpha: number}[] = [];
-      spans.forEach((period, k) => {
-        const [x0, x1] = period.x;
-        if (head <= x0) return;
-        const enter = k ? inOutSine(span(now, spans[k - 1].t, spans[k - 1].t + TAG_FADE_S)) : counterAlpha;
-        const done = inOutSine(span(now, period.t, period.t + TAG_FADE_S));
-        const alpha = enter * baseLabels * fade;
-        if (alpha <= 0.004) return;
-        const [ax, ay, okA] = at(x0 * squash, 0);
-        const [bx, by, okB] = at(Math.min(x1, head) * squash, 0);
-        if (!okA || !okB) return;
-        baseItems.push({k, period, ax: 0.5 * (ax + bx), ay: 0.5 * (ay + by), enter, done, alpha});
-      });
-      const rawAnchors = baseItems.map((it) => it.ax);
-      let labelXs = baseItems.length ? spread([rawAnchors[0]], minDx, loX, hiX) : [];
-      for (let i = 1; i < baseItems.length; i++) {
-        const prev = [...labelXs, Math.min(hiX, Math.max(rawAnchors[i], labelXs[i - 1] + minDx))];
-        const next = spread(rawAnchors.slice(0, i + 1), minDx, loX, hiX);
-        const w = baseItems[i].enter;
-        labelXs = next.map((nx, j) => lerp(prev[j], nx, w));
+      const feet: {k: number; period: Span; ax: number; ay: number; rise: number}[] = [];
+      for (const {period, k, rise} of done) {
+        const [ax, ay, ok] = at(period.x[1] * squash, 0);
+        if (ok) feet.push({k, period, ax, ay, rise});
       }
-      baseItems.forEach((it, i) => {
+      // Names keep clear of each other, and make room for a new one as it comes in.
+      const anchors = feet.map((it) => it.ax);
+      let labelXs = feet.length ? spread([anchors[0]], minDx, loX, hiX) : [];
+      for (let i = 1; i < feet.length; i++) {
+        const prev = [...labelXs, Math.min(hiX, Math.max(anchors[i], labelXs[i - 1] + minDx))];
+        const next = spread(anchors.slice(0, i + 1), minDx, loX, hiX);
+        labelXs = next.map((nx, j) => lerp(prev[j], nx, feet[i].rise));
+      }
+      feet.forEach((it, i) => {
+        const alpha = inOutSine(span(now, it.period.t + POST.nameLagS, it.period.t + POST.nameLagS + TAG_FADE_S)) * baseLabels * fade;
         const lx = labelXs[i];
-        const leader = 12 * scale;
-        const lead = leader * it.alpha;
+        const leader = POST.leader * scale;
+        const lead = leader * it.rise;
         if (lead > 0.5) {
           ops.push({
             kind: 'screen-path',
             xy: [it.ax, it.ay, it.ax, it.ay + 0.25 * lead, lx, it.ay + 0.75 * lead, lx, it.ay + lead],
             rgb: INK.paperRGB,
-            alpha: 0.22 * it.alpha,
-            width: scale,
+            alpha: POST.alpha * baseLabels * fade,
+            width: POST.width * scale,
           });
         }
+        if (alpha <= 0.004) return;
         const tag: TagItem = {
           kind: 'tag',
           id: `${id}-${it.k}`,
@@ -238,11 +241,10 @@ export function ascentScore({spec, tracks, frame, channel, projector, width, hei
           text: it.period.label,
           sub: compactBase ? undefined : it.period.value,
           size: baseSize,
-          subOpacity: it.done,
-          opacity: it.alpha,
+          opacity: alpha,
         };
         texts.push(tag);
-        knockouts.push({text: tag.id, alpha: it.alpha});
+        knockouts.push({text: tag.id, alpha});
       });
     }
     if (lineLabels > 0.004) {
@@ -253,13 +255,10 @@ export function ascentScore({spec, tracks, frame, channel, projector, width, hei
       let minY = Math.max(safeTop, Math.min(yTop, yBase) - 8 * textScale);
       let maxY = Math.min(safeBottom, Math.max(yTop, yBase) + 8 * textScale);
       const lineItems: {k: number; period: Span; lx: number; ly: number}[] = [];
-      spans.forEach((period, k) => {
-        const [z0, z1] = period.z;
-        if (head <= period.x[0]) return;
-        const zMid = 0.5 * (z0 + z1);
-        const [lx, ly, ok] = at(xAtHeight(profile, zMid) * squash, zMid);
+      for (const {period, k} of done) {
+        const [lx, ly, ok] = at(period.x[1] * squash, period.z[1]);
         if (ok) lineItems.push({k, period, lx, ly});
-      });
+      }
       const a = lineLabels * fade;
       if (lineItems.length && a > 0.004) {
         const n = lineItems.length;
@@ -329,32 +328,62 @@ export function ascentScore({spec, tracks, frame, channel, projector, width, hei
   }
 
   // Things anyone knows, standing left of home at true scale: each comes
-  // in as the line nears it and fills up to the height climbed so far;
-  // levels are drawn out from where the line crosses them, one at a time.
+  // in as the line nears it and fills up to the height climbed so far.
+  // Levels are drawn out from where the line crosses them to their name,
+  // and go with it: a level means nothing once its name has gone.
   const lastThing = story.heights.reduce((last, h, i) => (h.shape === 'level' ? last : i), -1);
   const lastLevel = story.heights.reduce((last, h, i) => (h.shape === 'level' ? i : last), -1);
-  const levels = story.heights.filter((h) => h.shape === 'level');
-  const marks: {h: Height; anchor: [number, number]; side: [number, number]; standing: number}[] = [];
+  const glyphM = GLYPH.pxPerM * scale * mPerPx;
+  // Where each is named: a thing above its top, and folded from its left end (where a skyline is fully
+  // drawn); a level at its far end, past its glyph.
+  const namedAt = story.heights.map((h) => {
+    if (h.shape === 'level') {
+      const [[far, z]] = h.strokes[0];
+      const length = h.glyph ? Math.max(...h.glyph.flat().map(([x]) => x)) : 0;
+      const nose = h.glyph ? far - GLYPH.gap * scale * mPerPx - length * glyphM : far;
+      return {top: [nose, z], side: [nose, z]};
+    }
+    const pts = h.strokes.flat();
+    const top = pts.reduce((a, b) => (b[1] > a[1] ? b : a));
+    const x0 = Math.min(...pts.map(([x]) => x));
+    const x1 = Math.max(...pts.map(([x]) => x));
+    return {top, side: h.shape === 'skyline' ? pts.find(([x]) => x >= x0 + THING.taper * (x1 - x0))! : top};
+  });
+
+  // One name at a time while the line climbs (when, the director decides),
+  // for a while or until the next one; the last stays on. Folded, the last
+  // thing and level passed are named, to the left, clear of the line and its
+  // ruler; the level only with room to read it clear of the thing.
+  const sideY = (i: number) => (i < 0 ? undefined : at(namedAt[i].side[0], namedAt[i].side[1])[1]);
+  const [thingY, levelY] = [sideY(lastThing), sideY(lastLevel)];
+  const levelBack = thingY === undefined || levelY === undefined ? 1 : clamp01((Math.abs(thingY - levelY) - 2.6 * LABEL_LINE * textScale) / (0.6 * LABEL_LINE * textScale));
+  const foldedBack = (i: number) => (i === lastThing ? 1 : i === lastLevel ? levelBack : 0);
+  const gives = (i: number) => {
+    const h = story.heights[i];
+    const next = story.heights[i + 1];
+    if (!next) return 0;
+    const until = Math.min(next.named, h.named + 2 * TAG_FADE_S + NAME_HOLD_S);
+    return inOutSine(span(now, until - TAG_FADE_S, until));
+  };
+  const climbing = (i: number) => inOutSine(span(now, story.heights[i].named, story.heights[i].named + TAG_FADE_S)) * (1 - gives(i));
+
+  const marks: {i: number; standing: number}[] = [];
   story.heights.forEach((h, i) => {
     const share = drawn(h, now);
     if (share <= 0) return;
     if (h.shape === 'level') {
-      const next = levels[levels.indexOf(h) + 1];
-      const standing = next ? 1 - smootherstep(span(now, next.t + LEVEL.drawS, next.t + LEVEL.drawS + LEVEL.outS)) : 1;
-      if (standing <= 0.004) return;
+      const life = lerp(1 - gives(i), foldedBack(i), lineLabels);
+      if (life <= 0.004) return;
       const [[far, z], [cross]] = h.strokes[0];
       const right = cross * squash;
-      const left = lerp(right, far, share);
-      ops.push({kind: 'plane', plane, strokes: [[right, z, left, z]], rgb: INK.paperRGB, alpha: LEVEL.alpha * standing * fade, width: LEVEL.width * scale});
-      let nose = left;
+      ops.push({kind: 'plane', plane, strokes: [[right, z, lerp(right, far, share), z]], rgb: INK.paperRGB, alpha: LEVEL.alpha * life * fade, width: LEVEL.width * scale});
       if (h.glyph) {
-        const m = GLYPH.pxPerM * scale * mPerPx;
-        nose = left - m * Math.max(...h.glyph.flat().map(([x]) => x));
-        const strokes = h.glyph.map((st) => st.flatMap(([x, y]) => [nose + x * m, z + y * m]));
-        ops.push({kind: 'plane', plane, strokes, rgb: INK.paperRGB, alpha: 0, width: 0, fill: GLYPH.fill * Math.min(1, 3 * share) * standing * fade});
+        const nose = namedAt[i].top[0];
+        const strokes = h.glyph.map((st) => st.flatMap(([x, y]) => [nose + x * glyphM, z + y * glyphM]));
+        const shown = lerp(climbing(i), foldedBack(i), lineLabels);
+        ops.push({kind: 'plane', plane, strokes, rgb: INK.paperRGB, alpha: 0, width: 0, fill: GLYPH.fill * shown * fade});
       }
-      const [x, y, ok] = at(nose, z);
-      if (ok) marks.push({h, anchor: [x, y], side: [x, y], standing});
+      marks.push({i, standing: 1});
       return;
     }
     // The last thing passed stays as the measure; the others give way once outgrown.
@@ -368,41 +397,37 @@ export function ascentScore({spec, tracks, frame, channel, projector, width, hei
     } else {
       ops.push({kind: 'plane', plane, strokes, rgb: INK.paperRGB, alpha: THING.alpha * alpha, width: THING.width * scale, shade: THING.shade * alpha, lit: climbed, taper: [THING.taper, THING.taper]});
     }
-    // Named above its top; folded, from its left end, where a skyline is fully drawn.
-    const pts = h.strokes.flat();
-    const top = pts.reduce((a, b) => (b[1] > a[1] ? b : a));
-    const x0 = Math.min(...pts.map(([x]) => x));
-    const x1 = Math.max(...pts.map(([x]) => x));
-    const end = h.shape === 'skyline' ? pts.find(([x]) => x >= x0 + THING.taper * (x1 - x0))! : top;
-    const [x, y, ok] = at(top[0], top[1]);
-    const [sx, sy] = at(end[0], end[1]);
-    if (ok) marks.push({h, anchor: [x, y], side: [sx, sy], standing});
+    marks.push({i, standing});
   });
   ops.push({kind: 'dot', at: story.home, radius: 3 * scale, rgb: INK.paperRGB, alpha: 0.9 * fade * (1 - live)});
 
-  // One name at a time while the line climbs (when, the director decides),
-  // for a while or until the next one. Folded, the last thing and level
-  // passed are named again, to the left, clear of the line and its ruler.
-  // Folded, the level comes back only with room to read it clear of the thing.
-  const sideOf = (i: number) => marks.find((m) => m.h === story.heights[i])?.side;
-  const [thingSide, levelSide] = [sideOf(lastThing), sideOf(lastLevel)];
-  const levelBack = !thingSide || !levelSide ? 1 : clamp01((Math.abs(thingSide[1] - levelSide[1]) - 2.6 * LABEL_LINE * textScale) / (0.6 * LABEL_LINE * textScale));
-  for (const {h, anchor, side, standing} of marks) {
-    const i = story.heights.indexOf(h);
-    const next = story.heights[i + 1];
-    const until = Math.min(next ? next.named : Infinity, h.named + 2 * TAG_FADE_S + NAME_HOLD_S);
-    const climbing = inOutSine(span(now, h.named, h.named + TAG_FADE_S)) * (1 - inOutSine(span(now, until - TAG_FADE_S, until)));
-    const folded = i === lastThing ? lineLabels : i === lastLevel ? lineLabels * levelBack : 0;
+  for (const {i, standing} of marks) {
+    const h = story.heights[i];
+    const folded = lineLabels * foldedBack(i);
     const named: [TagItem['direction'], number, string][] =
       h.shape === 'skyline'
-        ? [['up', climbing * (1 - folded), ''], ['left', folded, '-folded']]
-        : [['left', Math.max(climbing, folded), '']];
+        ? [['up', climbing(i) * (1 - folded), ''], ['left', folded, '-folded']]
+        : [['left', lerp(climbing(i), foldedBack(i), lineLabels), '']];
     for (const [direction, a, suffix] of named) {
       const alpha = a * standing * fade;
       if (alpha <= 0.004) continue;
-      const leader = (direction === 'up' ? 20 : 28) * scale;
-      const [x, y] = suffix ? side : anchor;
-      const tag: TagItem = {kind: 'tag', id: `ascent-height-${h.at}${suffix}`, x, y, leader, direction, text: h.name, sub: h.value, maxWidth: sideRoom(direction, x, leader), opacity: alpha};
+      // A level's line, and its glyph, lead to its name already.
+      const leader = h.shape === 'level' ? 0 : (direction === 'up' ? 20 : 28) * scale;
+      const [x, y, ok] = at(...((suffix ? namedAt[i].side : namedAt[i].top) as [number, number]));
+      if (!ok) continue;
+      const tag: TagItem = {
+        kind: 'tag',
+        id: `ascent-height-${h.at}${suffix}`,
+        x,
+        y,
+        leader,
+        customLeader: h.shape === 'level',
+        direction,
+        text: h.name,
+        sub: h.value,
+        maxWidth: sideRoom(direction, x, leader),
+        opacity: alpha,
+      };
       texts.push(tag);
       knockouts.push({text: tag.id, alpha});
     }

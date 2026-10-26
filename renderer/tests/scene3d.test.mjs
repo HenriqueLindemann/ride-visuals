@@ -43,10 +43,11 @@ const {clamp01, envelope, glide, span, travel} = await import('../src/scene3d/co
 const {destination, greatCircle, groundResolution, mercX, mercY, metersPerPixel, unmercX, unmercY} = await import(
   '../src/scene3d/core/geo.ts'
 );
-const {decodeTrack, indexAtDistance, lodFor, pointAtDistance} = await import('../src/scene3d/core/track.ts');
+const {decodeTrack, extentUpTo, indexAtDistance, lodFor, pointAtDistance} = await import('../src/scene3d/core/track.ts');
 const {PORTRAIT_TEXT, spread} = await import('../src/scene3d/core/layout.ts');
 const {sceneSpecSchema} = await import('../src/scene3d/schema.ts');
 const {scores} = await import('../src/scene3d/scores/index.ts');
+const {plateAt, ridesAt} = await import('../src/scene3d/scores/strata.ts');
 
 test('ease curves preserve endpoints and monotonicity', () => {
   assert.equal(clamp01(-2), 0);
@@ -200,6 +201,12 @@ test('flyover, stretch, and strata scores produce valid ops and non-overlapping 
   assert.equal(flyOpening.ops.filter((op) => op.kind === 'track').length, 0);
   assert.equal(flyOpening.ops.filter((op) => op.kind === 'dot').length, 1);
 
+  const plateCorners = [
+    [7.7, 49.4],
+    [7.85, 49.4],
+    [7.85, 49.5],
+    [7.7, 49.5],
+  ];
   const strataSpec = sceneSpecSchema.parse({
     ...flySpec,
     kind: 'strata',
@@ -219,15 +226,10 @@ test('flyover, stretch, and strata scores produce valid ops and non-overlapping 
       focus1: [1],
     },
     story: {
-      corners: [
-        [7.7, 49.4],
-        [7.85, 49.4],
-        [7.85, 49.5],
-        [7.7, 49.5],
-      ],
+      home: [7.76, 49.44],
       floors: [
-        {id: '2026-07', label: 'July', value: '400', unit: 'km', targetLift: 0, trackIndices: [0]},
-        {id: '2026-08', label: 'August', value: '620', unit: 'km', targetLift: 5000, trackIndices: [0]},
+        {id: '2026-07', label: 'July', value: '400', unit: 'km', targetLift: 0, corners: plateCorners, trackIndices: [0]},
+        {id: '2026-08', label: 'August', value: '620', unit: 'km', targetLift: 5000, corners: plateCorners, trackIndices: [0]},
       ],
       opening: {label: '20 rides', text: 'Kaiserslautern'},
       stats: [{label: 'Rides', value: '20'}],
@@ -353,6 +355,12 @@ test('edge-case scores: flat flyover, 12-month portrait strata, and multi-ride s
     unit: 'km',
     targetLift: k * 1200,
     step: 1200,
+    corners: [
+      [7.75, 49.4],
+      [7.85, 49.4],
+      [7.85, 49.5],
+      [7.75, 49.5],
+    ],
     trackIndices: [0],
   }));
   const strataChannels = {
@@ -374,12 +382,7 @@ test('edge-case scores: flat flyover, 12-month portrait strata, and multi-ride s
     profile: {width: 1080, height: 1920, fps: 30, durationInFrames: 1},
     channels: strataChannels,
     story: {
-      corners: [
-        [7.7, 49.4],
-        [7.85, 49.4],
-        [7.85, 49.5],
-        [7.7, 49.5],
-      ],
+      home: [7.76, 49.44],
       floors,
       opening: {label: '120 rides · Jan — Dec 2026', text: 'Kaiserslautern'},
       stats: [
@@ -412,6 +415,15 @@ test('edge-case scores: flat flyover, 12-month portrait strata, and multi-ride s
   }
   // Instagram Story: the top and bottom 220 px of a 1080x1920 frame are covered.
   assert.ok(floors12[0].y >= 220);
+  // In the stack's order (newest on top), each leader leaves its label level, and
+  // the leaders keep that order all the way to their plates: none cross.
+  assert.deepEqual(floors12.map((t) => t.id), months.map((_, k) => `floor-label-${11 - k}`));
+  const leaders = strata12Out.ops.filter((op) => op.kind === 'screen-path').sort((a, b) => a.xy[1] - b.xy[1]);
+  assert.ok(leaders.length > 0);
+  for (const [i, {xy}] of leaders.entries()) {
+    assert.equal(xy[1], xy[3]);
+    if (i > 0) assert.ok(xy.at(-1) >= leaders[i - 1].xy.at(-1), `leader ${i} crosses the one above`);
+  }
 
   // The 2x2 totals rest on the safe area and the floor column stops above them.
   const statTexts = strata12Out.texts.filter((t) => t.id.startsWith('strata-stat-'));
@@ -565,5 +577,57 @@ test('edge-case scores: flat flyover, 12-month portrait strata, and multi-ride s
       assert.equal(lineTags[i].opacity, 1, `month ${i} on folded line must have full uniform opacity`);
       if (i > 0) assert.ok(lineTags[i].y - lineTags[i - 1].y >= 38 * tScale, `month ${i} overlaps on folded line`);
     }
+
+    // A done month is marked by a post from the ground up to where it ends.
+    const [first] = ascentPeriods;
+    const isPost = (op) => op.kind === 'plane' && op.strokes[0].length === 4 && op.strokes[0][0] === first.x[1] && op.strokes[0][2] === first.x[1];
+    assert.deepEqual([...climbOut.ops.find(isPost).strokes[0]], [first.x[1], 0, first.x[1], first.z[1]]);
+
+    // A level is drawn to its name and goes with it; the last one stays.
+    const level = (key, at, t) => ({key, at, shape: 'level', strokes: [[[-0.15 * at, at], [xAcc, at]]], t0: t, t, named: t + 0.6, glyph: null, name: key, value: `${at} m`});
+    const levelSpec = sceneSpecSchema.parse({...ascentSpec, story: {...ascentSpec.story, heights: [level('airliner', 11000, 5), level('concorde', 18300, 12)]}});
+    const levelsAt = (seconds) => {
+      const out = scores.ascent({spec: levelSpec, tracks: [track], frame: seconds * 30, channel: (name) => (name === 'fold' ? 0 : levelSpec.channels[name][0]), projector: makeProjector(w, h), width: w, height: h, scale: 1, textScale: tScale});
+      return [11000, 18300].filter((z) => out.ops.some((op) => op.kind === 'plane' && op.strokes[0].length === 4 && op.strokes[0][1] === z && op.strokes[0][3] === z));
+    };
+    assert.deepEqual(levelsAt(8), [11000]);
+    assert.deepEqual(levelsAt(20), [18300]);
   }
+});
+
+test('strata plates follow their rides, never shrink, never cut a line, and reach out to a far start', () => {
+  // A ride out east from home, then one starting at the far east end riding back.
+  const line = (x0, dx) => decodeTrack({x: [x0, ...Array(40).fill(dx)], y: [49_440_000, ...Array(40).fill(0)], d: [0, ...Array(40).fill(9_000)]});
+  const tracks = [line(7_700_000, 3_000), line(7_900_000, -3_000)];
+  const corners = [
+    [7.68, 49.43],
+    [7.92, 49.43],
+    [7.92, 49.45],
+    [7.68, 49.45],
+  ];
+  const fps = 30;
+  const draws = Array.from({length: 4 * fps}, (_, f) => span(f, 0.5 * fps, 3 * fps));
+  let prev = null;
+  let prevSpeed = 0;
+  for (let f = 0; f < draws.length; f++) {
+    const [[w, s], , [e, n]] = plateAt(tracks, draws, f, fps, corners);
+    // Before the first line, just the margin around its start.
+    if (draws[f] === 0) assert.ok(Math.abs(w - 7.68) < 1e-9 && Math.abs(e - 7.72) < 1e-9, `frame ${f}: plate moves ahead of its rides`);
+    // The first ride's line, which starts on the plate, is never cut.
+    const [ride] = ridesAt(tracks, draws[f]);
+    if (ride.head > 0) {
+      const [w1, s1, e1, n1] = extentUpTo(ride.track, ride.head * ride.track.length);
+      assert.ok(w <= w1 && s <= s1 && e >= e1 && n >= n1, `frame ${f}: the line pokes out of its plate`);
+    }
+    if (prev) {
+      assert.ok(w <= prev[0] + 1e-12 && s <= prev[1] + 1e-12 && e >= prev[2] - 1e-12 && n >= prev[3] - 1e-12, `frame ${f}: plate shrinks`);
+      // Edges change speed gently.
+      const speed = Math.max(prev[0] - w, e - prev[2]) * fps;
+      assert.ok(Math.abs(speed - prevSpeed) * fps < 40, `frame ${f}: edge jerks`);
+      prevSpeed = speed;
+    }
+    prev = [w, s, e, n];
+  }
+  // Finished, the plate is exactly the floor's: it has reached the far start.
+  assert.deepEqual(plateAt(tracks, draws, draws.length - 1, fps, corners), corners);
 });

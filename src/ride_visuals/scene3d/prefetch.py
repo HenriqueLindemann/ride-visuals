@@ -33,9 +33,10 @@ Tile = tuple[int, int, int]
 
 #: MapLibre's map tiles are 512 px (transform.tileSize).
 MAP_TILE_SIZE = 512
-#: covering_tiles.ts defaults.
-MAX_ZOOM_LEVELS_ON_SCREEN = 9.314
-TILE_COUNT_MAX_MIN_RATIO = 3.0
+#: covering_tiles.ts defaults (zoom levels on screen, tile count ratio).
+DEFAULT_LOD = (9.314, 3.0)
+#: The map's tiles while a city stands in 3D (TILE_LOD in MapStage.tsx).
+CITY_LOD = (1.0, 30.0)
 #: mercator_utils.ts: rays are never followed further out than this from nadir.
 MAX_HORIZON_ANGLE_DEG = 89.25
 #: One camera sample per this many seconds; neighbours cover the motion between.
@@ -62,6 +63,8 @@ class _Layer:
     max_zoom: int
     #: Frames (boolean mask) on which the layer can request tiles.
     active: np.ndarray
+    #: How fast pitched tiles drop levels (setSourceTileLodParams).
+    lod: tuple[float, float] = DEFAULT_LOD
 
 
 @dataclass
@@ -83,28 +86,27 @@ def _integral_cos_pow(p: float, x1: float, x2: float) -> float:
     return sum(dx * math.cos(x1 + (i + 0.5) * dx) ** p for i in range(10))
 
 
-_PITCH_BEHAVIOUR = 2.0 * (
-    (MAX_ZOOM_LEVELS_ON_SCREEN - 1.0)
-    / math.log2(
-        math.cos(math.radians(MAX_HORIZON_ANGLE_DEG - FOV_DEG)) / math.cos(math.radians(MAX_HORIZON_ANGLE_DEG))
-    )
-    - 1.0
-)
-_TILE_COUNT_PITCH0 = 2.0 * _integral_cos_pow(_PITCH_BEHAVIOUR - 1.0, 0.0, math.radians(FOV_DEG / 2.0))
-
-
-def _tile_zoom_offset(center_pitch_deg: float, dist2d: np.ndarray, height: float, center_dist: float) -> np.ndarray:
+def _tile_zoom_offset(
+    center_pitch_deg: float, dist2d: np.ndarray, height: float, center_dist: float, lod: tuple[float, float]
+) -> np.ndarray:
     """calculateTileZoom minus the requested centre zoom, for ground points at ``dist2d``."""
+    levels, ratio = lod
+    behaviour = 2.0 * (
+        (levels - 1.0)
+        / math.log2(math.cos(math.radians(MAX_HORIZON_ANGLE_DEG - FOV_DEG)) / math.cos(math.radians(MAX_HORIZON_ANGLE_DEG)))
+        - 1.0
+    )
     half_fov = math.radians(FOV_DEG / 2.0)
+    count_pitch0 = 2.0 * _integral_cos_pow(behaviour - 1.0, 0.0, half_fov)
     centre = math.radians(center_pitch_deg)
     highest = min(math.radians(MAX_HORIZON_ANGLE_DEG), centre + half_fov)
     lowest = min(highest, centre - half_fov)
-    tile_count = _integral_cos_pow(_PITCH_BEHAVIOUR - 1.0, lowest, highest)
+    tile_count = _integral_cos_pow(behaviour - 1.0, lowest, highest)
     tile_pitch = np.arctan(dist2d / height)
     dist3d = np.hypot(dist2d, height)
     offset = np.log2(center_dist / dist3d / max(0.5, math.cos(half_fov)))
-    offset = offset + _PITCH_BEHAVIOUR * np.log2(np.maximum(np.cos(tile_pitch), 1e-9)) / 2.0
-    return offset - math.log2(max(1.0, tile_count / _TILE_COUNT_PITCH0 / TILE_COUNT_MAX_MIN_RATIO)) / 2.0
+    offset = offset + behaviour * np.log2(np.maximum(np.cos(tile_pitch), 1e-9)) / 2.0
+    return offset - math.log2(max(1.0, tile_count / count_pitch0 / ratio)) / 2.0
 
 
 def _ground_points(zoom: float, pitch: float, bearing: float, lat: float, width: int, height: int):
@@ -136,11 +138,13 @@ def _layers(spec: dict[str, Any], frames: int) -> list[_Layer]:
     dem_max = int(tiles["demMaxZoom"])
     contour_max = max(CONTOUR_MIN_ZOOM, min(dem_max - 2, 14))
     contours = np.asarray(cam["contours"], dtype=float) > 0
+    city = np.asarray(cam.get("buildings", np.zeros(frames)), dtype=float) > 0
     layers = [
         # Hillshade rounds like every raster source; the terrain mesh floors.
         _Layer("dem", 128, True, 0, dem_max, every),
         _Layer("dem", 128, False, 0, dem_max, every),
-        _Layer("vector", MAP_TILE_SIZE, False, 0, int(tiles["vectorMaxZoom"]), every),
+        _Layer("vector", MAP_TILE_SIZE, False, 0, int(tiles["vectorMaxZoom"]), ~city),
+        _Layer("vector", MAP_TILE_SIZE, False, 0, int(tiles["vectorMaxZoom"]), city, CITY_LOD),
         # maplibre-contour: one DEM tile of the contour tile's own level (overzoom 0).
         _Layer("dem", MAP_TILE_SIZE, False, CONTOUR_MIN_ZOOM, min(contour_max, dem_max, 14), contours),
     ]
@@ -192,13 +196,14 @@ def scene_tiles(spec: dict[str, Any], *, sample_every_s: float = SAMPLE_EVERY_S)
         my = np.clip(my0 - ground[:, 1] / (EARTH_CIRCUMFERENCE_M * cos_lat), 0.0, 1.0 - 1e-12)
         variable = terrain[i] > 0 or pitch > max_constant_pitch
 
-        def offset_at(dist: np.ndarray, *, variable=variable, pitch=pitch, eye_h=eye_h, center_dist=center_dist):
-            return _tile_zoom_offset(pitch, dist, eye_h, center_dist) if variable else np.zeros(len(dist))
-
-        point_offset = offset_at(dist2d)
         for layer in layers:
             if not layer.active[i]:
                 continue
+
+            def offset_at(dist: np.ndarray, *, variable=variable, pitch=pitch, eye_h=eye_h, center_dist=center_dist, lod=layer.lod):
+                return _tile_zoom_offset(pitch, dist, eye_h, center_dist, lod) if variable else np.zeros(len(dist))
+
+            point_offset = offset_at(dist2d)
             requested = zoom + math.log2(MAP_TILE_SIZE / layer.tile_size)
             if requested + 0.5 < layer.min_zoom:
                 continue

@@ -111,6 +111,15 @@ def test_every_landmark_is_named_in_every_locale_and_levels_carry_their_glyphs()
     assert min(x for x, _ in glyphs["concorde"][0]) == 0.0
 
 
+def test_glyphs_are_seen_from_above_at_their_real_length() -> None:
+    lengths = {mark.key: max(x for stroke in mark.glyph for x, _ in stroke) for mark in LANDMARKS if mark.glyph}
+    assert lengths == {"airliner": 37.6, "concorde": 61.7}
+    for mark in LANDMARKS:
+        for stroke in mark.glyph:
+            assert sorted(z for _, z in stroke) == sorted(-z for _, z in stroke)
+
+
+
 def test_the_camera_backs_away_with_home_held_still_on_screen() -> None:
     spec = build_ascent_spec(_archive(), fps=10, offline=True)
     cam, t = spec.camera, _t(spec)

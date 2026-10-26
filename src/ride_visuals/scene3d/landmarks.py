@@ -3,7 +3,7 @@
 Eiffel Tower: silhouette by GDJ (openclipart, CC0). Burj Khalifa: profile by MJBurrage
 (Wikimedia Commons, public domain), spire raised to the final 828 m. Fuji from the south and
 Everest with Lhotse from the west: Mapzen Terrain Tiles skylines (z12), summits set to the
-surveyed heights. Levels: airliners and Concorde cruising (glyphs drawn from real
+surveyed heights. Levels: airliners and Concorde cruising (seen from above, drawn from real
 dimensions), the highest skydive (FAI record, 2014), the edge of space (Kármán line) and the
 Space Station's mean orbit (2026).
 """
@@ -26,7 +26,7 @@ class Landmark:
     height_m: float
     shape: Shape
     strokes: tuple[Stroke, ...] = ()
-    #: A level's emblem, too small for true scale: a side view in metres, nose at x=0, axis at z=0.
+    #: A level's emblem, too small for true scale: seen from above in metres, nose at x=0, axis at z=0.
     glyph: tuple[Stroke, ...] = ()
 
 
@@ -108,25 +108,28 @@ _STROKES: dict[str, tuple[Stroke, ...]] = {
     ),
 }
 
+def _from_above(half: Stroke) -> tuple[Stroke, ...]:
+    """A plan view from one half of it (nose at x=0 to tail, z >= 0), mirrored about the axis."""
+    return ((*half, *((x, -z) for x, z in reversed(half[:-1]))),)
+
+
 _GLYPHS: dict[str, tuple[Stroke, ...]] = {
-    # A narrow-body airliner, ~38 m long: fuselage and fin, then the far wing.
-    "airliner": (
-        (
-            (0.0, -0.1), (1.6, 1.2), (4.6, 1.9), (28.4, 1.9), (30.7, 2.1), (34.7, 9.7), (37.0, 9.7),
-            (36.2, 2.1), (37.6, 1.5), (37.6, 0.8), (31.7, -0.9), (6.6, -1.7), (2.6, -1.5), (0.7, -1.0),
-            (0.0, -0.1),
-        ),
-        ((13.9, -0.9), (19.2, -0.9), (24.5, -5.2), (22.2, -5.2), (13.9, -0.9)),
-    ),
-    # Concorde in cruise (nose up), 61.7 m long: needle fuselage, swept fin, engine nacelles under the wing.
-    "concorde": (
-        (
-            (0.0, -0.15), (2.5, 0.45), (5.0, 0.9), (8.0, 1.3), (11.0, 1.55), (14.0, 1.66), (46.0, 1.66),
-            (55.6, 7.6), (59.4, 7.6), (60.6, 1.4), (61.7, 0.5), (61.7, 0.0), (58.6, -1.3), (58.6, -2.3),
-            (56.0, -3.4), (37.5, -3.4), (35.5, -1.9), (14.0, -1.66), (11.0, -1.6), (8.0, -1.35),
-            (5.0, -1.0), (2.5, -0.65), (0.0, -0.15),
-        ),
-    ),
+    # A narrow-body airliner seen from above (A320: 37.6 m long, 35.8 m span): swept wings with
+    # their engines slung ahead, tailplane.
+    "airliner": _from_above((
+        (0.0, 0.0), (0.4, 0.9), (1.2, 1.45), (2.5, 1.8), (4.5, 1.97), (13.0, 1.97), (14.6, 4.65),
+        (10.6, 4.65), (10.3, 5.1), (10.3, 6.4), (10.6, 6.85), (15.9, 6.85), (22.6, 17.9), (24.2, 17.9),
+        (20.5, 1.97), (31.0, 1.85), (31.6, 1.5), (35.6, 6.2), (36.9, 6.2), (35.9, 0.9), (37.6, 0.25),
+        (37.6, 0.0),
+    )),
+    # Concorde seen from above (61.7 m long, 25.6 m span): needle nose, ogival delta wing, no
+    # tailplane, four engine nozzles past the trailing edge.
+    "concorde": _from_above((
+        (0.0, 0.0), (1.5, 0.3), (4.0, 0.65), (8.0, 1.05), (12.0, 1.32), (16.0, 1.44), (19.0, 1.44),
+        (24.0, 1.9), (29.0, 2.8), (34.0, 4.3), (39.0, 6.5), (43.0, 8.7), (46.5, 10.6), (49.5, 11.9),
+        (52.0, 12.6), (54.5, 12.8), (56.0, 12.7), (57.5, 6.3), (60.4, 6.3), (60.4, 2.4), (58.7, 2.4),
+        (59.2, 1.44), (61.7, 0.4), (61.7, 0.0),
+    )),
 }
 
 #: In the order the line passes them.

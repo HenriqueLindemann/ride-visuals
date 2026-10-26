@@ -115,7 +115,8 @@ export const stretchStorySchema = z.object({
 });
 
 export const strataStorySchema = z.object({
-  corners: z.tuple([lngLat, lngLat, lngLat, lngLat]),
+  /** Where the rides start from: the stack's axis, which the floor labels line up on. */
+  home: lngLat,
   floors: z.array(
     z.object({
       id: z.string(),
@@ -127,6 +128,8 @@ export const strataStorySchema = z.object({
       targetLift: z.number(),
       /** Vertical distance between floors (m); a landing plate starts this far above. */
       step: optional(z.number()),
+      /** The finished plate, holding every ride of the period: SW, SE, NE, NW. */
+      corners: z.tuple([lngLat, lngLat, lngLat, lngLat]),
       trackIndices: z.array(z.number().int()),
     }),
   ),

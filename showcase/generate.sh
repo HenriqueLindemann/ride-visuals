@@ -37,8 +37,6 @@ ACTIVITY_FLYOVER="${ACTIVITY_FLYOVER:-19949741255}"
 FLYOVER_CLIMB="${FLYOVER_CLIMB:-22.67-30.83}"
 FLYOVER_ENDING="${FLYOVER_ENDING:-64.33-76.70}"
 STRATA_YEAR="${STRATA_YEAR:-2026}"
-# Seconds of title card skipped before the first floor appears.
-STRATA_START="${STRATA_START:-3.5}"
 
 TELEMETRY_BASEMAP="${TELEMETRY_BASEMAP:-satellite}"
 OVERLAY_BASEMAP="${OVERLAY_BASEMAP:-plain}"
@@ -212,23 +210,10 @@ flyover_gif() {
     -loop 0 "$destination"
 }
 
-# The strata floors are thin lines over a near-black terrain whose faint texture
-# changes every frame. Mapping only that texture to black (it ends below
-# 15/255; the floors start above 18/255) keeps every line and cuts the GIF to
-# a fraction of its size.
-strata_gif() {
-  local source="$1" destination="$2"
-  local black='if(lt(val\,15)\,0\,if(lt(val\,20)\,(val-15)*4\,val))'
-  ffmpeg -y -v error -ss "$STRATA_START" -i "$source" -filter_complex "
-    setpts=PTS/$GIF_SPEED,fps=10,scale=$SCENE_GIF_WIDTH:-1:flags=lanczos,format=rgb24,
-    lutrgb=r=$black:g=$black:b=$black,tpad=stop_mode=clone:stop_duration=1.5,split[a][b];
-    [a]palettegen=max_colors=64:stats_mode=full[p];
-    [b][p]paletteuse=dither=none:diff_mode=rectangle" \
-    -loop 0 "$destination"
-}
-
-# Ascent and stretch are lines on a near-black map: the same black mapping as
-# strata keeps them crisp, and a lower frame rate keeps the loop small.
+# Strata, ascent and stretch are thin lines over a near-black terrain whose
+# faint texture changes every frame. Mapping only that texture to black (it
+# ends below 15/255; the lines start above 18/255) keeps every line and cuts
+# the GIF to a fraction of its size; a lower frame rate keeps the loop small.
 line_gif() {
   local source="$1" destination="$2" start="${3:-0}"
   local black='if(lt(val\,15)\,0\,if(lt(val\,20)\,(val-15)*4\,val))'
@@ -262,7 +247,7 @@ scene3d() {
 
   log "3D: strata ($STRATA_YEAR by month)"
   render video strata --year "$STRATA_YEAR" --period month --preview --aspect 16:9
-  strata_gif \
+  line_gif \
     "$OUTPUTS/videos/strata/strata_years-${STRATA_YEAR}_month_carbon_16_9_${LOCALE_TAG}_preview.mp4" \
     "$SHOWCASE/strata.gif"
 

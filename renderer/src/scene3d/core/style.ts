@@ -209,8 +209,8 @@ export function buildStyle(look: Look, tiles: TileSet): StyleSpecification {
         type: 'fill-extrusion',
         source: 'omt',
         'source-layer': 'building',
-        // Down to the level that still holds buildings: the further out the map
-        // keeps them, the later the city has to give way to the flat map.
+        // Down to the level that still holds buildings; MapStage keeps that
+        // level out to the horizon while they stand (TILE_LOD).
         minzoom: 13,
         layout: {visibility: 'none'},
         paint: {

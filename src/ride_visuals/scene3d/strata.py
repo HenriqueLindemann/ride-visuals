@@ -43,6 +43,30 @@ def resolve_period(first: datetime, last: datetime, period: PeriodMode) -> Liter
     return ("month" if months <= 14 else "year") if period == "auto" else period
 
 
+#: A floor's plate is never smaller than this share of the home region, and
+#: its margin is this share of its own size, at least FLOOR_PAD_MIN of the region.
+FLOOR_MIN = 0.12
+FLOOR_PAD = 0.05
+FLOOR_PAD_MIN = 0.015
+
+
+def floor_box(rides: Sequence[SceneRide], origin: tuple[float, float], region_span: float) -> tuple[float, float, float, float]:
+    """Local (x0, y0, x1, y1) metres of a floor's plate: all its rides, grown evenly to the minimum, padded."""
+    xs, ys = local_xy(np.concatenate([r.track.lon for r in rides]), np.concatenate([r.track.lat for r in rides]), origin)
+    x0, y0, x1, y1 = float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())
+    grow_x = max(0.0, FLOOR_MIN * region_span - (x1 - x0)) / 2
+    grow_y = max(0.0, FLOOR_MIN * region_span - (y1 - y0)) / 2
+    x0, y0, x1, y1 = x0 - grow_x, y0 - grow_y, x1 + grow_x, y1 + grow_y
+    pad = max(FLOOR_PAD * max(x1 - x0, y1 - y0), FLOOR_PAD_MIN * region_span)
+    return x0 - pad, y0 - pad, x1 + pad, y1 + pad
+
+
+def box_corners(box: tuple[float, float, float, float], origin: tuple[float, float]) -> list[list[float]]:
+    """[lon, lat] of a local box's corners: SW, SE, NE, NW."""
+    lons, lats = from_local_xy(np.array([box[0], box[2], box[2], box[0]]), np.array([box[1], box[1], box[3], box[3]]), origin)
+    return [[round(float(lon), 6), round(float(lat), 6)] for lon, lat in zip(lons.tolist(), lats.tolist(), strict=True)]
+
+
 @dataclass(frozen=True)
 class StrataBuildResult:
     """Built strata scene spec and count of rides outside the home region."""
@@ -99,9 +123,9 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
     floor_keys = sorted(grouped)
     floor_count = len(floor_keys)
 
-    # Plate around where the riding happens: every ride weighs the same (a
-    # 200 km day out must not stretch the plate for 100 rides around home);
-    # what runs beyond the plate is cut at its edge by the player.
+    # The region where the riding happens, by its typical rides: every ride
+    # weighs the same, so a 200 km day out does not set the tower's scale or
+    # the opening frame for 100 rides around home.
     origin = (home_lon, home_lat)
     samples = [np.linspace(0, len(r.track.lon) - 1, 200).astype(int) for r in regional]
     all_lons = np.concatenate([r.track.lon[k] for r, k in zip(regional, samples, strict=True)])
@@ -113,28 +137,24 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
     span_y = max(float(y_max - y_min), 4_000.0)
     pad_x = 0.08 * span_x
     pad_y = 0.08 * span_y
-    x0, x1 = float(x_min - pad_x), float(x_max + pad_x)
-    y0, y1 = float(y_min - pad_y), float(y_max + pad_y)
-    plate_span = max(x1 - x0, y1 - y0)
+    region = (float(x_min - pad_x), float(y_min - pad_y), float(x_max + pad_x), float(y_max + pad_y))
+    plate_span = max(region[2] - region[0], region[3] - region[1])
+    # Each floor's plate holds every one of its rides, long days out included.
+    floor_boxes = [floor_box([regional[i] for i in grouped[key]], origin, plate_span) for key in floor_keys]
 
-    corner_x = np.array([x0, x1, x1, x0], dtype=float)
-    corner_y = np.array([y0, y0, y1, y1], dtype=float)
-    corner_lon, corner_lat = from_local_xy(corner_x, corner_y, origin)
-    corners = [
-        [round(float(lon), 6), round(float(lat), 6)]
-        for lon, lat in zip(corner_lon.tolist(), corner_lat.tolist(), strict=True)
-    ]
-
-    # Scale tower height to plate span so vertical floor separation always reads cleanly.
-    # Taller in portrait, where height is the room there is.
-    tower_height_m = (2.3 if height > width else 0.8) * plate_span if floor_count > 1 else 0.14 * plate_span
+    # Scale tower height to the typical plate so vertical floor separation
+    # always reads cleanly, however far the days out reach. Taller in
+    # portrait, where height is the room there is.
+    typical_span = max(plate_span, float(np.median([max(b[2] - b[0], b[3] - b[1]) for b in floor_boxes])))
+    tower_height_m = (2.3 if height > width else 0.8) * typical_span if floor_count > 1 else 0.14 * typical_span
     floor_step_m = tower_height_m / max(1, floor_count - 1) if floor_count > 1 else tower_height_m
 
     # Timeline (seconds).
     # One beat per floor: the plate lands, that period's rides draw on it, its
-    # label comes in. The film grows with the number of floors.
+    # label comes in. The film grows with the number of floors. No title card:
+    # the first plate lands as the curtain lifts, under the title.
     beat = 2.6 if resolved_period == "year" else (2.2 if floor_count <= 8 else 1.8)
-    t_beats = 3.4
+    t_beats = 0.5
     t_final = t_beats + floor_count * beat + 0.6
     # The four totals fade in over 1 s, then hold until the curtain.
     t_end = t_final + 1.0 + reading_hold_s(4) + CURTAIN_S
@@ -144,9 +164,11 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
     floor_lifts = [k * floor_step_m if floor_count > 1 else 0.0 for k in range(floor_count)]
 
     portrait = height > width
+    region_x = np.array([region[0], region[2], region[2], region[0]])
+    region_y = np.array([region[1], region[1], region[3], region[3]])
     z_top, cx_plate, cy_plate = fit_zoom(
-        corner_x,
-        corner_y,
+        region_x,
+        region_y,
         bearing=0.0,
         lat=home_lat,
         width=float(width),
@@ -154,10 +176,11 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
         fill=0.70 if not portrait else 0.76,
     )
 
-    # Camera: top-down for the title, tilt, then a slow orbit that rises with the stack.
+    # Camera: leans in from top-down as the first plate lands, then a slow
+    # orbit that rises with the stack.
     cam = CameraTrack(frames)
-    tilt = travel(span(t, 1.6, 3.8))
-    orbit = ease_in_out_sine(span(t, 1.6, t_end))
+    tilt = travel(span(t, 0.0, 2.8))
+    orbit = ease_in_out_sine(span(t, 0.0, t_end))
     stack_top = np.zeros(frames)
     for k in range(floor_count):
         stack_top = np.maximum(stack_top, floor_lifts[k] * travel(span(t, beat_start[k], beat_start[k] + 0.9)))
@@ -178,10 +201,27 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
     stats_in = ease_in_out_sine(span(t, t_final - 0.6, t_final + 1.0))
     # Portrait totals are two rows of larger text above the safe area.
     bottom = (0.9 - (0.21 if portrait else 0.1) * stats_in)
-    heights = np.concatenate([np.zeros((frames, 4)), np.repeat(framed_top[:, None], 4, axis=1)], axis=1)
+    # The view holds each floor's plate at its height, opening out as its rides
+    # draw (a month with a long day out widens it for the rest of the film),
+    # and the newest plate at the top the stack is framed for.
+    corners_x = [np.array([b[0], b[2], b[2], b[0]]) for b in floor_boxes]
+    corners_y = [np.array([b[1], b[1], b[3], b[3]]) for b in floor_boxes]
+    newest_x = np.tile(corners_x[0], (frames, 1))
+    newest_y = np.tile(corners_y[0], (frames, 1))
+    view_x, view_y, heights = [], [], []
+    for k in range(floor_count):
+        opened = glide(span(t, beat_start[k], beat_start[k] + beat))[:, None]
+        view_x.append(corners_x[0] + (corners_x[k] - corners_x[0]) * opened)
+        view_y.append(corners_y[0] + (corners_y[k] - corners_y[0]) * opened)
+        heights.append(np.repeat((floor_lifts[k] * travel(span(t, beat_start[k], beat_start[k] + 0.9)))[:, None], 4, axis=1))
+        newest_x += (corners_x[k] - newest_x) * opened
+        newest_y += (corners_y[k] - newest_y) * opened
+    view_x = np.hstack([*view_x, newest_x])
+    view_y = np.hstack([*view_y, newest_y])
+    heights = np.hstack([*heights, np.repeat(framed_top[:, None], 4, axis=1)])
     cam_cx, cam_cy, cam.zoom = frame_points(
         np.full(frames, cx_plate), np.full(frames, cy_plate), cam.elevation, np.full(frames, z_top), cam.pitch,
-        cam.bearing, home_lat, width, height, np.tile(corner_x, 2), np.tile(corner_y, 2), heights,
+        cam.bearing, home_lat, width, height, view_x, view_y, heights,
         (label_col, np.full(frames, 0.06), np.full(frames, 0.97), bottom),
         fps,
         fill=0.98,
@@ -192,7 +232,7 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
     cam.lon, cam.lat = from_local_xy(cam_cx, cam_cy, origin)
     cam.map_opacity = 1.0 - 0.45 * tilt
 
-    opening_ch = envelope(t, 0.35, t_beats + 0.4, 0.45)
+    opening_ch = envelope(t, 0.2, t_beats + 1.6 * beat, 0.6)
     final_ch = ease_in_out_sine(span(t, t_final - 0.4, t_final + 0.8))
     stats_ch = ease_in_out_sine(span(t, t_final, t_final + 1.0))
     fade_ch = 1.0 - 0.35 * ease_in_out_sine(span(t, t_end - 1.1, t_end))
@@ -225,7 +265,8 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
 
         b0 = beat_start[k]
         channels[f"floor{k}"] = glide(span(t, b0, b0 + 0.9))
-        channels[f"draw{k}"] = ease_in_out_sine(span(t, b0 + 0.25, b0 + beat + 0.2))
+        # Linear: the rides leave at an even cadence, each one eased by the player.
+        channels[f"draw{k}"] = span(t, b0 + 0.25, b0 + beat + 0.2)
         channels[f"label{k}"] = ease_in_out_sine(span(t, b0 + 0.3, b0 + 0.9))
         # In focus during its own beat, calmer once the next period arrives.
         channels[f"focus{k}"] = np.clip(
@@ -240,6 +281,7 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
                 "unit": "km",
                 "targetLift": round(floor_lifts[k], 1),
                 "step": round(floor_step_m, 1),
+                "corners": box_corners(floor_boxes[k], origin),
                 "trackIndices": indices,
             }
         )
@@ -255,7 +297,7 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
     total_hours = sum(max(0.0, r.moving_time_s) for r in regional) / 3600.0
 
     story = {
-        "corners": corners,
+        "home": [round(home_lon, 6), round(home_lat, 6)],
         "floors": story_floors,
         "excludedRides": excluded_count,
         "opening": {

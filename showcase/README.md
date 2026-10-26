@@ -19,7 +19,7 @@ This directory holds the images and GIFs used by the root `README.md`, plus
 Transparent renders keep their alpha in `outputs/`; the files in this directory
 are composited over `#161616` so the white telemetry stays readable on GitHub.
 The four 3D GIFs sit two by two at 640 px; their size budget and how each is
-kept small is noted next to `flyover_gif`, `strata_gif`, `line_gif` and `city_gif` in `generate.sh`.
+kept small is noted next to `flyover_gif`, `line_gif` and `city_gif` in `generate.sh`.
 
 ## Personal defaults
 
@@ -35,7 +35,6 @@ environment variables. The defaults are:
 | `FLYOVER_CLIMB` | `22.67-30.83` | Seconds of the flyover shown in 3D: the main climb up to its top |
 | `FLYOVER_ENDING` | `64.33-76.70` | Seconds of the ending, from the last metres ridden |
 | `STRATA_YEAR` | `2026` | Season stacked in the strata GIF |
-| `STRATA_START` | `3.5` | Seconds of title card skipped before the first floor |
 
 ## Regenerating
 
