@@ -53,10 +53,13 @@ export interface Projector {
 type Matrix = ArrayLike<number>;
 
 interface InternalMap {
+  painter?: {context: {gl: WebGL2RenderingContext; bindFramebuffer: {set: (fbo: WebGLFramebuffer | null) => void}}};
   terrain?: {
+    /** Depth of the rendered relief (Terrain.getFramebuffer), drawn at the start of each paint. */
+    _fbo?: {framebuffer: WebGLFramebuffer; width: number; height: number};
     getElevationForLngLat: (lngLat: maplibregl.LngLat, transform: unknown) => number;
-    /** Rendered DEM tiles; `maxElevation` is exaggerated metres plus a small pad. */
-    getCoverageIndex?: () => {maxElevation: number; zooms: number[]; samplerPerTile: Map<string, unknown>} | null;
+    /** Rendered DEM tiles. */
+    getCoverageIndex?: () => {zooms: number[]; samplerPerTile: Map<string, unknown>} | null;
     getElevationForLngLatZoom: (lngLat: maplibregl.LngLat, zoom: number) => number;
     tileManager: {minzoom: number; maxzoom: number};
   };
@@ -64,14 +67,6 @@ interface InternalMap {
 }
 
 const unmercLat = (my: number) => (360 / Math.PI) * Math.atan(Math.exp((180 - my * 360) * (Math.PI / 180))) - 90;
-
-/**
- * Line-of-sight ray fractions (eye -> target), precomputed once. sqrt(k/steps)
- * crowds the samples toward the target, where the ridges that matter usually
- * are, so a hidden point exits the walk early. Indexed k = steps..1.
- */
-const RAY_STEPS = 40;
-const RAY_S: number[] = Array.from({length: RAY_STEPS + 1}, (_, k) => Math.sqrt(k / RAY_STEPS));
 
 export function invert4(m: Matrix): Float64Array | null {
   const a = Array.from(m);
@@ -98,9 +93,33 @@ export function invert4(m: Matrix): Float64Array | null {
   return inv;
 }
 
+type DepthMap = {data: Uint8Array; width: number; height: number};
+
 /**
- * Line-of-sight occlusion against the rendered relief: a point is hidden when
- * the ray from the eye dips under the terrain anywhere before reaching it.
+ * The relief's depth as MapLibre drew it for this paint: one value per CSS
+ * pixel, rows bottom first, the clip-space depth packed into RGBA (its
+ * terrainDepth shader), white where no land was drawn.
+ */
+function terrainDepth(map: maplibregl.Map): DepthMap | null {
+  const internal = map as unknown as InternalMap;
+  const fbo = internal.terrain?._fbo;
+  const context = internal.painter?.context;
+  if (!fbo || !context) return null;
+  const {width, height} = fbo;
+  const data = new Uint8Array(width * height * 4);
+  context.bindFramebuffer.set(fbo.framebuffer);
+  context.gl.readPixels(0, 0, width, height, context.gl.RGBA, context.gl.UNSIGNED_BYTE, data);
+  context.bindFramebuffer.set(null);
+  return {data, width, height};
+}
+
+/** RGBA bytes back to the depth they pack (MapLibre's unpack). */
+const UNPACK = [1 / (255 * 256 * 256 * 256), 1 / (255 * 256 * 256), 1 / (255 * 256), 1 / 255];
+
+/**
+ * Occlusion against the relief exactly as rendered: a point is hidden when
+ * the land drawn at its pixel lies nearer the eye than the point itself, less
+ * a margin, so a line lying on a slope never hides itself.
  */
 function makeRelief(
   map: maplibregl.Map,
@@ -108,15 +127,13 @@ function makeRelief(
   worldSize: number,
   width: number,
   height: number,
+  matrix: Matrix,
   project: (mx: number, my: number, z: number, out: Float64Array) => boolean,
 ) {
   const internal = map as unknown as InternalMap;
   const terrain = internal.terrain;
   const transform = internal._camera?.transform;
   if (!terrain || !transform) return {};
-  const eyeX = eye.mx * worldSize;
-  const eyeY = eye.my * worldSize;
-  const eyeZ = eye.z;
   const probe = new maplibregl.LngLat(0, 0);
   // Off the rendered tiles, getElevationForLngLat re-covers the screen on every
   // call (~0.2 ms); its fallback zoom only depends on the frame, so find it once.
@@ -150,34 +167,30 @@ function makeRelief(
     }
     return terrain.getElevationForLngLatZoom(probe, fallbackZ());
   };
+  const depth = terrainDepth(map);
+  const m = matrix;
   const metersPerWorldPx = (my: number) =>
     (EARTH_CIRCUMFERENCE * Math.cos((unmercLat(my) * Math.PI) / 180)) / worldSize;
   const margin = Math.max(width, height) * 0.25;
-  // Every point of a ray from the eye to an on-screen target is itself on
-  // screen, so only the rendered tiles can block it: the stretch of the ray
-  // above their highest point is never tested. (Those samples, far up under
-  // the eye, also fall outside the rendered tiles, where each lookup costs a
-  // full tile-covering pass.)
-  const ceiling = terrain.getCoverageIndex?.()?.maxElevation ?? Infinity;
+  const eyeX = eye.mx * worldSize;
+  const eyeY = eye.my * worldSize;
   const inAir = (mx: number, my: number, z: number, out: Float64Array, cutaway = 0): Visibility => {
     if (!project(mx, my, z, out)) return 0;
     if (out[0] < -margin || out[0] > width + margin || out[1] < -margin || out[1] > height + margin) return 1;
-    const x = mx * worldSize;
-    const y = my * worldSize;
-    const dx = x - eyeX;
-    const dy = y - eyeY;
-    const dz = z - eyeZ;
-    const lengthM = Math.hypot(dx, dy) * metersPerWorldPx(my);
-    // Ignore the last ~90 m so a line lying on a slope does not shadow itself.
-    const sMax = 1 - Math.min(0.9, Math.max(90, cutaway) / Math.max(1, lengthM));
-    // Ray fraction where it comes down to the relief's ceiling.
-    const sTop = eyeZ > ceiling && dz < 0 ? (ceiling - eyeZ) / dz : 0;
-    // From the point back towards the eye: samples crowd near the point,
-    // where the ridges that matter usually are, so a hidden point exits early.
-    for (let k = RAY_STEPS; k >= 1; k--) {
-      const s = sMax * RAY_S[k];
-      if (s < sTop) break;
-      if (eyeZ + dz * s < ground((eyeX + dx * s) / worldSize, (eyeY + dy * s) / worldSize) - 2) return 2;
+    if (depth && out[0] >= 0 && out[0] < depth.width && out[1] >= 0 && out[1] < depth.height) {
+      // The point brought ~90 m nearer the eye (or `cutaway`): only land in
+      // front of that can hide it.
+      const x = mx * worldSize;
+      const y = my * worldSize;
+      const lengthM = Math.hypot(x - eyeX, y - eyeY) * metersPerWorldPx(my);
+      const s = 1 - Math.min(0.9, Math.max(90, cutaway) / Math.max(1, lengthM));
+      const qx = eyeX + (x - eyeX) * s;
+      const qy = eyeY + (y - eyeY) * s;
+      const qz = eye.z + (z - eye.z) * s;
+      const near = (m[2] * qx + m[6] * qy + m[10] * qz + m[14]) / (m[3] * qx + m[7] * qy + m[11] * qz + m[15]);
+      const i = ((depth.height - 1 - Math.floor(out[1])) * depth.width + Math.floor(out[0])) * 4;
+      const land = depth.data[i] * UNPACK[0] + depth.data[i + 1] * UNPACK[1] + depth.data[i + 2] * UNPACK[2] + depth.data[i + 3] * UNPACK[3];
+      if (near > 0 && land < near) return 2;
     }
     if (!cutaway && z < ground(mx, my) - 4) return 2;
     return 1;
@@ -226,7 +239,7 @@ export function makeProjector(
   // The eye, recovered from the inverse matrix (world pixels for x, y; metres for z).
   const inv = !camera.globe && matrix ? invert4(matrix) : null;
   const eye = inv ? {mx: inv[8] / inv[11] / worldSize, my: inv[9] / inv[11] / worldSize, z: inv[10] / inv[11]} : undefined;
-  const relief = eye && camera.terrain > 0 ? makeRelief(map, eye, worldSize, width, height, project) : {};
+  const relief = eye && matrix && camera.terrain > 0 ? makeRelief(map, eye, worldSize, width, height, matrix, project) : {};
   return {
     frame,
     camera,

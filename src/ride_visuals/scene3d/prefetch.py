@@ -33,10 +33,13 @@ Tile = tuple[int, int, int]
 
 #: MapLibre's map tiles are 512 px (transform.tileSize).
 MAP_TILE_SIZE = 512
-#: covering_tiles.ts defaults (zoom levels on screen, tile count ratio).
-DEFAULT_LOD = (9.314, 3.0)
-#: The map's tiles while a city stands in 3D (TILE_LOD in MapStage.tsx).
+#: Zoom levels on screen and tile count ratio (TILE_LOD in MapStage.tsx): rasters
+#: and the terrain, vector tiles, and buildings while a city stands in 3D.
+RASTER_LOD = (3.0, 10.0)
+VECTOR_LOD = (1.0, 12.0)
 CITY_LOD = (1.0, 30.0)
+#: Buildings are drawn from this map zoom (style.ts), or while they stand.
+BUILDINGS_MIN_ZOOM = 13.0
 #: mercator_utils.ts: rays are never followed further out than this from nadir.
 MAX_HORIZON_ANGLE_DEG = 89.25
 #: One camera sample per this many seconds; neighbours cover the motion between.
@@ -48,8 +51,8 @@ SPLIT_MARGIN = 0.3
 #: MapLibre also loads ancestors this many levels up as placeholders (map
 #: option prefetchZoomDelta, default 4).
 PREFETCH_ZOOM_DELTA = 4
-#: Contours exist from this map zoom (style.ts contours.minzoom).
-CONTOUR_MIN_ZOOM = 10
+#: Contours exist from this tile level (style.ts CONTOUR_MIN_ZOOM).
+CONTOUR_MIN_ZOOM = 8
 
 
 @dataclass(frozen=True)
@@ -64,7 +67,7 @@ class _Layer:
     #: Frames (boolean mask) on which the layer can request tiles.
     active: np.ndarray
     #: How fast pitched tiles drop levels (setSourceTileLodParams).
-    lod: tuple[float, float] = DEFAULT_LOD
+    lod: tuple[float, float] = RASTER_LOD
 
 
 @dataclass
@@ -135,18 +138,20 @@ def _ground_points(zoom: float, pitch: float, bearing: float, lat: float, width:
 def _layers(spec: dict[str, Any], frames: int) -> list[_Layer]:
     tiles, cam = spec["tiles"], spec["camera"]
     every = np.ones(frames, dtype=bool)
-    dem_max = int(tiles["demMaxZoom"])
-    contour_max = max(CONTOUR_MIN_ZOOM, min(dem_max - 2, 14))
+    dem_max, land_max = int(tiles["demMaxZoom"]), int(tiles["landMaxZoom"])
     contours = np.asarray(cam["contours"], dtype=float) > 0
     city = np.asarray(cam.get("buildings", np.zeros(frames)), dtype=float) > 0
+    streets = ~city & (np.asarray(cam["zoom"], dtype=float) >= BUILDINGS_MIN_ZOOM)
+    vector_max = int(tiles["vectorMaxZoom"])
     layers = [
         # Hillshade rounds like every raster source; the terrain mesh floors.
         _Layer("dem", 128, True, 0, dem_max, every),
         _Layer("dem", 128, False, 0, dem_max, every),
-        _Layer("vector", MAP_TILE_SIZE, False, 0, int(tiles["vectorMaxZoom"]), ~city),
-        _Layer("vector", MAP_TILE_SIZE, False, 0, int(tiles["vectorMaxZoom"]), city, CITY_LOD),
+        _Layer("vector", MAP_TILE_SIZE, False, 0, land_max, every, VECTOR_LOD),
+        _Layer("vector", MAP_TILE_SIZE, False, 0, vector_max, streets, VECTOR_LOD),
+        _Layer("vector", MAP_TILE_SIZE, False, 0, vector_max, city, CITY_LOD),
         # maplibre-contour: one DEM tile of the contour tile's own level (overzoom 0).
-        _Layer("dem", MAP_TILE_SIZE, False, CONTOUR_MIN_ZOOM, min(contour_max, dem_max, 14), contours),
+        _Layer("dem", MAP_TILE_SIZE, False, CONTOUR_MIN_ZOOM, min(land_max, dem_max), contours, VECTOR_LOD),
     ]
     if spec.get("look") == "satellite" and tiles.get("satellite"):
         satellite = np.asarray(cam["satellite"], dtype=float) > 0

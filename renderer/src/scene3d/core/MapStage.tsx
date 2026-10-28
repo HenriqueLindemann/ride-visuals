@@ -5,30 +5,28 @@ import {continueRender, delayRender, staticFile} from 'remotion';
 import type {SceneSpec} from '../schema';
 import {type Camera, makeProjector, type Projector} from './projector';
 import {buildStyle, contourPaint, contourSource, hillshadePaint, satelliteMixPaint} from './style';
+import {exactDrape, type TileLod} from './terrain';
 
 // The ESM worker cannot be resolved from inside the bundle; the Python engine
 // stages it into public/scene3d (see stage_scene3d_assets).
 maplibregl.setWorkerUrl(staticFile('scene3d/maplibre-gl-worker.mjs'));
 
-// MapLibre resets a DEM tile's "border backfilled" flags when a load starts,
-// not when the new DEM arrives. A tile reloaded (projection or terrain switch)
-// while a neighbour finishes gets its old DEM backfilled and flagged, and the
-// fresh one keeps clamped borders: a flat 1 px edge the hillshade turns into a
-// dark line along every such tile seam. Reset the flags once the DEM is in.
-const loadDemTile = maplibregl.RasterDEMTileSource.prototype.loadTile;
-maplibregl.RasterDEMTileSource.prototype.loadTile = async function (tile) {
-  await loadDemTile.call(this, tile);
-  if (tile.dem) tile.neighboringTiles = this._getNeighboringTiles(tile.tileID);
-};
-
 const MAP_TIMEOUT_MS = 120_000;
 /**
- * Pitched far tiles come at coarser levels, and buildings only exist from level
- * 13: a city standing in 3D would stop at an edge. While it stands, the map's
- * tiles span one level on screen, at up to this many times the tiles of a flat
- * view (MapLibre's defaults: about 9 levels, 3 times). Mirrored in prefetch.py.
+ * How many zoom levels a source's tiles span on screen, at up to how many
+ * times the tiles of a flat view. MapLibre's defaults (about 9 levels, 3
+ * times) spread a pitched view over bands of detail that sweep across the land
+ * as the camera moves. Rasters (relief, imagery) and the terrain's own tiles
+ * keep a few levels, all together, so a raster is never drawn into a much
+ * coarser drape; vector tiles are all of one level. Buildings only exist from
+ * 13: while a city stands, more of them keep it to the horizon. Mirrored in
+ * prefetch.py.
  */
-const TILE_LOD = {city: [1, 30], flat: [9.314, 3]} as const;
+const TILE_LOD = {raster: [3, 10], vector: [1, 12], city: [1, 30]} as const;
+/** Vector sources: lines and fills draped at any level, so all of one level (style.ts). */
+const VECTORS = ['omt', 'contours', 'buildings'];
+/** Draped texels per terrain tile pixel, times the device pixel ratio: always finer than the screen. */
+const DRAPE_TEXELS = 4;
 
 type Props = {
   spec: SceneSpec;
@@ -52,6 +50,7 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
   const mapRef = useRef<maplibregl.Map | null>(null);
   const matrixRef = useRef<Float64Array | null>(null);
   const applied = useRef<Applied>({globe: null, terrain: -1, opacity: -1, contours: -1, satellite: -1, shade: -1, buildings: 0, city: false});
+  const lodRef = useRef<TileLod | null>(null);
   const [ready, setReady] = useState(false);
   const [initHandle] = useState(() => delayRender('map init', {timeoutInMilliseconds: MAP_TIMEOUT_MS}));
 
@@ -81,6 +80,9 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
     mapRef.current = map;
     map.on('error', (event) => console.warn(`map error: ${event.error?.message ?? event}`));
     map.on('load', () => {
+      map.setSourceTileLodParams(...TILE_LOD.raster);
+      for (const id of VECTORS) map.setSourceTileLodParams(...TILE_LOD.vector, id);
+      lodRef.current = (map.getSource('terrain') as unknown as {calculateTileZoom: TileLod}).calculateTileZoom;
       map.addLayer({
         id: 'capture',
         type: 'custom',
@@ -101,7 +103,7 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
     const map = mapRef.current;
     if (!map || !ready) return;
     const handle = delayRender(`map frame ${frame}`, {timeoutInMilliseconds: MAP_TIMEOUT_MS});
-    applyState(map, spec, camera, applied.current);
+    applyState(map, spec, camera, applied.current, lodRef.current!);
 
     let done = false;
     let rendered = false;
@@ -175,7 +177,7 @@ function reportUnsettled(spec: SceneSpec, frame: number) {
   }
 }
 
-function applyState(map: maplibregl.Map, spec: SceneSpec, camera: Camera, state: Applied) {
+function applyState(map: maplibregl.Map, spec: SceneSpec, camera: Camera, state: Applied, lod: TileLod) {
   if (state.globe !== camera.globe) {
     map.setProjection({type: camera.globe ? 'globe' : 'mercator'});
     state.globe = camera.globe;
@@ -183,10 +185,10 @@ function applyState(map: maplibregl.Map, spec: SceneSpec, camera: Camera, state:
   const terrain = Math.round(camera.terrain * 1000) / 1000;
   if (state.terrain !== terrain) {
     map.setTerrain(terrain > 0 ? {source: 'terrain', exaggeration: terrain} : null);
+    exactDrape(map, lod, DRAPE_TEXELS * (window.devicePixelRatio || 1));
     state.terrain = terrain;
   }
-  // Quantised: hillshade repaint is cheap, but not free on every frame.
-  const shade = Math.round(camera.shade * 20) / 20;
+  const shade = Math.round(camera.shade * 100) / 100;
   if (state.shade !== shade) {
     for (const [prop, value] of Object.entries(hillshadePaint(shade))) {
       map.setPaintProperty('hillshade', prop as 'hillshade-exaggeration', value as number);
@@ -218,8 +220,8 @@ function applyState(map: maplibregl.Map, spec: SceneSpec, camera: Camera, state:
     state.buildings = buildings;
   }
   if (state.city !== buildings > 0) {
-    const [levels, ratio] = TILE_LOD[buildings > 0 ? 'city' : 'flat'];
-    map.setSourceTileLodParams(levels, ratio, 'omt');
+    const [levels, ratio] = TILE_LOD[buildings > 0 ? 'city' : 'vector'];
+    map.setSourceTileLodParams(levels, ratio, 'buildings');
     state.city = buildings > 0;
   }
   if (spec.look === 'satellite' && spec.tiles.satellite && state.satellite !== satellite) {

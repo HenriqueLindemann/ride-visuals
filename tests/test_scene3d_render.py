@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from ride_visuals.scene3d.camera import CameraTrack
-from ride_visuals.scene3d.prefetch import prefetch_tiles, scene_tiles
+from ride_visuals.scene3d.prefetch import PREFETCH_ZOOM_DELTA, prefetch_tiles, scene_tiles
 from ride_visuals.scene3d.spec import SceneSpec
 from ride_visuals.scene3d.tiles import TILE_SOURCES, TileCache
 from ride_visuals.video.engines.remotion import RemotionVideoEngine, scene3d_chunks
@@ -51,18 +51,21 @@ def test_top_down_scene_asks_for_the_centre_tile_of_each_source_at_its_own_level
 def test_pitched_relief_view_coarsens_tiles_with_distance() -> None:
     flat = scene_tiles(_spec(pitch=0.0, terrain=1.5).to_json())
     pitched = scene_tiles(_spec(pitch=75.0, terrain=1.5).to_json())
-    levels = {z for z, _, _ in pitched["vector"]}
-    # The foreground is closer than the centre and gets a finer level; the
-    # horizon coarser ones (MapLibre's calculateTileZoom).
-    assert max(levels) >= 12 and min(levels) < 11
+    # Relief tiles: the foreground finer than the horizon (MapLibre's
+    # calculateTileZoom), over a few levels only (TILE_LOD.raster).
+    dem = {z for z, _, _ in pitched["dem"]} - {z for z, _, _ in flat["dem"]}
+    assert dem and min(dem) < 12
+    # Vector tiles are all of one level: that one and its placeholder ancestors.
+    vector = {z for z, _, _ in pitched["vector"]}
+    assert max(vector) - min(vector) == PREFETCH_ZOOM_DELTA
     assert len(pitched["vector"]) > len(flat["vector"])
 
 
 def test_contours_and_satellite_add_their_own_tiles() -> None:
     spec = _spec(look="satellite", contours=1.0, satellite=1.0).to_json()
     tiles = scene_tiles(spec)
-    # Contour tiles take the DEM tile of their own level (capped at the relief lock).
-    contour_level = max(10, min(spec["tiles"]["demMaxZoom"] - 2, 14))
+    # Contour tiles take the DEM tile of their own level (capped at the land lock).
+    contour_level = spec["tiles"]["landMaxZoom"]
     assert _tile_of(LON, LAT, min(12, contour_level)) in tiles["dem"]
     # Imagery is 256 px and rounded: z12.3 asks for z13.
     assert _tile_of(LON, LAT, 13) in tiles["satellite"]

@@ -880,20 +880,26 @@ def test_hero_view_rises_above_a_ridge_that_would_hide_the_climb() -> None:
 
 def test_relief_is_locked_to_one_dem_level_while_the_camera_zooms() -> None:
     from ride_visuals.scene3d.camera import CameraTrack
-    from ride_visuals.scene3d.spec import relief_max_zoom
+    from ride_visuals.scene3d.spec import relief_lock
     from ride_visuals.scene3d.tiles import TILE_SOURCES
 
     cam = CameraTrack(100)
     cam.zoom = np.linspace(12.05, 14.0, 100)
+    cam.lat[:] = 49.0
     cam.terrain[:] = 1.5
-    # DEM tiles load two levels above the map zoom: z14 serves all of 12..14.
-    assert relief_max_zoom(cam) == 14
+    # DEM tiles load two levels above the map zoom: z14 serves all of 12..14;
+    # the land and its contours come from the map zoom's own level.
+    lock = relief_lock(cam)
+    assert (lock.dem, lock.land) == (14, 12)
+    # One interval for the whole film, from its widest typical view (~10.5 m/px).
+    assert lock.contours == (20, 100)
     # A brief establishing shot further out does not drag the whole film down.
     cam.zoom[:5] = 10.9
-    assert relief_max_zoom(cam) == 14
-    # Without relief on screen the source keeps its full depth.
+    assert relief_lock(cam).dem == 14
+    # Without relief on screen the sources keep their full depth.
     cam.terrain[:] = 0.0
-    assert relief_max_zoom(cam) == TILE_SOURCES["dem"].max_zoom
+    assert relief_lock(cam).dem == TILE_SOURCES["dem"].max_zoom
+    assert relief_lock(cam).land == TILE_SOURCES["vector"].max_zoom
 
 
 def test_scene3d_cli_orchestration_and_aspect_validation(

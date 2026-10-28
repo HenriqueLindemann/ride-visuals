@@ -32,9 +32,13 @@ const sceneBaseSchema = z.object({
     dem: z.string(),
     vector: z.string(),
     satellite: z.string().nullable(),
+    /** Levels the relief and the land are locked to (ReliefLock in spec.py). */
     demMaxZoom: z.number().int(),
+    landMaxZoom: z.number().int(),
     vectorMaxZoom: z.number().int(),
     satelliteMaxZoom: z.number().int(),
+    /** Contour interval, minor and major (m). */
+    contours: z.tuple([z.number(), z.number()]),
   }),
   /** Short data credit drawn on screen; null keeps the frame clean. */
   credits: z.string().nullable(),

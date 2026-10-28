@@ -15,18 +15,18 @@ export function hillshadePaint(relief: number) {
     'hillshade-highlight-color': `rgba(243,239,232,${Math.min(0.4, 0.09 * relief).toFixed(3)})`,
     'hillshade-shadow-color': `rgba(0,0,0,${Math.min(0.85, 0.5 + 0.12 * (relief - 1)).toFixed(3)})`,
     'hillshade-accent-color': 'rgba(0,0,0,0)',
-    'hillshade-exaggeration': [
-      'interpolate', ['linear'], ['zoom'],
-      2, k(0.8), 7, k(0.5), 10, k(0.35), 13, k(0.3), 14.5, k(0.42),
-    ] as unknown as number,
+    // Coarse globe-scale DEM levels read flatter, so they get more; from the
+    // regional scale on, one strength: the land never changes as the camera zooms.
+    'hillshade-exaggeration': ['interpolate', ['linear'], ['zoom'], 2, k(0.8), 7, k(0.5), 10, k(0.35)] as unknown as number,
   };
 }
+
+/** Contours exist from this tile level (mirrored in prefetch.py). */
+const CONTOUR_MIN_ZOOM = 8;
 
 let demSource: InstanceType<typeof mlcontour.DemSource> | null = null;
 let demSourceKey = '';
 
-/** Map zoom from which contours are overzoomed: where the relief is locked. */
-const contourLock = (tiles: TileSet) => Math.max(10, Math.min(tiles.demMaxZoom - 2, 14));
 
 /** Contour lines computed in a worker from the same DEM tiles the relief uses. */
 export function contourSource(tiles: TileSet) {
@@ -90,17 +90,22 @@ export function buildStyle(look: Look, tiles: TileSet): StyleSpecification {
       dem: {type: 'raster-dem', tiles: [tiles.dem], encoding: 'terrarium', tileSize: 128, maxzoom: tiles.demMaxZoom},
       // The same tiles again for the 3D mesh: terrain and hillshade pick tiles
       // differently, and sharing one source costs the hillshade its finest level.
-      // demMaxZoom is locked per scene (relief_max_zoom in spec.py), so the
-      // relief does not change detail as the camera zooms.
-      terrain: {type: 'raster-dem', tiles: [tiles.dem], encoding: 'terrarium', tileSize: 128, maxzoom: tiles.demMaxZoom},
-      omt: {type: 'vector', tiles: [tiles.vector], maxzoom: tiles.vectorMaxZoom},
+      // demMaxZoom is locked per scene (ReliefLock in spec.py), so the relief
+      // does not change detail as the camera zooms; the mesh one level under the
+      // shading, so its surface (and what it hides) is the lie of the land, not
+      // every bump the shading shows.
+      terrain: {type: 'raster-dem', tiles: [tiles.dem], encoding: 'terrarium', tileSize: 128, maxzoom: tiles.demMaxZoom - 1},
+      // The land's tiles are locked per scene like the relief (landMaxZoom): closer is overzoom.
+      omt: {type: 'vector', tiles: [tiles.vector], maxzoom: tiles.landMaxZoom},
+      // The same tiles at full detail, for the buildings only.
+      buildings: {type: 'vector', tiles: [tiles.vector], maxzoom: tiles.vectorMaxZoom},
       contours: {
         type: 'vector',
         tiles: [
-          // Wider spacing only further out than the relief lock (demMaxZoom - 2
-          // as a map zoom); from there on every line comes from the same tiles.
+          // One interval at every level (the scene's, see spec.py): no band of
+          // other lines ever sweeps across the land.
           contours.contourProtocolUrl({
-            thresholds: {10: [50, 200], [contourLock(tiles)]: [25, 100]},
+            thresholds: {0: tiles.contours},
             contourLayer: 'contours',
             elevationKey: 'ele',
             levelKey: 'level',
@@ -108,9 +113,9 @@ export function buildStyle(look: Look, tiles: TileSet): StyleSpecification {
             overzoom: 0,
           }),
         ],
-        minzoom: 10,
-        // Locked with the relief (demMaxZoom is per scene): closer is overzoom.
-        maxzoom: contourLock(tiles),
+        minzoom: CONTOUR_MIN_ZOOM,
+        // Locked with the land: closer is overzoom.
+        maxzoom: tiles.landMaxZoom,
       },
     },
     sky: {
@@ -155,7 +160,7 @@ export function buildStyle(look: Look, tiles: TileSet): StyleSpecification {
       {
         id: 'buildings',
         type: 'fill',
-        source: 'omt',
+        source: 'buildings',
         'source-layer': 'building',
         minzoom: 13,
         paint: {'fill-color': '#f3efe8', 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 14, 0.05]},
@@ -207,10 +212,10 @@ export function buildStyle(look: Look, tiles: TileSet): StyleSpecification {
       {
         id: 'buildings-3d',
         type: 'fill-extrusion',
-        source: 'omt',
+        source: 'buildings',
         'source-layer': 'building',
         // Down to the level that still holds buildings; MapStage keeps that
-        // level out to the horizon while they stand (TILE_LOD).
+        // level out to the horizon while they stand (TILE_LOD.city).
         minzoom: 13,
         layout: {visibility: 'none'},
         paint: {

@@ -10,7 +10,7 @@ from typing import Any, Literal
 import numpy as np
 
 from ride_visuals.credits import on_screen_line
-from ride_visuals.scene3d.camera import CameraTrack
+from ride_visuals.scene3d.camera import CameraTrack, meters_per_pixel
 from ride_visuals.scene3d.tiles import TILE_SOURCES
 
 SCENE_SPEC_VERSION = "1.0"
@@ -18,45 +18,63 @@ SceneKind = Literal["flyover", "stretch", "strata", "territory", "ascent"]
 Look = Literal["carbon", "satellite"]
 
 
-#: Share of the relief frames allowed below the DEM level a scene is locked to.
+#: Share of the relief frames allowed below the level a scene's land is locked to.
 RELIEF_ZOOM_PERCENTILE = 10.0
 #: DEM tiles are declared 128 px in style.ts: MapLibre loads them two levels
 #: above the map zoom (one for 256 px).
 DEM_LEVELS_ABOVE_MAP_ZOOM = 2
+#: Contour intervals (minor, major, m). A scene takes the widest whose minor
+#: line is at most CONTOUR_PX ground pixels at its widest typical view.
+CONTOUR_INTERVALS = ((10, 50), (20, 100), (25, 100), (50, 200), (100, 500), (200, 1000), (500, 2500))
+CONTOUR_PX = 2.0
 
 
-def relief_max_zoom(camera: CameraTrack) -> int:
-    """DEM tile level a scene's relief is locked to.
+@dataclass(frozen=True)
+class ReliefLock:
+    """Tile levels a scene's land is drawn from, and its contour interval.
 
-    MapLibre picks the DEM level from the camera zoom, so every whole zoom
-    level the camera crosses swaps the detail of the whole relief (mesh,
-    hillshade, contours). Capping the level just above where the camera
-    spends nearly all of its relief frames makes everything closer an
-    overzoom of the same tiles: the land keeps one look while the camera
-    moves in and out. The renderer declares the DEM tiles as 128 px, so they
-    load DEM_LEVELS_ABOVE_MAP_ZOOM levels above the map zoom and the locked
-    level is as fine as the closest shots used to get.
+    MapLibre picks tile levels from the camera zoom, so every whole level the
+    camera crosses would swap the detail of the land (relief, contours,
+    fields). Capping the levels just above where the camera spends nearly all
+    of its relief frames makes everything closer an overzoom of the same
+    tiles: the land keeps one look while the camera moves in and out.
     """
-    source_max = TILE_SOURCES["dem"].max_zoom
-    relief = (camera.terrain > 0.01) & (camera.map_opacity > 0.5)
+
+    #: DEM tiles (relief mesh and shading), DEM_LEVELS_ABOVE_MAP_ZOOM above the land's.
+    dem: int
+    #: Land and contour tiles (512 px, at the map zoom).
+    land: int
+    contours: tuple[int, int]
+
+
+def relief_lock(camera: CameraTrack) -> ReliefLock:
+    """The levels and contour interval for the frames where the land reads as relief."""
+    dem_max, land_max = TILE_SOURCES["dem"].max_zoom, TILE_SOURCES["vector"].max_zoom
+    relief = (np.maximum(camera.terrain, camera.contours) > 0.01) & (camera.map_opacity > 0.5)
     if not relief.any():
-        return source_max
+        return ReliefLock(dem_max, land_max, CONTOUR_INTERVALS[2])
     low = float(np.percentile(camera.zoom[relief], RELIEF_ZOOM_PERCENTILE))
-    return int(min(source_max, max(0, np.floor(low) + DEM_LEVELS_ABOVE_MAP_ZOOM)))
+    base = int(max(0, np.floor(low)))
+    ground_px = float(meters_per_pixel(low, float(np.median(camera.lat[relief]))))
+    contours = max((pair for pair in CONTOUR_INTERVALS if pair[0] <= CONTOUR_PX * ground_px), default=CONTOUR_INTERVALS[0])
+    return ReliefLock(min(dem_max, base + DEM_LEVELS_ABOVE_MAP_ZOOM), min(land_max, base), contours)
 
 
-def tile_paths(look: Look, dem_max_zoom: int | None = None) -> dict[str, Any]:
+def tile_paths(look: Look, lock: ReliefLock | None = None) -> dict[str, Any]:
     """Tile URL paths, relative to the server that serves the spec itself."""
     def path(key: str) -> str:
         return f"/tiles/{key}/{{z}}/{{x}}/{{y}}.{TILE_SOURCES[key].ext}"
 
+    lock = lock or ReliefLock(TILE_SOURCES["dem"].max_zoom, TILE_SOURCES["vector"].max_zoom, CONTOUR_INTERVALS[2])
     return {
         "dem": path("dem"),
         "vector": path("vector"),
         "satellite": path("satellite") if look == "satellite" else None,
-        "demMaxZoom": TILE_SOURCES["dem"].max_zoom if dem_max_zoom is None else dem_max_zoom,
+        "demMaxZoom": lock.dem,
+        "landMaxZoom": lock.land,
         "vectorMaxZoom": TILE_SOURCES["vector"].max_zoom,
         "satelliteMaxZoom": TILE_SOURCES["satellite"].max_zoom,
+        "contours": list(lock.contours),
     }
 
 
@@ -125,7 +143,7 @@ class SceneSpec:
                 "fps": self.fps,
                 "durationInFrames": self.frames,
             },
-            "tiles": tile_paths(self.look, relief_max_zoom(cam)),
+            "tiles": tile_paths(self.look, relief_lock(cam)),
             "credits": self.credits,
             "camera": {
                 "lon": _series(cam.lon, 7),

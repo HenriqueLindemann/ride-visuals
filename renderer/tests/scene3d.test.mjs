@@ -141,7 +141,7 @@ test('flyover, stretch, and strata scores produce valid ops and non-overlapping 
     locale: 'en',
     look: 'carbon',
     profile: {width: 1920, height: 1080, fps: 30, durationInFrames: 1},
-    tiles: {dem: '/d', vector: '/v', satellite: null, demMaxZoom: 15, vectorMaxZoom: 14, satelliteMaxZoom: 17},
+    tiles: {dem: '/d', vector: '/v', satellite: null, demMaxZoom: 15, landMaxZoom: 13, vectorMaxZoom: 14, satelliteMaxZoom: 17, contours: [25, 100]},
     credits: null,
     camera: {lon: [0], lat: [0], zoom: [12], pitch: [0], bearing: [0], elevation: [0], terrain: [0], globe: [0], mapOpacity: [0], contours: [0], satellite: [0]},
     channels: {
@@ -301,7 +301,7 @@ test('edge-case scores: flat flyover, 12-month portrait strata, and multi-ride s
     locale: 'en',
     look: 'carbon',
     profile: {width: 1920, height: 1080, fps: 30, durationInFrames: 1},
-    tiles: {dem: '/d', vector: '/v', satellite: null, demMaxZoom: 15, vectorMaxZoom: 14, satelliteMaxZoom: 17},
+    tiles: {dem: '/d', vector: '/v', satellite: null, demMaxZoom: 15, landMaxZoom: 13, vectorMaxZoom: 14, satelliteMaxZoom: 17, contours: [25, 100]},
     credits: null,
     camera: {lon: [7.77], lat: [49.44], zoom: [12], pitch: [50], bearing: [0], elevation: [200], terrain: [1.25], globe: [0], mapOpacity: [1], contours: [1], satellite: [0]},
     channels: {
