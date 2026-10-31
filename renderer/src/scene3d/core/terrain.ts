@@ -48,7 +48,10 @@ type DrapeTiles = {
   patched?: boolean;
 };
 
-type Internals = {terrain?: {tileManager: DrapeTiles} | null; painter: {renderToTexture?: RenderToTexture | null}};
+type Internals = {
+  terrain?: {tileManager: DrapeTiles; exaggeration: number; options: {exaggeration?: number}} | null;
+  painter: {renderToTexture?: RenderToTexture | null; markTerrainDepthDirty: () => void};
+};
 
 /** Orthographic tile-to-texture matrix (gl-matrix ortho(0, EXTENT, EXTENT, 0, 0, 1)). */
 const RTT_MATRIX = new Float32Array([2 / maplibregl.EXTENT, 0, 0, 0, 0, -2 / maplibregl.EXTENT, 0, 0, 0, 0, -2, 0, -1, 1, -1, 1]);
@@ -72,6 +75,11 @@ function redrawStaleDrapes(rtt: RenderToTexture) {
   proto.exact = true;
 }
 
+/** MapLibre's internal tile class, borrowed from the first tiles it makes itself. */
+type TileClass = new (id: OverscaledTileID, size: number) => DrapedTile;
+let DrapeTile: TileClass | undefined;
+const borrowTile = (tiles: DrapeTiles) => (DrapeTile ??= Object.values(tiles._tiles)[0]?.constructor as TileClass | undefined);
+
 /**
  * MapLibre picks the terrain's tiles with its default spread of zoom levels,
  * whatever setSourceTileLodParams says for the sources draped on them. Pick
@@ -84,13 +92,17 @@ function drapeTilesAt(tiles: DrapeTiles, lod: TileLod) {
   if (proto.patched) return;
   const update = proto.update;
   proto.update = function (this: DrapeTiles, transform, terrain) {
-    // The tile class is internal: borrow it from the tiles MapLibre made itself.
-    const Tile = Object.values(this._tiles)[0]?.constructor as (new (id: OverscaledTileID, size: number) => DrapedTile) | undefined;
-    if (!this.lod || !Tile) return update.call(this, transform, terrain);
+    if (!this.lod) return update.call(this, transform, terrain);
+    // The very first update makes MapLibre's own tiles, then they are re-picked below.
+    let changed = false;
+    if (!borrowTile(this)) {
+      changed = update.call(this, transform, terrain);
+      if (!borrowTile(this)) return changed;
+    }
+    const Tile = DrapeTile!;
     this.tileManager.update(transform, terrain);
     const map = this.tileManager.map;
     const keys = new Set<string>();
-    let changed = false;
     this._renderableTilesKeys = [];
     const ids = map.coveringTiles({tileSize: this.tileSize, minzoom: this.minzoom, maxzoom: this.maxzoom, reparseOverscaled: false, terrain, calculateTileZoom: this.lod});
     for (const id of ids) {
@@ -127,4 +139,17 @@ export function exactDrape(map: maplibregl.Map, lod: TileLod, texels: number) {
   redrawStaleDrapes(rtt);
   drapeTilesAt(tiles, lod);
   rtt.rttSize = tiles.tileSize * texels;
+}
+
+/**
+ * A new exaggeration for the terrain already set. MapLibre reads it live (mesh
+ * uniform, CPU samplers), while setTerrain would rebuild every mesh and drape.
+ */
+export function setExaggeration(map: maplibregl.Map, exaggeration: number): boolean {
+  const internals = map as unknown as Internals;
+  if (!internals.terrain) return false;
+  internals.terrain.exaggeration = internals.terrain.options.exaggeration = exaggeration;
+  internals.painter.markTerrainDepthDirty();
+  map.triggerRepaint();
+  return true;
 }

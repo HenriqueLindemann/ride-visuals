@@ -546,10 +546,12 @@ class RemotionVideoEngine:
             *(["--scale", str(scale)] if scale > 1 else []),
         ]
         # The spec URL changes with the server port on every run: key the
-        # chunks by the spec's content and the settings that change pixels.
-        digest = hashlib.sha256(
-            json.dumps([spec.to_json(), render_options], separators=(",", ":")).encode("utf-8")
-        ).hexdigest()[:16]
+        # chunks by the spec's content, the settings and the renderer's code.
+        key = hashlib.sha256(json.dumps([spec.to_json(), render_options], separators=(",", ":")).encode("utf-8"))
+        for source in sorted((self.renderer_dir / "src").rglob("*")):
+            if source.is_file():
+                key.update(source.read_bytes())
+        digest = key.hexdigest()[:16]
         parts_dir = output.with_name(f".{output.stem}.parts")
         chunks_dir = parts_dir / digest
         for stale in parts_dir.glob("*"):

@@ -1,5 +1,5 @@
 import * as maplibregl from 'maplibre-gl';
-import {EARTH_CIRCUMFERENCE, groundResolution, mercX, mercY} from './geo';
+import {EARTH_CIRCUMFERENCE, FOV_DEG, groundResolution, mercX, mercY} from './geo';
 
 /** One frame's camera and map state, as the Python director wrote it. */
 export interface Camera {
@@ -100,13 +100,17 @@ type DepthMap = {data: Uint8Array; width: number; height: number};
  * pixel, rows bottom first, the clip-space depth packed into RGBA (its
  * terrainDepth shader), white where no land was drawn.
  */
+let depthBuffer = new Uint8Array(0);
+
 function terrainDepth(map: maplibregl.Map): DepthMap | null {
   const internal = map as unknown as InternalMap;
   const fbo = internal.terrain?._fbo;
   const context = internal.painter?.context;
   if (!fbo || !context) return null;
   const {width, height} = fbo;
-  const data = new Uint8Array(width * height * 4);
+  // One buffer for every frame: a projector only lives until the next paint.
+  if (depthBuffer.length !== width * height * 4) depthBuffer = new Uint8Array(width * height * 4);
+  const data = depthBuffer;
   context.bindFramebuffer.set(fbo.framebuffer);
   context.gl.readPixels(0, 0, width, height, context.gl.RGBA, context.gl.UNSIGNED_BYTE, data);
   context.bindFramebuffer.set(null);
@@ -116,10 +120,15 @@ function terrainDepth(map: maplibregl.Map): DepthMap | null {
 /** RGBA bytes back to the depth they pack (MapLibre's unpack). */
 const UNPACK = [1 / (255 * 256 * 256 * 256), 1 / (255 * 256 * 256), 1 / (255 * 256), 1 / 255];
 
+/** Ground height error (m, before exaggeration) between the drawn mesh and the sampled DEM. */
+const HEIGHT_SLACK_M = 8;
+
 /**
  * Occlusion against the relief exactly as rendered: a point is hidden when
  * the land drawn at its pixel lies nearer the eye than the point itself, less
- * a margin, so a line lying on a slope never hides itself.
+ * a margin, so a line lying on a slope never hides itself. Far out at grazing
+ * angles that margin grows with what one pixel and the mesh's height error
+ * span along the view ray.
  */
 function makeRelief(
   map: maplibregl.Map,
@@ -129,6 +138,8 @@ function makeRelief(
   height: number,
   matrix: Matrix,
   project: (mx: number, my: number, z: number, out: Float64Array) => boolean,
+  readDepth: boolean,
+  exaggeration: number,
 ) {
   const internal = map as unknown as InternalMap;
   const terrain = internal.terrain;
@@ -167,23 +178,29 @@ function makeRelief(
     }
     return terrain.getElevationForLngLatZoom(probe, fallbackZ());
   };
-  const depth = terrainDepth(map);
+  // Read back on first use only: many frames test nothing against the relief.
+  let depth: DepthMap | null | undefined = readDepth ? undefined : null;
   const m = matrix;
   const metersPerWorldPx = (my: number) =>
     (EARTH_CIRCUMFERENCE * Math.cos((unmercLat(my) * Math.PI) / 180)) / worldSize;
   const margin = Math.max(width, height) * 0.25;
+  const pixelAngle = (FOV_DEG * Math.PI) / 180 / height;
+  const slack = HEIGHT_SLACK_M * Math.max(1, exaggeration);
   const eyeX = eye.mx * worldSize;
   const eyeY = eye.my * worldSize;
-  const inAir = (mx: number, my: number, z: number, out: Float64Array, cutaway = 0): Visibility => {
+  const test = (mx: number, my: number, z: number, out: Float64Array, cutaway: number, g: number): Visibility => {
     if (!project(mx, my, z, out)) return 0;
     if (out[0] < -margin || out[0] > width + margin || out[1] < -margin || out[1] > height + margin) return 1;
+    if (depth === undefined) depth = terrainDepth(map);
     if (depth && out[0] >= 0 && out[0] < depth.width && out[1] >= 0 && out[1] < depth.height) {
-      // The point brought ~90 m nearer the eye (or `cutaway`): only land in
-      // front of that can hide it.
+      // The point brought nearer the eye (90 m, the grazing slack or `cutaway`):
+      // only land in front of that can hide it.
       const x = mx * worldSize;
       const y = my * worldSize;
       const lengthM = Math.hypot(x - eyeX, y - eyeY) * metersPerWorldPx(my);
-      const s = 1 - Math.min(0.9, Math.max(90, cutaway) / Math.max(1, lengthM));
+      const rise = Math.max(1, eye.z - z);
+      const grazing = ((slack + 1.5 * pixelAngle * Math.hypot(lengthM, rise)) * lengthM) / rise;
+      const s = 1 - Math.min(0.9, Math.max(90, grazing, cutaway) / Math.max(1, lengthM));
       const qx = eyeX + (x - eyeX) * s;
       const qy = eyeY + (y - eyeY) * s;
       const qz = eye.z + (z - eye.z) * s;
@@ -192,13 +209,21 @@ function makeRelief(
       const land = depth.data[i] * UNPACK[0] + depth.data[i + 1] * UNPACK[1] + depth.data[i + 2] * UNPACK[2] + depth.data[i + 3] * UNPACK[3];
       if (near > 0 && land < near) return 2;
     }
-    if (!cutaway && z < ground(mx, my) - 4) return 2;
+    if (!cutaway && z < (Number.isNaN(g) ? ground(mx, my) : g) - 4) return 2;
     return 1;
   };
-  const onRelief = (mx: number, my: number, lift: number, out: Float64Array) => inAir(mx, my, ground(mx, my) + lift, out);
+  const inAir = (mx: number, my: number, z: number, out: Float64Array, cutaway = 0) => test(mx, my, z, out, cutaway, NaN);
+  const onRelief = (mx: number, my: number, lift: number, out: Float64Array) => {
+    const g = ground(mx, my);
+    return test(mx, my, g + lift, out, 0, g);
+  };
   return {onRelief, inAir, ground};
 }
 
+/**
+ * `painted`: the map was painted for this camera, so its relief depth can
+ * hide points; otherwise points are only tested against the ground height.
+ */
 export function makeProjector(
   map: maplibregl.Map,
   camera: Camera,
@@ -206,6 +231,7 @@ export function makeProjector(
   matrix: Matrix | null,
   width: number,
   height: number,
+  painted = true,
 ): Projector {
   const worldSize = 512 * 2 ** camera.zoom;
   const internal = map as unknown as InternalMap;
@@ -239,7 +265,7 @@ export function makeProjector(
   // The eye, recovered from the inverse matrix (world pixels for x, y; metres for z).
   const inv = !camera.globe && matrix ? invert4(matrix) : null;
   const eye = inv ? {mx: inv[8] / inv[11] / worldSize, my: inv[9] / inv[11] / worldSize, z: inv[10] / inv[11]} : undefined;
-  const relief = eye && matrix && camera.terrain > 0 ? makeRelief(map, eye, worldSize, width, height, matrix, project) : {};
+  const relief = eye && matrix && camera.terrain > 0 ? makeRelief(map, eye, worldSize, width, height, matrix, project, painted, camera.terrain) : {};
   return {
     frame,
     camera,

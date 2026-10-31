@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 
 import pytest
 
 from ride_visuals.scene3d.camera import CameraTrack
-from ride_visuals.scene3d.prefetch import PREFETCH_ZOOM_DELTA, prefetch_tiles, scene_tiles
+from ride_visuals.scene3d.prefetch import prefetch_tiles, scene_tiles
 from ride_visuals.scene3d.spec import SceneSpec
 from ride_visuals.scene3d.tiles import TILE_SOURCES, TileCache
 from ride_visuals.video.engines.remotion import RemotionVideoEngine, scene3d_chunks
@@ -35,15 +36,12 @@ def _spec(frames: int = 4, *, zoom: float = 12.3, pitch: float = 0.0, look: str 
 
 def test_top_down_scene_asks_for_the_centre_tile_of_each_source_at_its_own_level() -> None:
     tiles = scene_tiles(_spec().to_json())
-    # Vector tiles are 512 px and floored; DEM tiles are 128 px (two levels up),
-    # floored for the mesh and rounded for the hillshade.
+    # Vector tiles are 512 px and floored; DEM tiles are 128 px (two levels up) and rounded.
     assert _tile_of(LON, LAT, 12) in tiles["vector"]
     assert _tile_of(LON, LAT, 14) in tiles["dem"]
-    assert max(z for z, _, _ in tiles["vector"]) == 12
-    # z14.3 is within SPLIT_MARGIN of the rounded hillshade going to z15.
-    assert max(z for z, _, _ in tiles["dem"]) == 15
-    # MapLibre's placeholder ancestors (prefetchZoomDelta) come along.
-    assert _tile_of(LON, LAT, 8) in tiles["vector"] and _tile_of(LON, LAT, 7) not in tiles["vector"]
+    # A flat view is all of one level, and only what the frustum sees (no ancestors).
+    assert {z for z, _, _ in tiles["vector"]} == {12}
+    assert {z for z, _, _ in tiles["dem"]} == {14}
     # Neither contours nor imagery are on: no contour DEM level, no satellite source.
     assert "satellite" not in tiles
 
@@ -55,20 +53,62 @@ def test_pitched_relief_view_coarsens_tiles_with_distance() -> None:
     # calculateTileZoom), over a few levels only (TILE_LOD.raster).
     dem = {z for z, _, _ in pitched["dem"]} - {z for z, _, _ in flat["dem"]}
     assert dem and min(dem) < 12
-    # Vector tiles are all of one level: that one and its placeholder ancestors.
-    vector = {z for z, _, _ in pitched["vector"]}
-    assert max(vector) - min(vector) == PREFETCH_ZOOM_DELTA
+    # Vector tiles are all of one level, and more of them are in view.
+    assert len({z for z, _, _ in pitched["vector"]}) == 1
     assert len(pitched["vector"]) > len(flat["vector"])
+
+
+def test_terrain_loads_its_parents_and_root_level() -> None:
+    tiles = scene_tiles(_spec(pitch=0.0, terrain=1.5).to_json())["dem"]
+    # The terrain's own tiles are 256 px and floored (z13 here), and TerrainTileManager
+    # also loads each one's parent and the root level the visibility starts from.
+    assert _tile_of(LON, LAT, 13) in tiles
+    assert _tile_of(LON, LAT, 12) in tiles
+    assert _tile_of(LON, LAT, 5) in tiles
+    assert _tile_of(LON, LAT, 6) not in tiles
 
 
 def test_contours_and_satellite_add_their_own_tiles() -> None:
     spec = _spec(look="satellite", contours=1.0, satellite=1.0).to_json()
     tiles = scene_tiles(spec)
-    # Contour tiles take the DEM tile of their own level (capped at the land lock).
-    contour_level = spec["tiles"]["landMaxZoom"]
-    assert _tile_of(LON, LAT, min(12, contour_level)) in tiles["dem"]
+    # Contour tiles take the DEM tile of their own level (capped at the land lock)
+    # and the eight around it, which maplibre-contour reads for the borders.
+    z, x, y = _tile_of(LON, LAT, min(12, spec["tiles"]["landMaxZoom"]))
+    around = {(z, x + dx, y + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+    assert around <= tiles["dem"]
     # Imagery is 256 px and rounded: z12.3 asks for z13.
     assert _tile_of(LON, LAT, 13) in tiles["satellite"]
+
+
+def test_a_map_below_zoom_12_first_asks_on_the_globe() -> None:
+    # The style's globe (11 to 12) sees to the horizon: a fresh map at a steep pitch asks for
+    # more than the mercator view the frame is then drawn with.
+    low = _spec(zoom=11.5, pitch=70.0)
+    high = _spec(zoom=12.5, pitch=70.0)
+    assert len(scene_tiles(low.to_json())["vector"]) > len(scene_tiles(high.to_json())["vector"])
+
+
+def _renderer_frames() -> dict:
+    return json.loads((Path(__file__).parent / "fixtures" / "prefetch" / "renderer_frames.json").read_text())
+
+
+@pytest.mark.parametrize("frame", [480, 1950, 1995])
+def test_estimate_matches_the_tiles_the_renderer_requested(frame: int) -> None:
+    # Single frames of a real flyover (low zoom and steep pitch included), as the tile server saw them.
+    recorded = _renderer_frames()
+    case = next(item for item in recorded["frames"] if item["frame"] == frame)
+    spec = {
+        "profile": {**recorded["profile"], "durationInFrames": 1},
+        "tiles": recorded["tiles"],
+        "look": "carbon",
+        "camera": {key: [value] for key, value in case["camera"].items()},
+    }
+    tiles = scene_tiles(spec)
+    for source, listed in case["requested"].items():
+        requested = {tuple(int(v) for v in item.split("/")) for item in listed.split()}
+        missed = len(requested - tiles[source])
+        assert missed <= max(1, 0.01 * len(requested)), (source, missed, len(requested))
+        assert len(tiles[source]) <= 1.05 * len(requested), (source, len(tiles[source]), len(requested))
 
 
 def test_prefetch_reports_cached_downloaded_empty_and_failed(tmp_path: Path) -> None:

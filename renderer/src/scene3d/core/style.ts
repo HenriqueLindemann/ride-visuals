@@ -1,6 +1,7 @@
 import mlcontour from 'maplibre-contour';
 import type {StyleSpecification} from 'maplibre-gl';
 import type {SceneSpec} from '../schema';
+import {smootherstep, span} from './ease';
 
 export type Look = SceneSpec['look'];
 export type TileSet = SceneSpec['tiles'];
@@ -19,6 +20,30 @@ export function hillshadePaint(relief: number) {
     // regional scale on, one strength: the land never changes as the camera zooms.
     'hillshade-exaggeration': ['interpolate', ['linear'], ['zoom'], 2, k(0.8), 7, k(0.5), 10, k(0.35)] as unknown as number,
   };
+}
+
+/** Levels of overzoom over which the land's fills fade out: far past their level they are coarse shards. */
+const FILL_OVERZOOM: [number, number] = [3, 4.5];
+
+/**
+ * A zoom ramp of (zoom, opacity) stops, faded out between `land + FILL_OVERZOOM`
+ * (the level the land's tiles are locked to): one interpolate, as MapLibre needs.
+ */
+export function landFill(stops: [number, number][], land: number) {
+  const [from, to] = FILL_OVERZOOM.map((k) => land + k);
+  const base = (z: number) => {
+    if (z <= stops[0][0]) return stops[0][1];
+    for (let i = 1; i < stops.length; i++) {
+      const [z0, v0] = stops[i - 1];
+      const [z1, v1] = stops[i];
+      if (z <= z1) return v0 + ((v1 - v0) * (z - z0)) / (z1 - z0);
+    }
+    return stops[stops.length - 1][1];
+  };
+  const zooms = [...new Set([...stops.map(([z]) => z), from, to])].filter((z) => z <= to).sort((a, b) => a - b);
+  const out: number[] = [];
+  for (const z of zooms) out.push(z, Math.round(base(z) * (1 - smootherstep(span(z, from, to))) * 10000) / 10000);
+  return ['interpolate', ['linear'], ['zoom'], ...out] as unknown as number;
 }
 
 /** Contours exist from this tile level (mirrored in prefetch.py). */
@@ -141,7 +166,7 @@ export function buildStyle(look: Look, tiles: TileSet): StyleSpecification {
         filter: ['in', ['get', 'class'], ['literal', ['farmland', 'grass']]],
         paint: {
           'fill-color': '#f3efe8',
-          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 6, 0, 8, 0.028, 12, 0.036],
+          'fill-opacity': landFill([[6, 0], [8, 0.028], [12, 0.036]], tiles.landMaxZoom),
           'fill-antialias': false,
         },
       },
@@ -153,7 +178,7 @@ export function buildStyle(look: Look, tiles: TileSet): StyleSpecification {
         filter: ['in', ['get', 'class'], ['literal', ['residential', 'suburb', 'neighbourhood', 'commercial', 'industrial', 'retail']]],
         paint: {
           'fill-color': '#f3efe8',
-          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0.0, 12, 0.03],
+          'fill-opacity': landFill([[9, 0], [12, 0.03]], tiles.landMaxZoom),
           'fill-antialias': false,
         },
       },

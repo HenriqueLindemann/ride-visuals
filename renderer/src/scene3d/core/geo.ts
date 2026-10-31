@@ -14,6 +14,9 @@ const RAD = Math.PI / 180;
  */
 export const EARTH_CIRCUMFERENCE = 40_075_016.686;
 
+/** MapLibre's vertical field of view (camera.py FOV_DEG). */
+export const FOV_DEG = 36.87;
+
 export const mercX = (lon: number) => (lon + 180) / 360;
 
 export function mercY(lat: number): number {

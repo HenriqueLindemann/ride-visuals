@@ -5,7 +5,8 @@ import {continueRender, delayRender, staticFile} from 'remotion';
 import type {SceneSpec} from '../schema';
 import {type Camera, makeProjector, type Projector} from './projector';
 import {buildStyle, contourPaint, contourSource, hillshadePaint, satelliteMixPaint} from './style';
-import {exactDrape, type TileLod} from './terrain';
+import {smootherstep, span} from './ease';
+import {exactDrape, setExaggeration, type TileLod} from './terrain';
 
 // The ESM worker cannot be resolved from inside the bundle; the Python engine
 // stages it into public/scene3d (see stage_scene3d_assets).
@@ -14,19 +15,32 @@ maplibregl.setWorkerUrl(staticFile('scene3d/maplibre-gl-worker.mjs'));
 const MAP_TIMEOUT_MS = 120_000;
 /**
  * How many zoom levels a source's tiles span on screen, at up to how many
- * times the tiles of a flat view. MapLibre's defaults (about 9 levels, 3
- * times) spread a pitched view over bands of detail that sweep across the land
- * as the camera moves. Rasters (relief, imagery) and the terrain's own tiles
- * keep a few levels, all together, so a raster is never drawn into a much
- * coarser drape; vector tiles are all of one level. Buildings only exist from
- * 13: while a city stands, more of them keep it to the horizon. Mirrored in
- * prefetch.py.
+ * times the tiles of a flat view (mirrored in prefetch.py). MapLibre's
+ * defaults (about 9 levels) sweep bands of detail across the land as the
+ * camera moves, so rasters (relief, imagery, the terrain's own tiles) keep a
+ * few levels and vector tiles one. Buildings only exist from 13: while a city
+ * stands, more of them keep it to the horizon.
  */
 const TILE_LOD = {raster: [3, 10], vector: [1, 12], city: [1, 30]} as const;
+/**
+ * Raster levels at a pitch. Few levels make a steep view ask for far more
+ * tiles than the ratio allows, and MapLibre then coarsens all of it, the
+ * foreground too: from RASTER_OPEN_PITCH the far land may drop away instead
+ * (it is a few pixels under the fog), so the near land keeps its detail.
+ */
+const RASTER_OPEN_PITCH = [55, 75];
+const RASTER_OPEN_LEVELS = 6;
+const RASTER_SOURCES = ['dem', 'terrain', 'satellite'];
+const rasterLevels = (pitch: number) =>
+  TILE_LOD.raster[0] + (RASTER_OPEN_LEVELS - TILE_LOD.raster[0]) * smootherstep(span(pitch, RASTER_OPEN_PITCH[0], RASTER_OPEN_PITCH[1]));
 /** Vector sources: lines and fills draped at any level, so all of one level (style.ts). */
 const VECTORS = ['omt', 'contours', 'buildings'];
-/** Draped texels per terrain tile pixel, times the device pixel ratio: always finer than the screen. */
-const DRAPE_TEXELS = 4;
+/**
+ * Draped texels per terrain tile pixel, times the device pixel ratio. Tiles
+ * keep near their own size on screen, so twice is already finer than the
+ * screen: more measured no difference and cost four times the fill.
+ */
+const DRAPE_TEXELS = 2;
 
 type Props = {
   spec: SceneSpec;
@@ -38,7 +52,7 @@ type Props = {
 };
 
 /** Keys of the map state applied incrementally, so unchanged values cost nothing. */
-type Applied = {globe: boolean | null; terrain: number; opacity: number; contours: number; satellite: number; shade: number; buildings: number; city: boolean};
+type Applied = {globe: boolean | null; terrain: number; opacity: number; contours: number; satellite: number; shade: number; buildings: number; city: boolean; levels: number};
 
 /**
  * One MapLibre instance per render tab, driven frame by frame: jumpTo(camera),
@@ -49,8 +63,9 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const matrixRef = useRef<Float64Array | null>(null);
-  const applied = useRef<Applied>({globe: null, terrain: -1, opacity: -1, contours: -1, satellite: -1, shade: -1, buildings: 0, city: false});
+  const applied = useRef<Applied>({globe: null, terrain: -1, opacity: -1, contours: -1, satellite: -1, shade: -1, buildings: 0, city: false, levels: 0});
   const lodRef = useRef<TileLod | null>(null);
+  const paintedRef = useRef(false);
   const [ready, setReady] = useState(false);
   const [initHandle] = useState(() => delayRender('map init', {timeoutInMilliseconds: MAP_TIMEOUT_MS}));
 
@@ -79,10 +94,19 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
     });
     mapRef.current = map;
     map.on('error', (event) => console.warn(`map error: ${event.error?.message ?? event}`));
-    map.on('load', () => {
-      map.setSourceTileLodParams(...TILE_LOD.raster);
+    // The first paint is this frame's own: projection, LOD and camera are set
+    // before it asks for a single tile (the style starts on the globe, at the ground).
+    map.once('style.load', () => {
       for (const id of VECTORS) map.setSourceTileLodParams(...TILE_LOD.vector, id);
-      lodRef.current = (map.getSource('terrain') as unknown as {calculateTileZoom: TileLod}).calculateTileZoom;
+      setRasterLevels(map, camera.pitch, applied.current);
+      map.setProjection({type: camera.globe ? 'globe' : 'mercator'});
+      applied.current.globe = camera.globe;
+      map.jumpTo({center: camera.center, zoom: camera.zoom, pitch: camera.pitch, bearing: camera.bearing, elevation: camera.elevation});
+    });
+    map.on('load', () => {
+      // The drape follows the terrain source's rule, whatever its levels are now.
+      const terrain = map.getSource('terrain') as unknown as {calculateTileZoom: TileLod};
+      lodRef.current = (...args) => terrain.calculateTileZoom(...args);
       map.addLayer({
         id: 'capture',
         type: 'custom',
@@ -104,6 +128,13 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
     if (!map || !ready) return;
     const handle = delayRender(`map frame ${frame}`, {timeoutInMilliseconds: MAP_TIMEOUT_MS});
     applyState(map, spec, camera, applied.current, lodRef.current!);
+    if (camera.mapOpacity <= 0 && !camera.globe && paintedRef.current) {
+      // Nothing of the map shows: no paint and no tiles to wait for. The
+      // overlays project with this camera's own matrix over the last paint.
+      onProjector(makeProjector(map, camera, frame, cameraMatrix(map, camera), width, height, false));
+      continueRender(handle);
+      return;
+    }
 
     let done = false;
     let rendered = false;
@@ -115,6 +146,7 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
       map.off('idle', finish);
       map.off('render', onRender);
       if (poll) clearTimeout(poll);
+      paintedRef.current = true;
       onProjector(makeProjector(map, camera, frame, matrixRef.current, width, height));
       continueRender(handle);
     };
@@ -162,6 +194,27 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
   return <div ref={container} style={{position: 'absolute', left: 0, top: 0, width, height}} />;
 };
 
+type Transform = {
+  clone: () => Transform;
+  setCenter: (center: maplibregl.LngLat) => void;
+  setZoom: (zoom: number) => void;
+  setElevation: (elevation: number) => void;
+  setBearing: (bearing: number) => void;
+  setPitch: (pitch: number) => void;
+  modelViewProjectionMatrix: ArrayLike<number>;
+};
+
+/** The matrix a paint for `camera` would hand the custom layers (mercator), without painting. */
+function cameraMatrix(map: maplibregl.Map, camera: Camera): Float64Array {
+  const tr = (map as unknown as {_camera: {transform: Transform}})._camera.transform.clone();
+  tr.setCenter(new maplibregl.LngLat(camera.center[0], camera.center[1]));
+  tr.setZoom(camera.zoom);
+  tr.setElevation(camera.elevation);
+  tr.setBearing(camera.bearing);
+  tr.setPitch(camera.pitch);
+  return Float64Array.from(tr.modelViewProjectionMatrix);
+}
+
 /**
  * Tell the tile server (which also serves the tiles) that a frame was painted
  * before all of its tiles arrived, so the render reports it instead of
@@ -177,15 +230,25 @@ function reportUnsettled(spec: SceneSpec, frame: number) {
   }
 }
 
+function setRasterLevels(map: maplibregl.Map, pitch: number, state: Applied) {
+  const levels = Math.round(rasterLevels(pitch) * 20) / 20;
+  if (state.levels === levels) return;
+  for (const id of RASTER_SOURCES) if (map.getSource(id)) map.setSourceTileLodParams(levels, TILE_LOD.raster[1], id);
+  state.levels = levels;
+}
+
 function applyState(map: maplibregl.Map, spec: SceneSpec, camera: Camera, state: Applied, lod: TileLod) {
+  setRasterLevels(map, camera.pitch, state);
   if (state.globe !== camera.globe) {
     map.setProjection({type: camera.globe ? 'globe' : 'mercator'});
     state.globe = camera.globe;
   }
   const terrain = Math.round(camera.terrain * 1000) / 1000;
   if (state.terrain !== terrain) {
-    map.setTerrain(terrain > 0 ? {source: 'terrain', exaggeration: terrain} : null);
-    exactDrape(map, lod, DRAPE_TEXELS * (window.devicePixelRatio || 1));
+    if (!(terrain > 0 && state.terrain > 0 && setExaggeration(map, terrain))) {
+      map.setTerrain(terrain > 0 ? {source: 'terrain', exaggeration: terrain} : null);
+      exactDrape(map, lod, DRAPE_TEXELS * (window.devicePixelRatio || 1));
+    }
     state.terrain = terrain;
   }
   const shade = Math.round(camera.shade * 100) / 100;
