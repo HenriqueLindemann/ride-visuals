@@ -1,7 +1,7 @@
-import {type DrawOp, type RGB, rgba} from '../core/draw';
+import {type DrawOp, mixRGB, rgba} from '../core/draw';
 import {inOutSine, lerp} from '../core/ease';
 import type {LngLat} from '../core/geo';
-import {frameMargins, LABEL_GAP, LABEL_LINE, metricHeight, totalsGrid, TYPE} from '../core/layout';
+import {frameLayout, headline, LABEL_GAP, LABEL_LINE, metricHeight, totalsGrid, TYPE} from '../core/layout';
 import {INK, type TextItem} from '../core/Typography';
 import {extentUpTo, type Track} from '../core/track';
 import type {StrataFloor} from '../stories';
@@ -37,7 +37,7 @@ export function ridesAt(tracks: (Track | null)[], draw: number): (Ride | null)[]
   const n = tracks.length;
   const stagger = (STAGGER * (n - 1)) / Math.max(1, n);
   const room = 1 - stagger - TRAIL;
-  const longest = Math.max(1, ...tracks.map((track) => track?.length ?? 0));
+  const longest = tracks.reduce((m, track) => Math.max(m, track?.length ?? 0), 1);
   return tracks.map((track, j) => {
     if (!track) return null;
     const time = room * Math.max(0.4, Math.sqrt(track.length / longest));
@@ -159,10 +159,8 @@ export function strataScore({spec, tracks, frame, channel, projector, width, hei
   const ops: DrawOp[] = [];
   const texts: TextItem[] = [];
 
-  const portrait = height > width;
-  const margins = frameMargins(portrait);
-  const marginX = Math.round(margins.x * scale);
-  const topY = Math.round(margins.y * scale);
+  const box = frameLayout(width, height, scale);
+  const {portrait, marginX, topY} = box;
 
   const final = channel('final');
   const openingAlpha = channel('opening');
@@ -201,11 +199,7 @@ export function strataScore({spec, tracks, frame, channel, projector, width, hei
     // Each plate lands on its floor from half a step above.
     const lift = floor.targetLift + (1 - arrive) * 0.5 * (floor.step ?? 0);
     const tColor = floorCount > 1 ? k / (floorCount - 1) : 1;
-    const floorRGB: RGB = [
-      lerp(INK.warmRGB[0], INK.accentRGB[0], tColor),
-      lerp(INK.warmRGB[1], INK.accentRGB[1], tColor),
-      lerp(INK.warmRGB[2], INK.accentRGB[2], tColor),
-    ];
+    const floorRGB = mixRGB(INK.warmRGB, INK.accentRGB, tColor);
 
     // The period's rides draw one after another, each led by a hot trail that
     // cools into the floor's colour; settled floors stay legible, the floor in
@@ -235,20 +229,19 @@ export function strataScore({spec, tracks, frame, channel, projector, width, hei
       ops.push({kind: 'track', track, from: 0, to: head * track.length, rgb: floorRGB, alpha: level * arrive * fade, width: settled, lift, clip: plate});
       // The trail: three nested runs to the head, so it brightens towards it.
       if (tail >= 1) return;
-      for (let i = 0; i < 3; i++) {
-        ops.push({
-          kind: 'track',
-          track,
-          from: lerp(tail, head, i / 3) * track.length,
-          to: head * track.length,
-          rgb: INK.accentRGB,
-          alpha: 0.4 * arrive * fade,
-          width: 2.1 * scale,
-          head: i === 2 ? headGlow * hot : 0,
-          lift,
-          clip: plate,
-        });
-      }
+      ops.push({
+        kind: 'track',
+        track,
+        from: tail * track.length,
+        to: head * track.length,
+        rgb: INK.accentRGB,
+        alpha: 0.4 * arrive * fade,
+        width: 2.1 * scale,
+        head: headGlow * hot,
+        lift,
+        clip: plate,
+        ramp: 3,
+      });
     });
 
     if (labelAlpha > 0.005) {
@@ -321,20 +314,7 @@ export function strataScore({spec, tracks, frame, channel, projector, width, hei
     });
   }
 
-  if (openingAlpha > 0.004) {
-    texts.push({
-      kind: 'caption',
-      id: 'strata-opening',
-      x: marginX,
-      y: topY,
-      label: story.opening.label,
-      text: story.opening.text,
-      accent: story.opening.accent,
-      size: TYPE.title,
-      maxWidth: width - 2 * marginX,
-      opacity: openingAlpha,
-    });
-  }
+  if (openingAlpha > 0.004) texts.push(headline('strata-opening', story.opening, box, openingAlpha));
 
   if (statsAlpha > 0.004) texts.push(...totals.items);
 

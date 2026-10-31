@@ -1,7 +1,7 @@
 import type {DrawOp, Knockout} from '../core/draw';
-import {clamp01, smootherstep} from '../core/ease';
+import {clamp01, smootherstep, span} from '../core/ease';
 import {mercX, mercY} from '../core/geo';
-import {LABEL_LINE, totalsGrid, TYPE} from '../core/layout';
+import {headline, LABEL_LINE, numberFormat, totalsGrid, TYPE} from '../core/layout';
 import {pointAtDistance} from '../core/track';
 import {INK, type TextItem} from '../core/Typography';
 import type {FlyoverClimb, FlyoverStory} from '../stories';
@@ -68,6 +68,8 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
     const toM = Math.min(head, hero.endM);
     const stepM = Math.max(45, (hero.endM - hero.startM) / 46);
     for (let d = hero.startM; d <= toM; d += stepM) {
+      // Each eases in over the next stems' length as the head passes it.
+      const rise = smootherstep(span(head, d, d + 2 * stepM));
       const pt = pointAtDistance(track, d);
       ops.push({
         kind: 'stem',
@@ -75,7 +77,7 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
         from: hero.startAlt,
         to: pt.alt,
         rgb: INK.accentRGB,
-        alpha: 0.58 * beat,
+        alpha: 0.58 * beat * rise,
         width: 1.1 * scale,
         fade: true,
       });
@@ -107,28 +109,15 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
 
   // Opening title (top-left).
   if (titleAlpha > 0.004) {
-    texts.push({
-      kind: 'caption',
-      id: 'opening-title',
-      x: marginX,
-      y: topY,
-      label: story.title.label,
-      text: story.title.text,
-      accent: story.title.accent,
-      size: TYPE.title,
-      maxWidth: width - 2 * marginX,
-      opacity: titleAlpha,
-    });
+    texts.push(headline('opening-title', story.title, {marginX, topY, width}, titleAlpha));
     knockouts.push({text: 'opening-title', alpha: titleAlpha});
   }
 
   // Live counters during the 3D ride (top-left and top-right, over the land ahead).
   if (countersAlpha > 0.004) {
-    const fmtKm = new Intl.NumberFormat(spec.locale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
-    const fmtInt = new Intl.NumberFormat(spec.locale, {maximumFractionDigits: 0});
     const metricSize = TYPE.number;
-    const kmText = fmtKm.format(Math.max(0, kmVal));
-    const ascentText = `+${fmtInt.format(Math.max(0, Math.round(ascentVal)))}`;
+    const kmText = numberFormat(spec.locale, 1).format(Math.max(0, kmVal));
+    const ascentText = `+${numberFormat(spec.locale).format(Math.max(0, Math.round(ascentVal)))}`;
     knockouts.push({text: 'live-km', alpha: countersAlpha}, {text: 'live-ascent', alpha: countersAlpha});
     texts.push({
       kind: 'metric',
@@ -234,18 +223,22 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
     // tagged at their summits during the ride.
     if (whole && chart > 0.004) {
       const xy = runs[0];
+      // Each band eases in from the climb's foot, stays full to the summit and fades out over the top.
+      const feather = 18 * scale;
+      const over = Math.round(feather / Math.max(1e-3, Math.abs(x1 - x0) / Math.max(1, n - 1)));
       for (const climb of story.climbs) {
         const i0 = Math.max(0, Math.round((climb.startM / story.totalM) * (n - 1)));
         const i1 = Math.min(n - 1, Math.round((climb.endM / story.totalM) * (n - 1)));
         if (i1 - i0 < 2) continue;
         ops.push({
           kind: 'screen-path',
-          xy: xy.slice(i0 * 2, (i1 + 1) * 2),
+          xy: xy.slice(i0 * 2, (Math.min(n - 1, i1 + over) + 1) * 2),
           rgb: INK.accentRGB,
           alpha: 0,
           width: 0,
           fillTo: baseY,
           fillAlpha: (climb.hero ? 0.26 : 0.16) * chart,
+          fillFeather: feather,
         });
       }
     }
@@ -344,7 +337,7 @@ function climbTrace(
     ops.push({kind: 'screen-path', xy, rgb: INK.accentRGB, alpha: 0.96 * alpha, width: 2 * scale, head: alpha, smooth: true});
   }
 
-  const figure = `+${new Intl.NumberFormat(locale, {maximumFractionDigits: 0}).format(Math.max(0, Math.round(gained)))} m`;
+  const figure = `+${numberFormat(locale).format(Math.max(0, Math.round(gained)))} m`;
   texts.push({kind: 'caption', id: 'trace-gain', x: cx, y: y0, text: figure, size: TYPE.figure, align: 'center', opacity: alpha});
   knockouts.push({text: 'trace-gain', alpha});
   if (climb.summary && summit > 0.004) {

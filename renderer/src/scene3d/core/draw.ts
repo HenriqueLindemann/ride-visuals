@@ -1,4 +1,5 @@
-import {destination, EARTH_CIRCUMFERENCE, type LngLat, mercX, mercY, unmercY} from './geo';
+import {smootherstep, span} from './ease';
+import {EARTH_CIRCUMFERENCE, type LngLat, mercX, mercY, unmercY} from './geo';
 import type {Projector} from './projector';
 import {indexAtDistance, lodFor, type Track} from './track';
 
@@ -26,6 +27,8 @@ export type TrackOp = {
   occlude?: boolean;
   /** Cut the line at this lifted polygon (e.g. the plate it lies on). */
   clip?: readonly LngLat[];
+  /** Stroke it this many times, each over a shorter run to the `to` end: brighter towards the head (not with `occlude`). */
+  ramp?: number;
 };
 
 /** The map pulled up at `center` to `height` metres: a point `r` metres away is lifted `height * exp(-r / width)`. */
@@ -57,6 +60,8 @@ export type ScreenPathOp = {
   /** Fill between the line and this y (px), fading downwards. */
   fillTo?: number;
   fillAlpha?: number;
+  /** Fade the fill in and out over this many px at its left and right ends. */
+  fillFeather?: number;
   dash?: number[];
   /** 0..1: position marker at the last point. */
   head?: number;
@@ -95,21 +100,6 @@ export type PlateOp = {
   fill: string;
   stroke: string;
   strokeWidth: number;
-};
-
-/** A circle on the ground (metres), e.g. the reach of a collection. */
-export type RingOp = {
-  kind: 'ring';
-  center: LngLat;
-  radius: number;
-  rgb: RGB;
-  alpha: number;
-  width: number;
-  dash?: number[];
-  /** Height above the map (m): a level in the air. */
-  lift?: number;
-  /** 0..1: drawn on both ways from its screen-rightmost point, closing at the far side. */
-  sweep?: number;
 };
 
 /**
@@ -152,7 +142,7 @@ export type PlaneOp = {
 /** The Earth's limb seen from the camera, with space above it: alpha of space, of the limb's hairline, and of the air over it. */
 export type HorizonOp = {kind: 'horizon'; alpha: number; limb: number; air?: number};
 
-export type DrawOp = TrackOp | PathOp | ScreenPathOp | StemOp | DotOp | PulseOp | PlateOp | RingOp | SlicesOp | PlaneOp | HorizonOp;
+export type DrawOp = TrackOp | PathOp | ScreenPathOp | StemOp | DotOp | PulseOp | PlateOp | SlicesOp | PlaneOp | HorizonOp;
 
 const tmp = new Float64Array(3);
 
@@ -160,14 +150,20 @@ export const mixRGB = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) 
 
 export const rgba = (c: RGB, a: number) => `rgba(${c[0]},${c[1]},${c[2]},${Math.max(0, Math.min(1, a))})`;
 
-type Traced = {path: Path2D; head: [number, number] | null; any: boolean; pts: number[] | null};
+/** Points closer than this (px) to the last one add nothing but work. */
+const MIN_STEP_PX = 0.35;
 
-function traceTrack(p: Projector, op: TrackOp): Traced {
+/** A traced line: its path, and with `keep` its vertices as flat (x, y, depth) with NaN where the line breaks. */
+type Traced = {path: Path2D; head: [number, number] | null; any: boolean; pts: number[] | null; cuts: number[]};
+
+/** Traces a slice of a track; `splits` (distances) mark vertices in `cuts`, for runs that start there. */
+function traceTrack(p: Projector, op: TrackOp, splits: number[] = []): Traced {
   const t = op.track;
   const from = Math.max(0, op.from);
   const to = Math.min(t.length, op.to);
   const path = new Path2D();
-  if (to <= from || t.n < 2) return {path, head: null, any: false, pts: null};
+  const cuts: number[] = [];
+  if (to <= from || t.n < 2) return {path, head: null, any: false, pts: null, cuts};
   const idx = lodFor(t, p.resolution);
   const i0 = indexAtDistance(t, from);
   const i1 = indexAtDistance(t, to);
@@ -180,7 +176,7 @@ function traceTrack(p: Projector, op: TrackOp): Traced {
   const relief = op.occlude ? p.onRelief : undefined;
   // With occlusion, keep (x, y, depth) per vertex for perspective tapering;
   // NaN marks a break where the relief hides the line.
-  const pts: number[] | null = relief ? [] : null;
+  const pts: number[] | null = relief || splits.length ? [] : null;
   let pen = false;
   let any = false;
   let lastX = 0;
@@ -198,7 +194,7 @@ function traceTrack(p: Projector, op: TrackOp): Traced {
     if (!pen) {
       path.moveTo(x, y);
       pen = true;
-    } else if (Math.abs(x - lastX) + Math.abs(y - lastY) > 0.35) {
+    } else if (Math.abs(x - lastX) + Math.abs(y - lastY) > MIN_STEP_PX) {
       path.lineTo(x, y);
     } else {
       return;
@@ -227,6 +223,14 @@ function traceTrack(p: Projector, op: TrackOp): Traced {
     const f = spanM > 0 ? Math.min(1, Math.max(0, (dist - t.d[i]) / spanM)) : 0;
     return [t.mx[i] + (t.mx[j] - t.mx[i]) * f, t.my[i] + (t.my[j] - t.my[i]) * f];
   };
+  // Lands on every split up to a distance, noting the last vertex plotted there.
+  let next = 0;
+  const cutUpTo = (dist: number) => {
+    for (; next < splits.length && splits[next] <= dist; next++) {
+      emit(...at(indexAtDistance(t, splits[next]), splits[next]));
+      cuts.push(Math.max(0, (pts?.length ?? 0) / 3 - 1));
+    }
+  };
   emit(...at(i0, from));
   let lo = 0;
   let hi = idx.length - 1;
@@ -235,7 +239,11 @@ function traceTrack(p: Projector, op: TrackOp): Traced {
     if (idx[mid] <= i0) lo = mid + 1;
     else hi = mid;
   }
-  for (let k = lo; k < idx.length && idx[k] <= i1; k++) emit(t.mx[idx[k]], t.my[idx[k]]);
+  for (let k = lo; k < idx.length && idx[k] <= i1; k++) {
+    cutUpTo(t.d[idx[k]]);
+    emit(t.mx[idx[k]], t.my[idx[k]]);
+  }
+  cutUpTo(to);
   // Always land exactly on the head, even within the dedupe threshold.
   const [hx, hy] = at(i1, to);
   const lift = liftAt(hx, hy);
@@ -245,17 +253,52 @@ function traceTrack(p: Projector, op: TrackOp): Traced {
     path.lineTo(head[0], head[1]);
     pts?.push(head[0], head[1], tmp[2]);
   }
-  return {path, head, any, pts};
+  return {path, head, any, pts, cuts};
 }
 
+/** The traced vertices from index `start` on as one path. */
+function pathFrom(pts: number[], start: number): Path2D {
+  const path = new Path2D();
+  let pen = false;
+  for (let i = start; i * 3 < pts.length; i++) {
+    if (Number.isNaN(pts[i * 3])) {
+      pen = false;
+    } else if (pen) {
+      path.lineTo(pts[i * 3], pts[i * 3 + 1]);
+    } else {
+      path.moveTo(pts[i * 3], pts[i * 3 + 1]);
+      pen = true;
+    }
+  }
+  return path;
+}
+
+/** Run lengths (px) between which a visible stretch fades in: shorter ones are not drawn, longer ones whole. */
+const RUN_FADE_PX: [number, number] = [8, 32];
+
+/** 0..1 for a visible stretch of this length, so slivers peeking over a ridge ease in and out rather than pop. */
+export const runFade = (len: number) => smootherstep(span(len, RUN_FADE_PX[0], RUN_FADE_PX[1]));
+
+/** Perspective factor bounds (1 at the depth of the map centre) and the steps between them that width and alpha follow. */
+const NEAR_MIN = 0.35;
+const NEAR_MAX = 1.9;
+const NEAR_LEVELS = 32;
+const nearAt = (level: number) => NEAR_MIN * (NEAR_MAX / NEAR_MIN) ** (level / (NEAR_LEVELS - 1));
+
+/** Vertices stroked together as one piece of a run. */
+const TAPER_RUN = 4;
+
 /**
- * Strokes a traced line in short runs whose width follows perspective: full
- * width at the depth of the map centre, thicker near the eye, thinner and
- * quieter towards the horizon. Slivers peeking over a ridge are dropped.
+ * Strokes a traced line whose width follows perspective: full width at the
+ * depth of the map centre, thicker near the eye, thinner and quieter towards
+ * the horizon. Pieces of a like depth share one path and stroke, and the
+ * dimmer ones go first, each clearing what it covers before it is drawn, so
+ * where two meet the stronger one wins instead of doubling up. Short runs
+ * (slivers over a ridge) fade by their length.
  */
-function strokeTapered(ctx: CanvasRenderingContext2D, pts: number[], width: number, refDepth: number) {
-  const run = 4;
+function strokeTapered(layer: CanvasRenderingContext2D, pts: number[], width: number, refDepth: number) {
   const n = pts.length / 3;
+  const pieces: {alpha: number; width: number; path: Path2D}[] = [];
   for (let a = 0; a < n; ) {
     if (Number.isNaN(pts[a * 3])) {
       a++;
@@ -267,35 +310,42 @@ function strokeTapered(ctx: CanvasRenderingContext2D, pts: number[], width: numb
       len += Math.hypot(pts[(b + 1) * 3] - pts[b * 3], pts[(b + 1) * 3 + 1] - pts[b * 3 + 1]);
       b++;
     }
-    if (len < 24) for (let i = a; i <= b; i++) pts[i * 3] = NaN;
+    const fade = runFade(len);
+    if (fade > 0) {
+      const levels = new Map<number, Path2D>();
+      let open = -1;
+      for (let k = a; k < b; k += TAPER_RUN) {
+        const end = Math.min(b, k + TAPER_RUN);
+        let depth = 0;
+        for (let i = k + 1; i <= end; i++) depth += pts[i * 3 + 2];
+        const near = Math.min(NEAR_MAX, Math.max(NEAR_MIN, refDepth / (depth / (end - k))));
+        const level = Math.round((Math.log(near / NEAR_MIN) / Math.log(NEAR_MAX / NEAR_MIN)) * (NEAR_LEVELS - 1));
+        let path = levels.get(level);
+        if (!path) levels.set(level, (path = new Path2D()));
+        // A piece of the same depth as the last carries on its stroke, without a joint.
+        if (level !== open) path.moveTo(pts[k * 3], pts[k * 3 + 1]);
+        for (let i = k + 1; i <= end; i++) path.lineTo(pts[i * 3], pts[i * 3 + 1]);
+        open = level;
+      }
+      for (const [level, path] of levels) {
+        const near = nearAt(level);
+        pieces.push({alpha: Math.min(1, Math.max(0.4, near ** 0.7)) * fade, width: width * near ** 0.9, path});
+      }
+    }
     a = b + 1;
   }
-  let k = 0;
-  while (k < n - 1) {
-    if (Number.isNaN(pts[k * 3])) {
-      k++;
-      continue;
+  pieces.sort((x, y) => x.alpha - y.alpha);
+  for (const {alpha, width: w, path} of pieces) {
+    layer.lineWidth = w;
+    if (alpha < 1) {
+      layer.globalCompositeOperation = 'destination-out';
+      layer.globalAlpha = 1;
+      layer.stroke(path);
+      layer.globalCompositeOperation = 'source-over';
     }
-    let end = k;
-    let depth = 0;
-    let count = 0;
-    ctx.beginPath();
-    ctx.moveTo(pts[k * 3], pts[k * 3 + 1]);
-    while (end < n - 1 && end - k < run && !Number.isNaN(pts[(end + 1) * 3])) {
-      end++;
-      ctx.lineTo(pts[end * 3], pts[end * 3 + 1]);
-      depth += pts[end * 3 + 2];
-      count++;
-    }
-    if (count > 0) {
-      const near = Math.min(1.9, Math.max(0.35, refDepth / (depth / count)));
-      ctx.lineWidth = width * near ** 0.9;
-      ctx.globalAlpha = Math.min(1, Math.max(0.4, near ** 0.7));
-      ctx.stroke();
-    }
-    k = end > k ? end : k + 1;
+    layer.globalAlpha = alpha;
+    layer.stroke(path);
   }
-  ctx.globalAlpha = 1;
 }
 
 /** Crisp position marker: an accent disc with a paper-white core, no halo. */
@@ -311,8 +361,24 @@ function drawHead(ctx: CanvasRenderingContext2D, x: number, y: number, rgb: RGB,
   ctx.fill();
 }
 
+/** A box on the canvas: left, top, right, bottom. */
+type Rect = [number, number, number, number];
+
+/** The box round points (flat, `stride` numbers each, NaN skipped), grown by `pad`; null if there are none. */
+function boundsOf(pts: ArrayLike<number>, stride: number, pad: number): Rect | null {
+  const box: Rect = [Infinity, Infinity, -Infinity, -Infinity];
+  for (let i = 0; i + 1 < pts.length; i += stride) {
+    if (Number.isNaN(pts[i])) continue;
+    box[0] = Math.min(box[0], pts[i]);
+    box[1] = Math.min(box[1], pts[i + 1]);
+    box[2] = Math.max(box[2], pts[i]);
+    box[3] = Math.max(box[3], pts[i + 1]);
+  }
+  return Number.isFinite(box[0]) ? [box[0] - pad, box[1] - pad, box[2] + pad, box[3] + pad] : null;
+}
+
 let scratchCtx: CanvasRenderingContext2D | null = null;
-/** An offscreen layer the size of the frame, sharing the main canvas's transform. */
+/** An offscreen layer the size of the frame, sharing the main canvas's transform. Always clean between uses. */
 function scratch(main: CanvasRenderingContext2D): CanvasRenderingContext2D {
   const {width, height} = main.canvas;
   if (!scratchCtx || scratchCtx.canvas.width !== width || scratchCtx.canvas.height !== height) {
@@ -323,6 +389,39 @@ function scratch(main: CanvasRenderingContext2D): CanvasRenderingContext2D {
   }
   scratchCtx.setTransform(main.getTransform());
   return scratchCtx;
+}
+
+/**
+ * Paints into the scratch layer, then lays the box `paint` returns (all it drew)
+ * onto `ctx` once and wipes it again: only that box is touched, never the frame.
+ */
+function throughLayer(
+  ctx: CanvasRenderingContext2D,
+  paint: (layer: CanvasRenderingContext2D) => Rect | null,
+  {alpha = 1, operation = 'source-over', filter = 'none'}: {alpha?: number; operation?: GlobalCompositeOperation; filter?: string} = {},
+) {
+  const layer = scratch(ctx);
+  layer.save();
+  const box = paint(layer);
+  layer.restore();
+  if (!box) return;
+  const m = ctx.getTransform();
+  const x0 = Math.max(0, Math.floor(box[0] * m.a + m.e));
+  const y0 = Math.max(0, Math.floor(box[1] * m.d + m.f));
+  const x1 = Math.min(ctx.canvas.width, Math.ceil(box[2] * m.a + m.e));
+  const y1 = Math.min(ctx.canvas.height, Math.ceil(box[3] * m.d + m.f));
+  if (x1 <= x0 || y1 <= y0) return;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  ctx.globalCompositeOperation = operation;
+  ctx.filter = filter;
+  ctx.drawImage(layer.canvas, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
+  ctx.restore();
+  layer.save();
+  layer.setTransform(1, 0, 0, 1, 0, 0);
+  layer.clearRect(x0, y0, x1 - x0, y1 - y0);
+  layer.restore();
 }
 
 function drawTrack(ctx: CanvasRenderingContext2D, p: Projector, op: TrackOp) {
@@ -340,25 +439,30 @@ function drawTrack(ctx: CanvasRenderingContext2D, p: Projector, op: TrackOp) {
     ctx.restore();
     return;
   }
-  const {path, head, any, pts} = traceTrack(p, op);
-  if (any && pts) {
-    // Translucent runs would double up at their joints: draw them opaque into
-    // a layer and composite it once at the op's alpha.
-    const layer = scratch(ctx);
-    layer.clearRect(0, 0, p.width, p.height);
-    layer.lineCap = 'round';
-    layer.lineJoin = 'round';
-    layer.strokeStyle = rgba(op.rgb, 1);
-    strokeTapered(layer, pts, op.width, p.centerDepth);
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = Math.max(0, Math.min(1, op.alpha));
-    ctx.drawImage(layer.canvas, 0, 0);
-    ctx.restore();
+  const ramp = op.ramp && op.ramp > 1 && !op.occlude ? op.ramp : 0;
+  const from = Math.max(0, op.from);
+  const splits = Array.from({length: Math.max(0, ramp - 1)}, (_, i) => from + (Math.min(op.track.length, op.to) - from) * ((i + 1) / ramp));
+  const {path, head, any, pts, cuts} = traceTrack(p, op, splits);
+  if (any && op.occlude && pts) {
+    // Translucent runs would double up at their joints: draw them into a
+    // layer and composite it once at the op's alpha.
+    throughLayer(
+      ctx,
+      (layer) => {
+        layer.lineCap = 'round';
+        layer.lineJoin = 'round';
+        layer.strokeStyle = rgba(op.rgb, 1);
+        strokeTapered(layer, pts, op.width, p.centerDepth);
+        return boundsOf(pts, 3, (op.width * NEAR_MAX ** 0.9) / 2 + 2);
+      },
+      {alpha: op.alpha},
+    );
   } else if (any) {
     ctx.strokeStyle = rgba(op.rgb, op.alpha);
     ctx.lineWidth = op.width;
     ctx.stroke(path);
+    // Each run that starts later strokes over the rest, from the one trace.
+    if (pts) for (const cut of cuts) ctx.stroke(pathFrom(pts, cut));
   }
   if (head && op.head) {
     if (op.dot) {
@@ -424,19 +528,44 @@ function drawScreenPath(ctx: CanvasRenderingContext2D, op: ScreenPathOp) {
   const n = op.xy.length / 2;
   if (n < 2) return;
   if (op.fillTo !== undefined && (op.fillAlpha ?? 0) > 0) {
-    let top = Infinity;
-    for (let i = 0; i < n; i++) top = Math.min(top, op.xy[i * 2 + 1]);
-    const gradient = ctx.createLinearGradient(0, top, 0, op.fillTo);
-    gradient.addColorStop(0, rgba(op.rgb, op.fillAlpha ?? 0));
-    gradient.addColorStop(1, rgba(op.rgb, 0));
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.moveTo(op.xy[0], op.fillTo);
-    if (op.smooth) smoothPath(ctx, op.xy, false);
-    else for (let i = 0; i < n; i++) ctx.lineTo(op.xy[i * 2], op.xy[i * 2 + 1]);
-    ctx.lineTo(op.xy[(n - 1) * 2], op.fillTo);
-    ctx.closePath();
-    ctx.fill();
+    const fillTo = op.fillTo;
+    const fill = (target: CanvasRenderingContext2D) => {
+      let top = Infinity;
+      for (let i = 0; i < n; i++) top = Math.min(top, op.xy[i * 2 + 1]);
+      const gradient = target.createLinearGradient(0, top, 0, fillTo);
+      gradient.addColorStop(0, rgba(op.rgb, op.fillAlpha ?? 0));
+      gradient.addColorStop(1, rgba(op.rgb, 0));
+      target.fillStyle = gradient;
+      target.beginPath();
+      target.moveTo(op.xy[0], fillTo);
+      if (op.smooth) smoothPath(target, op.xy, false);
+      else for (let i = 0; i < n; i++) target.lineTo(op.xy[i * 2], op.xy[i * 2 + 1]);
+      target.lineTo(op.xy[(n - 1) * 2], fillTo);
+      target.closePath();
+      target.fill();
+    };
+    const x0 = op.xy[0];
+    const x1 = op.xy[(n - 1) * 2];
+    const feather = Math.min(op.fillFeather ?? 0, 0.5 * Math.abs(x1 - x0));
+    if (feather < 0.5) fill(ctx);
+    else
+      throughLayer(ctx, (layer) => {
+        fill(layer);
+        // Masked by a horizontal ramp, so the band has no hard sides.
+        const ramp = layer.createLinearGradient(x0, 0, x1, 0);
+        const k = feather / Math.abs(x1 - x0);
+        ramp.addColorStop(0, 'rgba(0,0,0,0)');
+        ramp.addColorStop(k, 'rgba(0,0,0,1)');
+        ramp.addColorStop(1 - k, 'rgba(0,0,0,1)');
+        ramp.addColorStop(1, 'rgba(0,0,0,0)');
+        layer.globalCompositeOperation = 'destination-in';
+        layer.fillStyle = ramp;
+        const box = boundsOf(op.xy, 2, 1);
+        if (!box) return null;
+        box[3] = Math.max(box[3], fillTo + 1);
+        layer.fillRect(box[0], box[1], box[2] - box[0], box[3] - box[1]);
+        return box;
+      });
   }
   if (op.alpha > 0.002) {
     ctx.setLineDash(op.dash ?? []);
@@ -515,63 +644,6 @@ function drawPlate(ctx: CanvasRenderingContext2D, p: Projector, op: PlateOp) {
   ctx.stroke();
 }
 
-type ProjectedRing = {xy: ([number, number] | null)[]; left: number; right: number};
-
-const RING_STEPS = 180;
-
-/** A circle `radius` metres round `center`, `lift` metres up, on screen: its points and leftmost/rightmost ones. */
-function projectRing(p: Projector, center: LngLat, radius: number, lift = 0): ProjectedRing {
-  const xy: ProjectedRing['xy'] = [];
-  let left = -1;
-  let right = -1;
-  for (let i = 0; i < RING_STEPS; i++) {
-    const [lon, lat] = destination(center, (i * 360) / RING_STEPS, radius);
-    const [x, y, ok] = p.lngLat(lon, lat, lift);
-    xy.push(ok ? [x, y] : null);
-    if (!ok) continue;
-    if (left < 0 || x < xy[left]![0]) left = i;
-    if (right < 0 || x > xy[right]![0]) right = i;
-  }
-  return {xy, left, right};
-}
-
-/** The screen-leftmost and rightmost points of a lifted circle (null when not drawn). */
-export function ringEdges(p: Projector, center: LngLat, radius: number, lift = 0) {
-  const {xy, left, right} = projectRing(p, center, radius, lift);
-  return {left: left < 0 ? null : xy[left], right: right < 0 ? null : xy[right]};
-}
-
-function drawRing(ctx: CanvasRenderingContext2D, p: Projector, op: RingOp) {
-  const {xy, right} = projectRing(p, op.center, op.radius, op.lift);
-  if (right < 0) return;
-  // Both ends run from the rightmost point round to meet at the far side,
-  // the last step cut short so the sweep glides.
-  const reach = Math.max(0, Math.min(1, op.sweep ?? 1)) * (RING_STEPS / 2);
-  const at = (k: number) => xy[(((right + k) % RING_STEPS) + RING_STEPS) % RING_STEPS];
-  const path = new Path2D();
-  for (const dir of [1, -1]) {
-    let pen = false;
-    for (let k = 0; k <= Math.ceil(reach); k++) {
-      let pt = at(dir * k);
-      const prev = at(dir * (k - 1));
-      if (pt && prev && k > reach) pt = [prev[0] + (pt[0] - prev[0]) * (reach - k + 1), prev[1] + (pt[1] - prev[1]) * (reach - k + 1)];
-      if (!pt) {
-        pen = false;
-        continue;
-      }
-      if (!pen) path.moveTo(pt[0], pt[1]);
-      else path.lineTo(pt[0], pt[1]);
-      pen = true;
-    }
-  }
-  ctx.setLineDash(op.dash ?? []);
-  ctx.strokeStyle = rgba(op.rgb, op.alpha);
-  ctx.lineWidth = op.width;
-  ctx.lineCap = 'round';
-  ctx.stroke(path);
-  ctx.setLineDash([]);
-}
-
 /** Projects plane coordinates (x along, z up, metres) to the screen. */
 export function planeProjector(p: Projector, plane: Plane) {
   const unit = mercMeters(plane.origin[1]);
@@ -594,7 +666,7 @@ function drawPlane(ctx: CanvasRenderingContext2D, p: Projector, op: PlaneOp) {
   const path = new Path2D();
   let last: [number, number] | null = null;
   let top = Infinity;
-  let base = -Infinity;
+  let bottom = -Infinity;
   let left = Infinity;
   let right = -Infinity;
   for (const xz of op.strokes) {
@@ -604,27 +676,18 @@ function drawPlane(ctx: CanvasRenderingContext2D, p: Projector, op: PlaneOp) {
         pen = false;
         continue;
       }
-      // Points closer than a third of a pixel add nothing but work.
-      if (pen && last && Math.abs(tmp[0] - last[0]) + Math.abs(tmp[1] - last[1]) < 0.35 && i + 2 < xz.length) continue;
+      if (pen && last && Math.abs(tmp[0] - last[0]) + Math.abs(tmp[1] - last[1]) < MIN_STEP_PX && i + 2 < xz.length) continue;
       if (!pen) path.moveTo(tmp[0], tmp[1]);
       else path.lineTo(tmp[0], tmp[1]);
       pen = true;
       last = [tmp[0], tmp[1]];
       top = Math.min(top, tmp[1]);
+      bottom = Math.max(bottom, tmp[1]);
       left = Math.min(left, tmp[0]);
       right = Math.max(right, tmp[0]);
     }
   }
   if (!last) return;
-  // Tapered ends are drawn apart and faded out across the screen, so nothing ends on an edge.
-  const taper = op.taper && right - left > 1 ? op.taper : null;
-  const layer = taper ? scratch(ctx) : ctx;
-  if (layer !== ctx) {
-    layer.save();
-    layer.setTransform(1, 0, 0, 1, 0, 0);
-    layer.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
-    layer.restore();
-  }
   // The plane below a height, across the strokes' span, as a screen polygon.
   const below = (height: number) => {
     let x0 = Infinity;
@@ -637,69 +700,75 @@ function drawPlane(ctx: CanvasRenderingContext2D, p: Projector, op: PlaneOp) {
     }
     return area;
   };
-  const clipped = op.upTo !== undefined && Number.isFinite(left);
-  if (clipped) {
-    layer.save();
-    layer.clip(below(op.upTo!));
-  }
+  // The first stroke and its foot on the ground, to shade from its top down to nothing.
+  let shade: Path2D | null = null;
+  let foot = -Infinity;
   if (op.shade && op.shade > 0.002) {
-    // The first stroke and its foot on the ground, shaded from its top down to nothing.
     const xz = op.strokes[0];
     const area = new Path2D(path);
     for (let i = xz.length - 2; i >= 0; i -= 2) {
       if (!project(xz[i], 0, tmp)) continue;
       area.lineTo(tmp[0], tmp[1]);
-      base = Math.max(base, tmp[1]);
+      foot = Math.max(foot, tmp[1]);
     }
     area.closePath();
-    if (base > top + 1) {
-      // Most of it near the top, thinning out like haze toward the ground.
-      const gradient = layer.createLinearGradient(0, top, 0, base);
-      for (const [stop, share] of [[0, 1], [0.2, 0.55], [0.45, 0.2], [0.75, 0.05], [1, 0]]) gradient.addColorStop(stop, rgba(op.rgb, op.shade * share));
-      layer.fillStyle = gradient;
-      layer.fill(area);
-    }
+    if (foot > top + 1) shade = area;
+    bottom = Math.max(bottom, foot);
   }
-  if (op.fill && op.fill > 0.002) {
-    layer.fillStyle = rgba(op.rgb, op.fill);
-    layer.fill(path, 'evenodd');
-  }
-  if (clipped) layer.restore();
-  if (op.alpha > 0.002) {
-    layer.lineWidth = op.width;
-    layer.lineCap = 'round';
-    layer.lineJoin = 'round';
-    layer.strokeStyle = rgba(op.rgb, op.lit === undefined ? op.alpha : op.alpha / 3);
-    layer.stroke(path);
-    if (op.lit !== undefined && op.lit > 0) {
+  // Tapered ends are drawn apart and faded out across the screen, so nothing ends on an edge.
+  const taper = op.taper && right - left > 1 ? op.taper : null;
+  const paint = (layer: CanvasRenderingContext2D): Rect => {
+    const clipped = op.upTo !== undefined && Number.isFinite(left);
+    if (clipped) {
       layer.save();
-      layer.clip(below(op.lit));
-      layer.strokeStyle = rgba(op.rgb, op.alpha);
-      layer.stroke(path);
-      layer.restore();
+      layer.clip(below(op.upTo!));
     }
-  }
-  if (taper) {
-    const mask = layer.createLinearGradient(left, 0, right, 0);
-    mask.addColorStop(0, 'rgba(0,0,0,0)');
-    mask.addColorStop(Math.min(0.5, taper[0]), 'rgba(0,0,0,1)');
-    mask.addColorStop(Math.max(0.5, 1 - taper[1]), 'rgba(0,0,0,1)');
-    mask.addColorStop(1, 'rgba(0,0,0,0)');
-    layer.save();
-    layer.globalCompositeOperation = 'destination-in';
-    layer.fillStyle = mask;
-    layer.fillRect(left - 1, -p.height, right - left + 2, 3 * p.height);
-    layer.restore();
-    // Outside the strokes' span the mask leaves the layer as it was: clear it.
-    layer.clearRect(-p.width, -p.height, left - 1 + p.width, 3 * p.height);
-    layer.clearRect(right + 1, -p.height, 2 * p.width, 3 * p.height);
-  }
-  if (layer !== ctx) {
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(layer.canvas, 0, 0);
-    ctx.restore();
-  }
+    if (shade) {
+      // Most of it near the top, thinning out like haze toward the ground.
+      const gradient = layer.createLinearGradient(0, top, 0, foot);
+      for (const [stop, share] of [[0, 1], [0.2, 0.55], [0.45, 0.2], [0.75, 0.05], [1, 0]]) gradient.addColorStop(stop, rgba(op.rgb, op.shade! * share));
+      layer.fillStyle = gradient;
+      layer.fill(shade);
+    }
+    if (op.fill && op.fill > 0.002) {
+      layer.fillStyle = rgba(op.rgb, op.fill);
+      layer.fill(path, 'evenodd');
+    }
+    if (clipped) layer.restore();
+    if (op.alpha > 0.002) {
+      layer.lineWidth = op.width;
+      layer.lineCap = 'round';
+      layer.lineJoin = 'round';
+      layer.strokeStyle = rgba(op.rgb, op.lit === undefined ? op.alpha : op.alpha / 3);
+      layer.stroke(path);
+      if (op.lit !== undefined && op.lit > 0) {
+        layer.save();
+        layer.clip(below(op.lit));
+        layer.strokeStyle = rgba(op.rgb, op.alpha);
+        layer.stroke(path);
+        layer.restore();
+      }
+    }
+    const pad = op.width + 2;
+    const box: Rect = [left - pad, top - pad, right + pad, bottom + pad];
+    if (taper) {
+      const mask = layer.createLinearGradient(left, 0, right, 0);
+      mask.addColorStop(0, 'rgba(0,0,0,0)');
+      mask.addColorStop(Math.min(0.5, taper[0]), 'rgba(0,0,0,1)');
+      mask.addColorStop(Math.max(0.5, 1 - taper[1]), 'rgba(0,0,0,1)');
+      mask.addColorStop(1, 'rgba(0,0,0,0)');
+      layer.globalCompositeOperation = 'destination-in';
+      layer.fillStyle = mask;
+      layer.fillRect(left - 1, box[1], right - left + 2, box[3] - box[1]);
+      layer.globalCompositeOperation = 'source-over';
+      // Outside the strokes' span the mask leaves the layer as it was: clear it.
+      layer.clearRect(box[0], box[1], left - 1 - box[0], box[3] - box[1]);
+      layer.clearRect(right + 1, box[1], box[2] - right - 1, box[3] - box[1]);
+    }
+    return box;
+  };
+  if (taper) throughLayer(ctx, paint);
+  else paint(ctx);
   if (op.head) drawHead(ctx, last[0], last[1], op.rgb, op.head * Math.min(1, op.alpha * 1.4));
 }
 
@@ -768,7 +837,6 @@ export function drawOps(ctx: CanvasRenderingContext2D, p: Projector, ops: DrawOp
     else if (op.kind === 'screen-path') drawScreenPath(ctx, op);
     else if (op.kind === 'stem') drawStem(ctx, p, op);
     else if (op.kind === 'plate') drawPlate(ctx, p, op);
-    else if (op.kind === 'ring') drawRing(ctx, p, op);
     else if (op.kind === 'slices') drawSlices(ctx, p, op);
     else if (op.kind === 'plane') drawPlane(ctx, p, op);
     else if (op.kind === 'horizon') drawHorizon(ctx, p, op);
@@ -804,6 +872,9 @@ export function drawOps(ctx: CanvasRenderingContext2D, p: Projector, ops: DrawOp
 /** Fixed text (a text item's id) the drawn lines give way to, at the text's own alpha. */
 export type Knockout = {text: string; alpha: number};
 
+/** Softness (px) of a knockout's edge. */
+const BLUR_PX = 0.6;
+
 /** Halo (CSS px) kept clear around a glyph set at `size` px. */
 const haloFor = (size: number) => 3 + 0.05 * size;
 
@@ -821,30 +892,24 @@ export function drawKnockouts(ctx: CanvasRenderingContext2D, knockouts: Knockout
     if (!element) continue;
     // Glyphs drawn opaque into a layer, then cleared once at the text's own
     // alpha: a halo's fill and stroke would otherwise double up mid-fade.
-    const layer = scratch(ctx);
-    layer.save();
-    layer.setTransform(1, 0, 0, 1, 0, 0);
-    layer.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
-    layer.restore();
-    layer.save();
-    traceGlyphs(layer, element, ctx.canvas.getBoundingClientRect(), width);
-    layer.restore();
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.globalAlpha = Math.min(1, alpha);
-    ctx.filter = 'blur(0.6px)';
-    ctx.drawImage(layer.canvas, 0, 0);
-    ctx.restore();
+    throughLayer(ctx, (layer) => traceGlyphs(layer, element, ctx.canvas.getBoundingClientRect(), width), {
+      alpha,
+      operation: 'destination-out',
+      filter: `blur(${BLUR_PX}px)`,
+    });
   }
 }
+
+/** Ascent of each font above the baseline (px), measured once. */
+const ascents = new Map<string, number>();
 
 /**
  * Fills and strokes (with its halo) every character under `element`, each at
  * the position the browser laid it out: kerning, tabular figures and letter
  * spacing all come from the page; the canvas only supplies the glyph shape.
+ * Returns the box it drew in, null when there was no glyph.
  */
-function traceGlyphs(ctx: CanvasRenderingContext2D, element: HTMLElement, frame: DOMRect, width: number) {
+function traceGlyphs(ctx: CanvasRenderingContext2D, element: HTMLElement, frame: DOMRect, width: number): Rect | null {
   // Composition px per client px (the Studio scales its preview).
   const k = width / frame.width;
   const range = document.createRange();
@@ -853,6 +918,7 @@ function traceGlyphs(ctx: CanvasRenderingContext2D, element: HTMLElement, frame:
   ctx.lineJoin = 'round';
   ctx.fillStyle = '#000';
   ctx.strokeStyle = '#000';
+  const box: Rect = [Infinity, Infinity, -Infinity, -Infinity];
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const text = node as Text;
@@ -860,10 +926,13 @@ function traceGlyphs(ctx: CanvasRenderingContext2D, element: HTMLElement, frame:
     const size = parseFloat(style.fontSize);
     const spacing = parseFloat(style.letterSpacing) || 0;
     const upper = style.textTransform === 'uppercase';
-    ctx.font = `${style.fontWeight} ${size}px ${style.fontFamily}`;
+    const font = `${style.fontWeight} ${size}px ${style.fontFamily}`;
+    ctx.font = font;
     // A text range's box is the font's content area: its top is one ascent above the baseline.
-    const ascent = ctx.measureText('H').fontBoundingBoxAscent;
-    ctx.lineWidth = 2 * haloFor(size);
+    let ascent = ascents.get(font);
+    if (ascent === undefined) ascents.set(font, (ascent = ctx.measureText('H').fontBoundingBoxAscent));
+    const halo = haloFor(size);
+    ctx.lineWidth = 2 * halo;
     let at = 0;
     for (const char of text.data) {
       const from = at;
@@ -871,14 +940,21 @@ function traceGlyphs(ctx: CanvasRenderingContext2D, element: HTMLElement, frame:
       if (char.trim() === '') continue;
       range.setStart(text, from);
       range.setEnd(text, at);
-      const box = range.getBoundingClientRect();
-      if (box.width === 0) continue;
+      const rect = range.getBoundingClientRect();
+      if (rect.width === 0) continue;
       // Letter spacing trails each character: the glyph is centred on its advance.
-      const x = (box.left - frame.left) * k + (box.width * k - spacing) / 2;
-      const y = (box.top - frame.top) * k + ascent;
+      const x = (rect.left - frame.left) * k + (rect.width * k - spacing) / 2;
+      const y = (rect.top - frame.top) * k + ascent;
       const glyph = upper ? char.toLocaleUpperCase() : char;
       ctx.strokeText(glyph, x, y);
       ctx.fillText(glyph, x, y);
+      // The glyph's cell, grown by the halo and the blur it is cleared with.
+      const reach = halo + 3 * BLUR_PX + 1;
+      box[0] = Math.min(box[0], (rect.left - frame.left) * k - reach);
+      box[1] = Math.min(box[1], (rect.top - frame.top) * k - reach);
+      box[2] = Math.max(box[2], (rect.right - frame.left) * k + reach);
+      box[3] = Math.max(box[3], (rect.bottom - frame.top) * k + reach);
     }
   }
+  return Number.isFinite(box[0]) ? box : null;
 }

@@ -2,7 +2,7 @@
  * The shared frame layout and type scale of the 3D scenes. Sizes are px at a
  * 1080 px short side: scores multiply layout by `scale` and text by `textScale`.
  */
-import type {MetricItem, TextItem} from './Typography';
+import type {CaptionItem, MetricItem, TextItem} from './Typography';
 
 /**
  * Instagram Story safe area at 1080x1920: the profile row on top and the reply
@@ -16,6 +16,36 @@ export const STORY_SAFE = 220;
  * bottom (the safe area in portrait). Mirrors LAYOUT_1080 in scene3d/flyover.py.
  */
 export const frameMargins = (portrait: boolean) => ({x: portrait ? 72 : 112, y: portrait ? STORY_SAFE : 88});
+
+/** The frame's box at this size: side margin and top margin (px, whole), as the scores place text. */
+export function frameLayout(width: number, height: number, scale: number) {
+  const portrait = height > width;
+  const margins = frameMargins(portrait);
+  return {portrait, width, marginX: Math.round(margins.x * scale), topY: Math.round(margins.y * scale)};
+}
+
+/** A score's opening or closing sentence, top-left in the frame's margins. */
+export function headline(
+  id: string,
+  copy: {label?: string; text: string; accent?: string},
+  {marginX, topY, width}: {marginX: number; topY: number; width: number},
+  opacity: number,
+): CaptionItem {
+  return {kind: 'caption', id, x: marginX, y: topY, label: copy.label, text: copy.text, accent: copy.accent, size: TYPE.title, maxWidth: width - 2 * marginX, opacity};
+}
+
+const formats = new Map<string, Intl.NumberFormat>();
+
+/** A number format with exactly `digits` decimals, built once per locale. */
+export function numberFormat(locale: string, digits = 0): Intl.NumberFormat {
+  const key = `${locale}/${digits}`;
+  let format = formats.get(key);
+  if (!format) {
+    format = new Intl.NumberFormat(locale, {minimumFractionDigits: digits, maximumFractionDigits: digits});
+    formats.set(key, format);
+  }
+  return format;
+}
 
 /**
  * One family, five sizes (px at a 1080 px short side): small caps labels

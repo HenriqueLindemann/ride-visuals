@@ -1,6 +1,6 @@
 import {type DrawOp, type Knockout, type Plane, planePoint, type SlicesOp} from '../core/draw';
 import {clamp01, glide, inOutSine, lerp, smootherstep, span} from '../core/ease';
-import {counterRow, frameMargins, LABEL_LINE, metricHeight, spread, TYPE} from '../core/layout';
+import {counterRow, frameLayout, headline, LABEL_LINE, metricHeight, numberFormat, spread, TYPE} from '../core/layout';
 import {INK, type TagItem, type TextItem} from '../core/Typography';
 import type {AscentStory} from '../stories';
 import type {ScoreContext, ScoreOutput} from './index';
@@ -60,6 +60,40 @@ function profileOf(story: AscentStory): Profile {
   return profile;
 }
 
+/** What a height's strokes give the score each frame, found once: flat strokes, where it is named, and a level's glyph length. */
+type Geometry = {strokes: number[][]; top: [number, number]; side: [number, number]; glyphLength: number};
+
+const geometries = new WeakMap<Height, Geometry>();
+
+function geometryOf(h: Height): Geometry {
+  let geometry = geometries.get(h);
+  if (!geometry) {
+    const strokes = h.strokes.map((st) => st.flat());
+    let glyphLength = 0;
+    for (const st of h.glyph ?? []) for (const [x] of st) glyphLength = Math.max(glyphLength, x);
+    if (h.shape === 'level') {
+      const [far, z] = h.strokes[0][0];
+      geometry = {strokes, top: [far, z], side: [far, z], glyphLength};
+    } else {
+      // The highest point; a skyline is also named where its taper ends.
+      let top = h.strokes[0][0];
+      let x0 = Infinity;
+      let x1 = -Infinity;
+      for (const st of h.strokes) {
+        for (const pt of st) {
+          if (pt[1] > top[1]) top = pt;
+          x0 = Math.min(x0, pt[0]);
+          x1 = Math.max(x1, pt[0]);
+        }
+      }
+      const side = h.shape === 'skyline' ? h.strokes.flat().find(([x]) => x >= x0 + THING.taper * (x1 - x0))! : top;
+      geometry = {strokes, top: [top[0], top[1]], side: [side[0], side[1]], glyphLength};
+    }
+    geometries.set(h, geometry);
+  }
+  return geometry;
+}
+
 /** Index of the last vertex at or before plane x. */
 function indexAt(xs: Float64Array, x: number): number {
   let lo = 0;
@@ -80,26 +114,21 @@ function heightAt({x: xs, z: zs}: Profile, x: number): number {
   return xs[j] > xs[i] ? lerp(zs[i], zs[j], clamp01((x - xs[i]) / (xs[j] - xs[i]))) : zs[i];
 }
 
-/** Plane x where the profile first reaches height z. */
-function xAtHeight({x: xs, z: zs}: Profile, z: number): number {
-  let lo = 0;
-  let hi = zs.length - 1;
-  if (z >= zs[hi]) return xs[hi];
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (zs[mid] < z) lo = mid;
-    else hi = mid;
-  }
-  return zs[hi] > zs[lo] ? lerp(xs[lo], xs[hi], clamp01((z - zs[lo]) / (zs[hi] - zs[lo]))) : xs[lo];
-}
-
 /** The profile from plane x `from` to `to`, squashed toward home: flat x, z pairs. */
-function stretch(profile: Profile, from: number, to: number, squash: number): number[] {
-  if (to <= from) return [];
-  const out = [from * squash, heightAt(profile, from)];
+function stretch(profile: Profile, from: number, to: number, squash: number): Float64Array {
+  if (to <= from) return new Float64Array(0);
+  const first = indexAt(profile.x, from) + 1;
   const last = indexAt(profile.x, to);
-  for (let i = indexAt(profile.x, from) + 1; i <= last; i++) out.push(profile.x[i] * squash, profile.z[i]);
-  out.push(to * squash, heightAt(profile, to));
+  const out = new Float64Array(2 * (Math.max(0, last - first + 1) + 2));
+  let n = 0;
+  out[n++] = from * squash;
+  out[n++] = heightAt(profile, from);
+  for (let i = first; i <= last; i++) {
+    out[n++] = profile.x[i] * squash;
+    out[n++] = profile.z[i];
+  }
+  out[n++] = to * squash;
+  out[n] = heightAt(profile, to);
   return out;
 }
 
@@ -118,9 +147,8 @@ export function ascentScore({spec, tracks, frame, channel, projector, width, hei
   const ops: DrawOp[] = [];
   const texts: TextItem[] = [];
   const knockouts: Knockout[] = [];
-  const margins = frameMargins(height > width);
-  const marginX = Math.round(margins.x * scale);
-  const topY = Math.round(margins.y * scale);
+  const box = frameLayout(width, height, scale);
+  const {marginX, topY} = box;
   const now = frame / spec.profile.fps;
 
   const fade = channel('fade');
@@ -337,17 +365,10 @@ export function ascentScore({spec, tracks, frame, channel, projector, width, hei
   // Where each is named: a thing above its top, and folded from its left end (where a skyline is fully
   // drawn); a level at its far end, past its glyph.
   const namedAt = story.heights.map((h) => {
-    if (h.shape === 'level') {
-      const [[far, z]] = h.strokes[0];
-      const length = h.glyph ? Math.max(...h.glyph.flat().map(([x]) => x)) : 0;
-      const nose = h.glyph ? far - GLYPH.gap * scale * mPerPx - length * glyphM : far;
-      return {top: [nose, z], side: [nose, z]};
-    }
-    const pts = h.strokes.flat();
-    const top = pts.reduce((a, b) => (b[1] > a[1] ? b : a));
-    const x0 = Math.min(...pts.map(([x]) => x));
-    const x1 = Math.max(...pts.map(([x]) => x));
-    return {top, side: h.shape === 'skyline' ? pts.find(([x]) => x >= x0 + THING.taper * (x1 - x0))! : top};
+    const {top, side, glyphLength} = geometryOf(h);
+    if (h.shape !== 'level') return {top, side};
+    const nose = h.glyph ? top[0] - GLYPH.gap * scale * mPerPx - glyphLength * glyphM : top[0];
+    return {top: [nose, top[1]], side: [nose, top[1]]};
   });
 
   // One name at a time while the line climbs (when, the director decides),
@@ -391,7 +412,7 @@ export function ascentScore({spec, tracks, frame, channel, projector, width, hei
     const standing = 1 - smootherstep(gone);
     if (standing <= 0.004) return;
     const alpha = share * standing * fade;
-    const strokes = h.strokes.map((st) => st.flat());
+    const {strokes} = geometryOf(h);
     if (h.shape === 'outline') {
       ops.push({kind: 'plane', plane, strokes, rgb: INK.paperRGB, alpha: THING.alpha * alpha, width: THING.width * scale, fill: THING.fill * alpha, upTo: climbed});
     } else {
@@ -433,23 +454,10 @@ export function ascentScore({spec, tracks, frame, channel, projector, width, hei
     }
   }
 
-  if (openingAlpha > 0.004) {
-    texts.push({
-      kind: 'caption',
-      id: 'ascent-opening',
-      x: marginX,
-      y: topY,
-      label: story.opening.label,
-      text: story.opening.text,
-      accent: story.opening.accent,
-      size: TYPE.title,
-      maxWidth: width - 2 * marginX,
-      opacity: openingAlpha,
-    });
-  }
+  if (openingAlpha > 0.004) texts.push(headline('ascent-opening', story.opening, box, openingAlpha));
   // The ride the head is on (the first one until the profile sets off).
   const ride = story.rides[Math.max(0, story.rides.filter((r) => r.x0 < head).length - 1)];
-  const value = `+${new Intl.NumberFormat(spec.locale, {maximumFractionDigits: 0}).format(climbed)}`;
+  const value = `+${numberFormat(spec.locale).format(climbed)}`;
   for (const item of counterRow(story.stats, {
     id: 'ascent',
     counter: story.counter,

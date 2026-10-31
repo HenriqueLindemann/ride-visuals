@@ -39,12 +39,13 @@ registerHooks({
   },
 });
 
-const {clamp01, envelope, glide, span, travel} = await import('../src/scene3d/core/ease.ts');
+const {clamp01, envelope, glide, smootherstep, span} = await import('../src/scene3d/core/ease.ts');
 const {destination, greatCircle, groundResolution, mercX, mercY, metersPerPixel, unmercX, unmercY} = await import(
   '../src/scene3d/core/geo.ts'
 );
 const {decodeTrack, extentUpTo, indexAtDistance, lodFor, pointAtDistance} = await import('../src/scene3d/core/track.ts');
-const {PORTRAIT_TEXT, spread} = await import('../src/scene3d/core/layout.ts');
+const {frameLayout, numberFormat, PORTRAIT_TEXT, spread} = await import('../src/scene3d/core/layout.ts');
+const {runFade} = await import('../src/scene3d/core/draw.ts');
 const {sceneSpecSchema} = await import('../src/scene3d/schema.ts');
 const {scores} = await import('../src/scene3d/scores/index.ts');
 const {plateAt, ridesAt} = await import('../src/scene3d/scores/strata.ts');
@@ -55,9 +56,30 @@ test('ease curves preserve endpoints and monotonicity', () => {
   assert.equal(span(5, 0, 10), 0.5);
   assert.ok(Math.abs(glide(0)) < 1e-6);
   assert.ok(Math.abs(glide(1) - 1) < 1e-6);
-  assert.ok(Math.abs(travel(0.5) - 0.5) < 1e-3);
+  assert.equal(smootherstep(0.5), 0.5);
   assert.equal(envelope(0, 2, 8, 1), 0);
   assert.equal(envelope(5, 2, 8, 1), 1);
+});
+
+test('visible runs fade in with their length instead of popping', () => {
+  assert.equal(runFade(0), 0);
+  assert.equal(runFade(8), 0);
+  assert.equal(runFade(32), 1);
+  assert.equal(runFade(500), 1);
+  let last = 0;
+  for (let len = 8; len <= 32; len += 0.5) {
+    assert.ok(runFade(len) >= last, `fade falls at ${len} px`);
+    last = runFade(len);
+  }
+});
+
+test('number formats are built once and frame margins round to whole px', () => {
+  assert.equal(numberFormat('en', 1), numberFormat('en', 1));
+  assert.notEqual(numberFormat('en', 1), numberFormat('en', 0));
+  assert.equal(numberFormat('en', 1).format(12.34), '12.3');
+  assert.equal(numberFormat('en').format(1234.6), '1,235');
+  assert.deepEqual(frameLayout(1920, 1080, 1), {portrait: false, width: 1920, marginX: 112, topY: 88});
+  assert.deepEqual(frameLayout(1080, 1920, 1), {portrait: true, width: 1080, marginX: 72, topY: 220});
 });
 
 test('web mercator and great-circle helpers round-trip cleanly', () => {
@@ -630,4 +652,15 @@ test('strata plates follow their rides, never shrink, never cut a line, and reac
   }
   // Finished, the plate is exactly the floor's: it has reached the far start.
   assert.deepEqual(plateAt(tracks, draws, draws.length - 1, fps, corners), corners);
+});
+
+test('land fills fade out far past their locked level, in one zoom ramp', async () => {
+  const {landFill} = await import('../src/scene3d/core/style.ts');
+  const [kind, , input, ...stops] = landFill([[6, 0], [8, 0.028], [12, 0.036]], 8);
+  assert.equal(kind, 'interpolate');
+  assert.deepEqual(input, ['zoom']);
+  const zooms = stops.filter((_, i) => i % 2 === 0);
+  assert.deepEqual(zooms, [...zooms].sort((a, b) => a - b));
+  assert.equal(stops[stops.length - 1], 0);
+  assert.equal(stops[stops.indexOf(8) + 1], 0.028);
 });

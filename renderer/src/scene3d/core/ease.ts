@@ -10,12 +10,8 @@ export const span = (v: number, from: number, to: number) =>
   to === from ? (v >= to ? 1 : 0) : clamp01((v - from) / (to - from));
 
 export const outCubic: Ease = (t) => 1 - (1 - clamp01(t)) ** 3;
-export const inOutCubic: Ease = (t) => {
-  const u = clamp01(t);
-  return u < 0.5 ? 4 * u * u * u : 1 - (-2 * u + 2) ** 3 / 2;
-};
 export const inOutSine: Ease = (t) => (1 - Math.cos(Math.PI * clamp01(t))) / 2;
-/** Quintic smootherstep: zero speed and acceleration at both ends (the director's `travel`). */
+/** Quintic smootherstep: zero speed and acceleration at both ends. */
 export const smootherstep: Ease = (t) => {
   const u = clamp01(t);
   return u * u * u * (u * (u * 6 - 15) + 10);
@@ -48,8 +44,6 @@ export function bezier(x1: number, y1: number, x2: number, y2: number): Ease {
 
 /** Decisive start, long soft landing: the default for things arriving on screen. */
 export const glide = bezier(0.16, 1, 0.3, 1);
-/** Symmetric move with gentle ends, for things travelling between two states. */
-export const travel = bezier(0.65, 0, 0.35, 1);
 
 /** Opacity envelope: fades in over `fade` after `start`, out over `fade` before `end`. */
 export const envelope = (v: number, start: number, end: number, fade: number) =>

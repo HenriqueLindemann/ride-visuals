@@ -1,7 +1,7 @@
-import type {DrawOp, RGB} from '../core/draw';
+import {type DrawOp, mixRGB} from '../core/draw';
 import {clamp01, lerp, outCubic} from '../core/ease';
 import {destination, type LngLat} from '../core/geo';
-import {frameMargins, TYPE} from '../core/layout';
+import {frameLayout, headline, numberFormat, TYPE} from '../core/layout';
 import {pointAtDistance} from '../core/track';
 import {INK, type TextItem} from '../core/Typography';
 import type {ScoreContext, ScoreOutput} from './index';
@@ -11,10 +11,8 @@ export function stretchScore({spec, tracks, channel, projector, width, height, s
   const ops: DrawOp[] = [];
   const texts: TextItem[] = [];
 
-  const portrait = height > width;
-  const margins = frameMargins(portrait);
-  const marginX = Math.round(margins.x * scale);
-  const topY = Math.round(margins.y * scale);
+  const box = frameLayout(width, height, scale);
+  const {marginX, topY} = box;
 
   const laid = channel('laid');
   const openingAlpha = channel('opening');
@@ -57,11 +55,7 @@ export function stretchScore({spec, tracks, channel, projector, width, height, s
     const tr = tracks[ride.trackIndex];
     if (m <= 0) {
       const cue = outCubic(clamp01((laid - ride.beforeM + 10_000) / 10_000));
-      const rgb: RGB = [
-        lerp(INK.warmRGB[0], INK.accentRGB[0], cue),
-        lerp(INK.warmRGB[1], INK.accentRGB[1], cue),
-        lerp(INK.warmRGB[2], INK.accentRGB[2], cue),
-      ];
+      const rgb = mixRGB(INK.warmRGB, INK.accentRGB, cue);
       ops.push({
         kind: 'track',
         track: tr,
@@ -171,33 +165,16 @@ export function stretchScore({spec, tracks, channel, projector, width, height, s
     }
   }
 
-  if (openingAlpha > 0.004) {
-    texts.push({
-      kind: 'caption',
-      id: 'stretch-opening',
-      x: marginX,
-      y: topY,
-      label: story.opening.label,
-      text: story.opening.text,
-      accent: story.opening.accent,
-      size: TYPE.title,
-      maxWidth: width - 2 * marginX,
-      opacity: openingAlpha,
-    });
-  }
+  if (openingAlpha > 0.004) texts.push(headline('stretch-opening', story.opening, box, openingAlpha));
 
   if (counterAlpha > 0.004) {
-    const fmt = new Intl.NumberFormat(spec.locale, {
-      maximumFractionDigits: kmVal < 100 ? 1 : 0,
-      minimumFractionDigits: kmVal < 100 ? 1 : 0,
-    });
     texts.push({
       kind: 'metric',
       id: 'stretch-counter',
       x: marginX,
       y: topY,
       label: story.counter.label,
-      value: fmt.format(Math.max(0, kmVal)),
+      value: numberFormat(spec.locale, kmVal < 100 ? 1 : 0).format(Math.max(0, kmVal)),
       unit: story.counter.unit,
       align: 'left',
       size: TYPE.number,
@@ -205,20 +182,7 @@ export function stretchScore({spec, tracks, channel, projector, width, height, s
     });
   }
 
-  if (endingAlpha > 0.004) {
-    texts.push({
-      kind: 'caption',
-      id: 'stretch-ending',
-      x: marginX,
-      y: topY,
-      label: story.ending.label,
-      text: story.ending.text,
-      accent: story.ending.accent,
-      size: TYPE.title,
-      maxWidth: width - 2 * marginX,
-      opacity: endingAlpha,
-    });
-  }
+  if (endingAlpha > 0.004) texts.push(headline('stretch-ending', story.ending, box, endingAlpha));
 
   return {ops, texts, black, scrim: {top: Math.max(openingAlpha, counterAlpha, endingAlpha) * fade, strength: 0.45}};
 }

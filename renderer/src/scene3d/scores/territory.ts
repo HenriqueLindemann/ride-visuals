@@ -1,6 +1,6 @@
 import {type DrawOp, type Knockout, mixRGB, type SlicesOp} from '../core/draw';
 import {clamp01, lerp, smootherstep} from '../core/ease';
-import {counterRow, frameMargins, TYPE} from '../core/layout';
+import {counterRow, frameLayout, headline, numberFormat} from '../core/layout';
 import {INK, type TextItem} from '../core/Typography';
 import type {ScoreContext, ScoreOutput} from './index';
 
@@ -10,7 +10,6 @@ const COOL_S = 1.6;
 const TAIL = 0.18;
 /** Seconds a piece of road takes to brighten into its next wear level. */
 const WEAR_FADE_S = 0.5;
-const FADE_STEPS = 4;
 
 type Slice = SlicesOp['slices'][number];
 
@@ -31,10 +30,8 @@ export function territoryScore({spec, tracks, frame, channel, width, height, sca
   const ops: DrawOp[] = [];
   const texts: TextItem[] = [];
   const knockouts: Knockout[] = [];
-  const portrait = height > width;
-  const margins = frameMargins(portrait);
-  const marginX = Math.round(margins.x * scale);
-  const topY = Math.round(margins.y * scale);
+  const box = frameLayout(width, height, scale);
+  const {marginX, topY} = box;
   const now = frame / spec.profile.fps;
 
   const fade = channel('fade');
@@ -43,10 +40,11 @@ export function territoryScore({spec, tracks, frame, channel, width, height, sca
   const counterAlpha = channel('counter');
   const statsAlpha = channel('stats');
 
-  // Settled territory, one layer per wear level (and per step of a level fading in).
+  // Settled territory, one layer per wear level (and per frame of a level fading in).
   const top = Math.max(1, story.wearCounts.length - 1);
+  const fadeFrames = Math.ceil(WEAR_FADE_S * spec.profile.fps);
   const worn: Slice[][] = Array.from({length: top + 1}, () => []);
-  const rising: Slice[][][] = Array.from({length: top + 1}, () => Array.from({length: FADE_STEPS}, () => []));
+  const rising: Slice[][][] = Array.from({length: top + 1}, () => Array.from({length: fadeFrames + 1}, () => []));
   const cooling: DrawOp[] = [];
   const running: DrawOp[] = [];
   let period: string | undefined;
@@ -64,7 +62,7 @@ export function territoryScore({spec, tracks, frame, channel, width, height, sca
         // From the accent to the territory's first wear level.
         const k = smootherstep(cool);
         const base = wearStyle(0, scale);
-        cooling.push({kind: 'slices', slices, rgb: mixRGB(INK.accentRGB, base.rgb, k), alpha: lerp(0.98, base.alpha, k) * fade, width: lerp(2.0, base.width, k)});
+        cooling.push({kind: 'slices', slices, rgb: mixRGB(INK.accentRGB, base.rgb, k), alpha: lerp(0.98, base.alpha, k) * fade, width: lerp(2.0 * scale, base.width, k)});
       }
     } else {
       ride.fresh.forEach(([a, b], i) => {
@@ -78,7 +76,7 @@ export function territoryScore({spec, tracks, frame, channel, width, height, sca
           const rise = level > 0 ? clamp01((now - times[level - 1]) / WEAR_FADE_S) : 1;
           if (rise < 1) {
             push(worn[level - 1], track, from, to);
-            push(rising[level][Math.min(FADE_STEPS - 1, Math.floor(rise * FADE_STEPS))], track, from, to);
+            push(rising[level][Math.round(rise * fadeFrames)], track, from, to);
           } else {
             push(worn[level], track, from, to);
           }
@@ -106,33 +104,19 @@ export function territoryScore({spec, tracks, frame, channel, width, height, sca
     if (j < top) {
       const next = wearStyle((j + 1) / top, scale);
       rising[j + 1].forEach((slices, b) => {
-        if (slices.length) ops.push({kind: 'slices', slices, rgb: next.rgb, alpha: next.alpha * ((b + 0.5) / FADE_STEPS) * fade, width: next.width});
+        if (b > 0 && slices.length) ops.push({kind: 'slices', slices, rgb: next.rgb, alpha: next.alpha * (b / fadeFrames) * fade, width: next.width});
       });
     }
   }
   ops.push(...cooling, ...running);
 
-  if (openingAlpha > 0.004) {
-    texts.push({
-      kind: 'caption',
-      id: 'territory-opening',
-      x: marginX,
-      y: topY,
-      label: story.opening.label,
-      text: story.opening.text,
-      accent: story.opening.accent,
-      size: TYPE.title,
-      maxWidth: width - 2 * marginX,
-      opacity: openingAlpha,
-    });
-  }
+  if (openingAlpha > 0.004) texts.push(headline('territory-opening', story.opening, box, openingAlpha));
 
   const km = Math.max(0, channel('km'));
-  const fmt = new Intl.NumberFormat(spec.locale, {maximumFractionDigits: km < 100 ? 1 : 0, minimumFractionDigits: km < 100 ? 1 : 0});
   for (const item of counterRow(story.stats, {
     id: 'territory',
     counter: story.counter,
-    live: fmt.format(km),
+    live: numberFormat(spec.locale, km < 100 ? 1 : 0).format(km),
     period,
     x0: marginX,
     x1: width - marginX,
