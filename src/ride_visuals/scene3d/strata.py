@@ -15,16 +15,17 @@ from ride_visuals.i18n import DEFAULT_LOCALE, Translator
 from ride_visuals.scene3d.camera import (
     CURTAIN_S,
     CameraTrack,
+    closing_channels,
     ease_in_out_sine,
     envelope,
-    fade_through_black,
     fit_zoom,
     glide,
     reading_hold_s,
+    soft_max,
     span,
     travel,
 )
-from ride_visuals.scene3d.framing import frame_points
+from ride_visuals.scene3d.framing import back_away, drift_back, frame_points
 from ride_visuals.scene3d.places import (
     DEFAULT_PLACES_CACHE_DIR,
     home_region,
@@ -48,6 +49,8 @@ def resolve_period(first: datetime, last: datetime, period: PeriodMode) -> Liter
 FLOOR_MIN = 0.12
 FLOOR_PAD = 0.05
 FLOOR_PAD_MIN = 0.015
+#: How sharply the framed stack top joins the stack's own top (a p-norm power).
+STACK_TOP_SHARPNESS = 40.0
 
 
 def floor_box(rides: Sequence[SceneRide], origin: tuple[float, float], region_span: float) -> tuple[float, float, float, float]:
@@ -192,7 +195,8 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
     # each landing as it happens would bob the camera once per floor.
     ahead = np.interp(t + beat, t, stack_top)
     framed_top = np.maximum.accumulate(gaussian_smooth(np.maximum.accumulate(ahead), beat * fps))
-    framed_top = np.maximum(framed_top, stack_top)
+    # (a sharp soft maximum: it joins the stack top without a kink, and overshoots it by ~2% at most).
+    framed_top = soft_max(framed_top, stack_top, power=STACK_TOP_SHARPNESS)
     cam.elevation = 0.5 * framed_top * tilt
     # The stack fills the space right of the label column; the camera dollies
     # out and up as it grows.
@@ -226,17 +230,14 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
         fps,
         fill=0.98,
     )
-    # Once the stack starts growing the camera only ever backs away.
-    peak = int(np.argmax(cam.zoom))
-    cam.zoom[peak:] = np.minimum.accumulate(cam.zoom[peak:])
+    # The camera only ever backs away, and never rests while the totals are read.
+    cam.zoom = back_away(cam.zoom, 0.6 * fps) - drift_back(t, t_final - 2.0, t_end, levels=0.05)
     cam.lon, cam.lat = from_local_xy(cam_cx, cam_cy, origin)
     cam.map_opacity = 1.0 - 0.45 * tilt
 
     opening_ch = envelope(t, 0.2, t_beats + 1.6 * beat, 0.6)
     final_ch = ease_in_out_sine(span(t, t_final - 0.4, t_final + 0.8))
     stats_ch = ease_in_out_sine(span(t, t_final, t_final + 1.0))
-    fade_ch = 1.0 - 0.35 * ease_in_out_sine(span(t, t_end - 1.1, t_end))
-    black_ch = fade_through_black(t, t_end, open_s=0.65)
 
     if look == "satellite":
         # Imagery under the title, carbon once the stack starts (floors read over black).
@@ -246,8 +247,7 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
         "opening": opening_ch,
         "final": final_ch,
         "stats": stats_ch,
-        "fade": fade_ch,
-        "black": black_ch,
+        **closing_channels(t, t_end, dim=0.35),
     }
 
     story_floors = []

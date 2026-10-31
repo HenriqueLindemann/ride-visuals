@@ -14,9 +14,8 @@ from ride_visuals.i18n import DEFAULT_LOCALE, Translator
 from ride_visuals.scene3d.camera import (
     EARTH_CIRCUMFERENCE_M,
     CameraTrack,
-    ease_in_out_sine,
+    closing_channels,
     envelope,
-    fade_through_black,
     span,
     zoom_for_mpp,
 )
@@ -281,6 +280,7 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
             cam.bearing[i] = 0.0
         else:
             hold_drift = float(span(np.array([ti]), t_pull_end, t_end)[0])
+            film_drift = float(span(np.array([ti]), t_open, t_end)[0])
             eff_m = cur_m * (1.0 + 0.08 * hold_drift)
             # Frame from home to the growing tip; on global scales follow the great circle at ~55% of the arc.
             mid_frac = 0.48 if eff_m < 8_000_000.0 else 0.58
@@ -292,13 +292,13 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
             blend = float(np.clip((z0 - cam.zoom[i]) / 1.4, 0.0, 1.0))
             cam.lon[i] = home_lon + (((mid_lon - home_lon + 540.0) % 360.0) - 180.0) * blend
             cam.lat[i] = home_lat * (1.0 - blend) + mid_lat * blend
-            cam.bearing[i] = -6.0 * blend * (0.5 + 0.5 * hold_drift)
+            cam.bearing[i] = -6.0 * blend * (0.5 + 0.5 * film_drift)
 
     cam.lon = np.degrees(np.unwrap(np.radians(cam.lon)))
     cam.lon = gaussian_smooth(cam.lon, max(2.0, 0.45 * fps))
     cam.lat = gaussian_smooth(cam.lat, max(2.0, 0.45 * fps))
     cam.zoom = gaussian_smooth(cam.zoom, max(2.0, 0.45 * fps))
-    cam.bearing = gaussian_smooth(cam.bearing, max(2.0, 0.45 * fps)) % 360.0
+    cam.bearing = gaussian_smooth(cam.bearing, max(2.0, 0.45 * fps))
     cam.map_opacity = np.full(frames, 0.92)
 
     opening_ch = envelope(t, 0.3, t_open + 0.3, 0.45)
@@ -306,8 +306,6 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
     ending_ch = envelope(t, t_pull_end + 0.15, t_end - 0.55, 0.55)
     landed_ch = np.where(t < t_pull_end, 0.0, np.clip((t - t_pull_end) / 1.1, 0.0, 1.0))
     ghost_ch = envelope(t, t_pull_end + 0.25, t_end - 0.6, 0.55)
-    fade_ch = 1.0 - 0.35 * ease_in_out_sine(span(t, t_end - 1.2, t_end))
-    black_ch = fade_through_black(t, t_end, open_s=0.65)
 
     if look == "satellite":
         cam.satellite = np.clip(1.0 - 0.28 * np.maximum(opening_ch, ending_ch), 0.0, 1.0)
@@ -320,8 +318,7 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
         "landed": landed_ch,
         "ghost": ghost_ch,
         "ending": ending_ch,
-        "fade": fade_ch,
-        "black": black_ch,
+        **closing_channels(t, t_end, dim=0.35, dim_s=1.2),
     }
 
     story = {

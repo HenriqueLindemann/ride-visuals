@@ -22,17 +22,22 @@ The director knows the whole future, so the camera is solved offline:
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 
 from ride_visuals.scene3d.camera import (
     FOV_DEG,
+    MAX_BEARING_RATE_DEG_S,
+    ease_in_out_sine,
     eye_offset,
     limit_rate,
     meters_per_pixel,
     smooth_angles,
+    span,
     zoom_for_mpp,
 )
 from ride_visuals.scene3d.track import gaussian_smooth
@@ -51,9 +56,10 @@ MIN_WINDOW_M = 1100.0
 MIN_WINDOW_SHARE = 0.3
 MIN_WINDOW_FLOOR_M = 400.0
 MAX_BACKGROUND_PX_S = 300.0
-MAX_BEARING_RATE_DEG_S = 22.0
 #: Zoom levels per second the chase may dolly in or out.
 MAX_ZOOM_RATE = 0.45
+#: Zoom levels a camera keeps backing away by over the end of a scene, so it is never still.
+DRIFT_BACK = 0.25
 VISIBILITY_OFFSETS_DEG = (0.0, -22.0, 22.0, -45.0, 45.0)
 
 #: Ground height sampler: (lon, lat) arrays in, metres out (NaN when unknown).
@@ -298,6 +304,21 @@ def rate_limited_floor(values: np.ndarray, max_step: float) -> np.ndarray:
     return out
 
 
+def smooth_under(values: np.ndarray, sigma: float) -> np.ndarray:
+    """Gaussian smoothing that does not rise above ``values``: a rise is cut back first, so it starts early."""
+    return gaussian_smooth(np.minimum(values, gaussian_smooth(values, sigma)), sigma)
+
+
+def back_away(zoom: np.ndarray, sigma: float) -> np.ndarray:
+    """Zoom that only ever backs off: the running minimum, smoothed without closing in."""
+    return smooth_under(np.minimum.accumulate(zoom), sigma)
+
+
+def drift_back(t: np.ndarray, start: float, end: float, levels: float = DRIFT_BACK) -> np.ndarray:
+    """Zoom levels to back away by from ``start`` to ``end`` (eased): the camera drifts on where it would rest."""
+    return levels * ease_in_out_sine(span(t, start, end))
+
+
 def smooth_cover(values: np.ndarray, sigma: float) -> np.ndarray:
     """A smooth curve over ``values``: their running maximum over ±3 sigma, Gaussian smoothed."""
     radius = max(1, int(3 * sigma))
@@ -462,6 +483,14 @@ def fit_held(  # noqa: PLR0913
     return lo
 
 
+@lru_cache(maxsize=4096)
+def _camera_basis(pitch: float, bearing: float) -> tuple[float, ...]:
+    """Unit forward, right and up vectors (x east, y north, z up) of a camera looking at its centre."""
+    p, b = math.radians(pitch), math.radians(bearing)
+    sp, cp, sb, cb = math.sin(p), math.cos(p), math.sin(b), math.cos(b)
+    return (sp * sb, sp * cb, -cp, cb, -sb, 0.0, sb * cp, cb * cp, sp)
+
+
 def project_points(
     cx: float,
     cy: float,
@@ -480,19 +509,15 @@ def project_points(
 
     Returns (x, y, in_front). Good to a few pixels, which is all layout needs.
     """
-    dx, dy, dz = eye_offset(np.array([zoom]), np.array([pitch]), np.array([bearing]), np.array([lat]), float(height))
-    eye = np.array([cx + dx[0], cy + dy[0], cz + dz[0]])
-    f = np.array([cx, cy, cz]) - eye
-    f /= max(float(np.linalg.norm(f)), 1e-9)
-    b = np.radians(bearing)
-    r = np.array([np.cos(b), -np.sin(b), 0.0])
-    u = np.cross(r, f)
-    focal = 0.5 * height / np.tan(np.radians(FOV_DEG) / 2.0)
-    vx, vy, vz = px - eye[0], py - eye[1], pz - eye[2]
-    zc = vx * f[0] + vy * f[1] + vz * f[2]
+    fx, fy, fz, rx, ry, rz, ux, uy, uz = _camera_basis(float(pitch), float(bearing))
+    focal = 0.5 * height / math.tan(math.radians(FOV_DEG) / 2.0)
+    distance = focal * float(meters_per_pixel(zoom, lat))
+    # The eye sits `distance` behind the centre, along the forward axis.
+    vx, vy, vz = px - (cx - distance * fx), py - (cy - distance * fy), pz - (cz - distance * fz)
+    zc = vx * fx + vy * fy + vz * fz
     safe = np.where(zc > 1e-6, zc, np.nan)
-    sx = 0.5 * width + focal * (vx * r[0] + vy * r[1] + vz * r[2]) / safe
-    sy = 0.5 * height - focal * (vx * u[0] + vy * u[1] + vz * u[2]) / safe
+    sx = 0.5 * width + focal * (vx * rx + vy * ry + vz * rz) / safe
+    sy = 0.5 * height - focal * (vx * ux + vy * uy + vz * uz) / safe
     return sx, sy, zc > 1e-6
 
 
@@ -603,7 +628,7 @@ def frame_points(
             out[i] += 0.8 * np.log2(ratio)
     sigma = 0.6 * fps
     cx, cy = gaussian_smooth(cx, sigma), gaussian_smooth(cy, sigma)
-    out = gaussian_smooth(np.minimum(out, gaussian_smooth(out, sigma)), sigma)
+    out = smooth_under(out, sigma)
     out = keep_points_in_frame(cx, cy, cz, out, pitch, bearing, lat, width, height, px, py, pz, safe, fps, step=0.03)
     return cx, cy, out
 

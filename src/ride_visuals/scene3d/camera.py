@@ -18,6 +18,8 @@ from ride_visuals.scene3d.track import gaussian_smooth
 EARTH_CIRCUMFERENCE_M = 40_075_016.686
 #: MapLibre's default vertical field of view.
 FOV_DEG = 36.87
+#: The fastest any scene turns its bearing (deg/s).
+MAX_BEARING_RATE_DEG_S = 22.0
 
 
 def meters_per_pixel(zoom: np.ndarray | float, lat: np.ndarray | float) -> np.ndarray | float:
@@ -68,6 +70,17 @@ def limit_rate(values: np.ndarray, max_step: np.ndarray | float) -> np.ndarray:
         if abs(step) > limit[i]:
             out[i] = out[i - 1] + math.copysign(limit[i], step)
     return out
+
+
+def soft_max(a: np.ndarray | float, b: np.ndarray | float, power: float = 3.0) -> np.ndarray | float:
+    """Smooth maximum of two positive series (a p-norm): rounds off where the larger one changes."""
+    top = np.maximum(np.maximum(a, b), 1e-12)
+    return top * ((a / top) ** power + (b / top) ** power) ** (1.0 / power)
+
+
+def soft_min(a: np.ndarray | float, b: np.ndarray | float, power: float = 3.0) -> np.ndarray | float:
+    """Smooth minimum of two positive series: settles onto the smaller instead of stopping at it."""
+    return (a**-power + b**-power) ** (-1.0 / power)
 
 
 def eye_offset(zoom: np.ndarray, pitch: np.ndarray, bearing: np.ndarray, lat: np.ndarray, height_px: float):
@@ -121,6 +134,16 @@ CURTAIN_S = 0.85
 def fade_through_black(t: np.ndarray, end: float, *, open_s: float, power: float = 3.2) -> np.ndarray:
     """Black curtain: lifts over ``open_s`` at the start, falls in the last ``CURTAIN_S``."""
     return np.maximum(1.0 - glide(span(t, 0.0, open_s), power), ease_in_out_sine(span(t, end - CURTAIN_S, end)))
+
+
+def closing_channels(
+    t: np.ndarray, end: float, *, dim: float = 0.3, dim_s: float = 1.1, open_s: float = 0.65
+) -> dict[str, np.ndarray]:
+    """The channels every scene ends on: ``fade`` dims the text, ``black`` is the curtain."""
+    return {
+        "fade": 1.0 - dim * ease_in_out_sine(span(t, end - dim_s, end)),
+        "black": fade_through_black(t, end, open_s=open_s),
+    }
 
 
 def reading_hold_s(figures: int) -> float:

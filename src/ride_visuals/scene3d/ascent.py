@@ -12,15 +12,25 @@ from ride_visuals.i18n import DEFAULT_LOCALE, Translator
 from ride_visuals.scene3d.camera import (
     CURTAIN_S,
     CameraTrack,
+    closing_channels,
     ease_in_out_sine,
     envelope,
-    fade_through_black,
     glide,
     reading_hold_s,
+    soft_min,
     span,
     travel,
 )
-from ride_visuals.scene3d.framing import fit_held, fit_view, hold_at, project_points, rate_limited_floor, smooth_cover
+from ride_visuals.scene3d.framing import (
+    back_away,
+    drift_back,
+    fit_held,
+    fit_view,
+    hold_at,
+    project_points,
+    rate_limited_floor,
+    smooth_cover,
+)
 from ride_visuals.scene3d.landmarks import LANDMARKS
 from ride_visuals.scene3d.places import DEFAULT_PLACES_CACHE_DIR, home_region, home_title
 from ride_visuals.scene3d.spec import Look, SceneSpec
@@ -89,10 +99,9 @@ HEADROOM = 1.45
 SKYLINE_FADE = 0.2
 SKYLINE_ROOM = 0.6
 SKYLINE_SPAN = (0.6, 1.0)
-#: Zoom levels per second the camera moves at most; and drifts back while the totals are read.
+#: Zoom levels per second the camera moves at most.
 ZOOM_RATE = 0.55
 PULL_SMOOTH_S = 2.2
-CLOSING_DRIFT = 0.25
 FRAME_POINTS = 300
 
 
@@ -344,7 +353,7 @@ def build_ascent_spec(  # noqa: PLR0913, PLR0915
         room = 1.0 + (HEADROOM - 1.0) * float(climbing_on[i])
         # (a soft minimum, so the frame settles onto the top rather than stopping at it).
         reach = max(room * float(climbed[i]), float(climbing_on[i]) * LANDMARKS[0].height_m, 1.0)
-        roof = (reach**-3 + total**-3) ** (-1 / 3)
+        roof = soft_min(reach, total)
         along = np.concatenate([along, [0.0, along.max(), 0.0]])
         up = np.concatenate([up, [0.0, 0.0, roof]])
         # And the things and levels, eased into the frame as they come in.
@@ -410,11 +419,10 @@ def build_ascent_spec(  # noqa: PLR0913, PLR0915
     floor = rate_limited_floor(zoom, ZOOM_RATE / fps)
     pull = floor[0] + np.cumsum(gaussian_smooth(np.diff(floor, prepend=floor[0]), PULL_SMOOTH_S * fps))
     zoom = pull - smooth_cover(np.maximum(0.0, pull - floor), PULL_SMOOTH_S * fps)
-    zoom = np.minimum.accumulate(zoom)
-    zoom = gaussian_smooth(np.minimum(zoom, gaussian_smooth(zoom, sigma)), sigma)
+    zoom = back_away(zoom, sigma)
     zoom = zoom + max(0.0, folded - float(zoom[i_fold])) * fold
     # Never still: the pull settles into a slow drift back while the line lands and the totals are read.
-    zoom = zoom - CLOSING_DRIFT * ease_in_out_sine(span(t, t_built - 6.0, t_end + 1.0))
+    zoom = zoom - drift_back(t, t_built - 6.0, t_end + 1.0)
     # Where the camera looks: whatever puts home on its mark at that zoom.
     marks = np.column_stack([gaussian_smooth(np.interp(index, keys, anchors[:, c]), sigma) for c in range(2)])
     aim = np.zeros((frames, 3))
@@ -452,8 +460,7 @@ def build_ascent_spec(  # noqa: PLR0913, PLR0915
         "fold": fold,
         "ruler": span(t, t_ruler, t_ruler + RULER_S) if ruled else np.zeros(frames),
         "stats": ease_in_out_sine(span(t, stats_t, stats_t + 1.0)),
-        "fade": 1.0 - 0.3 * ease_in_out_sine(span(t, t_end - 1.1, t_end)),
-        "black": fade_through_black(t, t_end, open_s=0.65),
+        **closing_channels(t, t_end),
     }
 
     # The map: rides ridden from home, drawn flat as their climbing joins the profile.

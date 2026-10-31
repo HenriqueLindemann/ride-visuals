@@ -12,12 +12,14 @@ import numpy as np
 from ride_visuals.i18n import DEFAULT_LOCALE, Translator, sanitize_display_text
 from ride_visuals.scene3d.camera import (
     CURTAIN_S,
+    MAX_BEARING_RATE_DEG_S,
     CameraTrack,
     bearing_deg,
     ease_in_out_sine,
     envelope,
     eye_offset,
     fade_through_black,
+    glide,
     lerp_angle,
     limit_rate,
     meters_per_pixel,
@@ -48,7 +50,8 @@ from ride_visuals.scene3d.track import (
 from ride_visuals.video.instagram import INSTAGRAM_STORY
 
 MIN_RIDE_LENGTH_M = 500.0
-MAX_BEARING_RATE_DEG_S = 24.0  # hard cap; the chase solver aims for 22
+#: The establishing shot opens this far (deg) off the chase bearing and swings round into it as it dives.
+OPENING_SWING_DEG = 24.0
 MIN_EYE_CLEARANCE_M = 45.0
 SIDE_PITCH = 84.0
 # Real relief at the level view: an exaggerated skyline would hide the route.
@@ -791,7 +794,7 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
             cy[i] = cy_ov * (1.0 - w_rise) + chase_cy[i] * w_rise
             zoom[i] = (z_ov - 0.05 + open_push) * (1.0 - w_rise) + chase_zoom[i] * w_rise
             pitch[i] = chase_pitch[i] * w_rise
-            bearing[i] = float(lerp_angle(0.0, chase_bearing[i], w_rise))
+            bearing[i] = chase_bearing[i] - OPENING_SWING_DEG * (1.0 - float(glide(ti / max(t_rise_end, 1e-6), power=2.0)))
             terrain[i] = exaggeration * float(travel(span(np.array([ti]), t_open_end, t_go)[0]))
             contours[i] = float(ease_in_out_sine(span(np.array([ti]), t_open_end + 0.5, t_rise_end)[0]))
         elif ti < t_ride_end:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from ride_visuals.scene3d.climbs import Climb
 from ride_visuals.scene3d.flyover import _tag_windows
@@ -175,3 +176,13 @@ def test_occlusion_ignores_the_slope_a_road_lies_on_but_not_a_ridge() -> None:
 
     assert occlusion(*eye, *road, hillside)[0] == 0.0
     assert occlusion(*eye, *road, ridge)[0] == 1.0
+
+
+def test_project_points_puts_the_look_at_point_mid_frame_and_ahead_above_it() -> None:
+    for bearing in (0.0, 90.0, 215.0):
+        ahead = (np.array([0.0, 300.0 * np.sin(np.radians(bearing))]), np.array([0.0, 300.0 * np.cos(np.radians(bearing))]))
+        sx, sy, ok = project_points(0.0, 0.0, 50.0, 13.0, 60.0, bearing, 49.4, 1920, 1080, *ahead, np.array([50.0, 50.0]))
+        assert ok.all()
+        assert (sx[0], sy[0]) == pytest.approx((960.0, 540.0), abs=1e-6)
+        assert sx[1] == pytest.approx(960.0, abs=1e-6)
+        assert sy[1] < sy[0]

@@ -15,15 +15,16 @@ import numpy as np
 from ride_visuals.i18n import DEFAULT_LOCALE, Translator
 from ride_visuals.scene3d.camera import (
     CURTAIN_S,
+    MAX_BEARING_RATE_DEG_S,
     CameraTrack,
+    closing_channels,
     ease_in_out_sine,
     envelope,
-    fade_through_black,
     reading_hold_s,
     span,
     travel,
 )
-from ride_visuals.scene3d.framing import fit_view, principal_bearing
+from ride_visuals.scene3d.framing import back_away, drift_back, fit_view, principal_bearing
 from ride_visuals.scene3d.places import DEFAULT_PLACES_CACHE_DIR, home_region, home_title
 from ride_visuals.scene3d.spec import Look, SceneSpec
 from ride_visuals.scene3d.stretch import SceneRide
@@ -364,8 +365,11 @@ def build_territory_spec(  # noqa: PLR0913, PLR0915
     orbit = ease_in_out_sine(span(t, OPENING_S - 1.2, t_end))
     # Less tilt in portrait: a frame limited by its width has height to spare.
     pitch = (TILT_PITCH_PORTRAIT if portrait else TILT_PITCH) * tilt
-    # The orbit swings across the axis, centred on it.
-    bearing = (axis_deg * tilt + ORBIT_DEG * (0.5 - orbit) * tilt) % 360.0
+    # The orbit swings across the axis, centred on it. The turn takes as long as the
+    # bearing cap needs (smootherstep peaks at 1.9x the mean rate), never less than the tilt.
+    turn_deg = abs(axis_deg) + 0.5 * ORBIT_DEG
+    turn = travel(span(t, OPENING_S - 1.2, OPENING_S - 1.2 + max(3.6, 1.9 * turn_deg / MAX_BEARING_RATE_DEG_S)))
+    bearing = (axis_deg + ORBIT_DEG * (0.5 - orbit)) * turn % 360.0
 
     # The frame holds what will be drawn a moment from now, grows side by side
     # (never shrinks), and stays within the whole territory's box; home, at
@@ -390,9 +394,8 @@ def build_territory_spec(  # noqa: PLR0913, PLR0915
         mids[j] = (mid_x, mid_y)
     index = np.arange(frames)
     # Only ever backing away, as one calm move; the guard keeps the smoothing
-    # from closing in on a road about to be drawn.
-    zoom = np.minimum.accumulate(np.interp(index, keys, zoom_keys))
-    zoom = gaussian_smooth(np.minimum(zoom, gaussian_smooth(zoom, 0.6 * fps)), 0.6 * fps)
+    # from closing in on a road about to be drawn. It never rests, drifting on once the frame is whole.
+    zoom = back_away(np.interp(index, keys, zoom_keys), 0.6 * fps) - drift_back(t, OPENING_S, t_end)
     cx = gaussian_smooth(np.interp(index, keys, mids[:, 0]), 0.6 * fps)
     cy = gaussian_smooth(np.interp(index, keys, mids[:, 1]), 0.6 * fps)
 
@@ -416,8 +419,7 @@ def build_territory_spec(  # noqa: PLR0913, PLR0915
         "counter": counter_ch,
         "km": revealed / 1000.0,
         "stats": stats_ch,
-        "fade": 1.0 - 0.3 * ease_in_out_sine(span(t, t_end - 1.1, t_end)),
-        "black": fade_through_black(t, t_end, open_s=0.65),
+        **closing_channels(t, t_end),
     }
 
     # The period of the ride being drawn, shown small in the opposite corner.
