@@ -26,6 +26,8 @@ if [[ -z "${PYTHON:-}" ]]; then
   fi
 fi
 CONFIG="${CONFIG:-config/config.toml}"
+# Frames rendered at once; unset keeps the CLI default. Lower it on a busy machine.
+CONCURRENCY="${CONCURRENCY:-}"
 
 SCOPE_START="${SCOPE_START:-2026-02-08}"
 SCOPE_END="${SCOPE_END:-}"
@@ -76,7 +78,7 @@ LOCALE_TAG="${LOCALE_TAG//-/_}"
 log() { printf '\n== %s\n' "$*"; }
 
 render() {
-  "${RUN[@]}" "$@" --config "$CONFIG"
+  "${RUN[@]}" "$@" ${CONCURRENCY:+--concurrency "$CONCURRENCY"} --config "$CONFIG"
 }
 
 command -v ffmpeg >/dev/null || {

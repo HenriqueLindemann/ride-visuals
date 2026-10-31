@@ -67,7 +67,7 @@ track = RideTrack.from_arrays(lon, lat, alt, s / 8.0)
 
 fly = build_flyover_spec(
     track,
-    metadata=FlyoverMetadata(activity_id=1, name="Test", distance_m=20000.0, elevation_gain_m=360.0, moving_time_s=2500.0),
+    metadata=FlyoverMetadata(distance_m=20000.0, elevation_gain_m=360.0, moving_time_s=2500.0),
     fps=10,
     offline=True,
     highlight=Highlight("Most climbing in a ride yet", ("ascent",)),

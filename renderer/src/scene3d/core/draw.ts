@@ -144,7 +144,10 @@ export type HorizonOp = {kind: 'horizon'; alpha: number; limb: number; air?: num
 
 export type DrawOp = TrackOp | PathOp | ScreenPathOp | StemOp | DotOp | PulseOp | PlateOp | SlicesOp | PlaneOp | HorizonOp;
 
-const tmp = new Float64Array(3);
+const tmp = new Float64Array(4);
+
+/** Numbers per traced vertex: x, y, depth, how visible (0..1). */
+const VERTEX = 4;
 
 export const mixRGB = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
@@ -174,8 +177,8 @@ function traceTrack(p: Projector, op: TrackOp, splits: number[] = []): Traced {
   const unit = tent ? mercMeters(tent.center[1]) : 0;
   const liftAt = (mx: number, my: number) => (tent ? base + tent.height * Math.exp(-(Math.hypot(mx - cx, my - cy) * unit) / tent.width) : base);
   const relief = op.occlude ? p.onRelief : undefined;
-  // With occlusion, keep (x, y, depth) per vertex for perspective tapering;
-  // NaN marks a break where the relief hides the line.
+  // With occlusion, keep (x, y, depth, visibility) per vertex for perspective
+  // tapering and fading behind ridges; NaN marks a break where the relief hides the line.
   const pts: number[] | null = relief || splits.length ? [] : null;
   let pen = false;
   let any = false;
@@ -183,9 +186,10 @@ function traceTrack(p: Projector, op: TrackOp, splits: number[] = []): Traced {
   let lastY = 0;
   const plot = (mx: number, my: number) => {
     const lift = liftAt(mx, my);
-    const ok = relief ? relief(mx, my, lift, tmp) === 1 : p.merc(mx, my, lift, tmp);
+    tmp[3] = 1;
+    const ok = relief ? relief(mx, my, lift, tmp) !== 0 && tmp[3] > 0 : p.merc(mx, my, lift, tmp);
     if (!ok) {
-      if (pen && pts) pts.push(NaN, NaN, NaN);
+      if (pen && pts) pts.push(NaN, NaN, NaN, NaN);
       pen = false;
       return;
     }
@@ -199,7 +203,7 @@ function traceTrack(p: Projector, op: TrackOp, splits: number[] = []): Traced {
     } else {
       return;
     }
-    pts?.push(x, y, tmp[2]);
+    pts?.push(x, y, tmp[2], tmp[3]);
     lastX = x;
     lastY = y;
     any = true;
@@ -228,7 +232,7 @@ function traceTrack(p: Projector, op: TrackOp, splits: number[] = []): Traced {
   const cutUpTo = (dist: number) => {
     for (; next < splits.length && splits[next] <= dist; next++) {
       emit(...at(indexAtDistance(t, splits[next]), splits[next]));
-      cuts.push(Math.max(0, (pts?.length ?? 0) / 3 - 1));
+      cuts.push(Math.max(0, (pts?.length ?? 0) / VERTEX - 1));
     }
   };
   emit(...at(i0, from));
@@ -247,11 +251,12 @@ function traceTrack(p: Projector, op: TrackOp, splits: number[] = []): Traced {
   // Always land exactly on the head, even within the dedupe threshold.
   const [hx, hy] = at(i1, to);
   const lift = liftAt(hx, hy);
+  tmp[3] = 1;
   const ok = relief ? relief(hx, hy, lift, tmp) === 1 : p.merc(hx, hy, lift, tmp);
   const head: [number, number] | null = ok ? [tmp[0], tmp[1]] : null;
   if (head && pen) {
     path.lineTo(head[0], head[1]);
-    pts?.push(head[0], head[1], tmp[2]);
+    pts?.push(head[0], head[1], tmp[2], tmp[3]);
   }
   return {path, head, any, pts, cuts};
 }
@@ -260,13 +265,13 @@ function traceTrack(p: Projector, op: TrackOp, splits: number[] = []): Traced {
 function pathFrom(pts: number[], start: number): Path2D {
   const path = new Path2D();
   let pen = false;
-  for (let i = start; i * 3 < pts.length; i++) {
-    if (Number.isNaN(pts[i * 3])) {
+  for (let i = start; i * VERTEX < pts.length; i++) {
+    if (Number.isNaN(pts[i * VERTEX])) {
       pen = false;
     } else if (pen) {
-      path.lineTo(pts[i * 3], pts[i * 3 + 1]);
+      path.lineTo(pts[i * VERTEX], pts[i * VERTEX + 1]);
     } else {
-      path.moveTo(pts[i * 3], pts[i * 3 + 1]);
+      path.moveTo(pts[i * VERTEX], pts[i * VERTEX + 1]);
       pen = true;
     }
   }
@@ -279,11 +284,31 @@ const RUN_FADE_PX: [number, number] = [8, 32];
 /** 0..1 for a visible stretch of this length, so slivers peeking over a ridge ease in and out rather than pop. */
 export const runFade = (len: number) => smootherstep(span(len, RUN_FADE_PX[0], RUN_FADE_PX[1]));
 
+/** Hidden stretches shorter than this (px between the visible ends) are not a ridge but depth noise, and are drawn through. */
+const GAP_BRIDGE_PX = 24;
+
+/** The traced vertices with every break narrower than `GAP_BRIDGE_PX` closed. */
+function bridgeGaps(pts: number[]): number[] {
+  const out: number[] = [];
+  for (let i = 0; i * VERTEX < pts.length; i++) {
+    const o = i * VERTEX;
+    if (Number.isNaN(pts[o]) && out.length && i + 1 < pts.length / VERTEX && !Number.isNaN(pts[o + VERTEX])) {
+      const last = out.length - VERTEX;
+      if (Math.hypot(pts[o + VERTEX] - out[last], pts[o + VERTEX + 1] - out[last + 1]) < GAP_BRIDGE_PX) continue;
+    }
+    for (let k = 0; k < VERTEX; k++) out.push(pts[o + k]);
+  }
+  return out;
+}
+
 /** Perspective factor bounds (1 at the depth of the map centre) and the steps between them that width and alpha follow. */
 const NEAR_MIN = 0.35;
 const NEAR_MAX = 1.9;
 const NEAR_LEVELS = 32;
 const nearAt = (level: number) => NEAR_MIN * (NEAR_MAX / NEAR_MIN) ** (level / (NEAR_LEVELS - 1));
+
+/** Steps of visibility (0..1) a line eases out by behind a ridge. */
+const SEEN_LEVELS = 8;
 
 /** Vertices stroked together as one piece of a run. */
 const TAPER_RUN = 4;
@@ -294,42 +319,53 @@ const TAPER_RUN = 4;
  * the horizon. Pieces of a like depth share one path and stroke, and the
  * dimmer ones go first, each clearing what it covers before it is drawn, so
  * where two meet the stronger one wins instead of doubling up. Short runs
- * (slivers over a ridge) fade by their length.
+ * (slivers over a ridge) fade by their length, and each piece by how visible
+ * the relief leaves it; narrow breaks close.
  */
-function strokeTapered(layer: CanvasRenderingContext2D, pts: number[], width: number, refDepth: number) {
-  const n = pts.length / 3;
+function strokeTapered(layer: CanvasRenderingContext2D, traced: number[], width: number, refDepth: number) {
+  const pts = bridgeGaps(traced);
+  const n = pts.length / VERTEX;
+  const x = (i: number) => pts[i * VERTEX];
+  const y = (i: number) => pts[i * VERTEX + 1];
   const pieces: {alpha: number; width: number; path: Path2D}[] = [];
   for (let a = 0; a < n; ) {
-    if (Number.isNaN(pts[a * 3])) {
+    if (Number.isNaN(x(a))) {
       a++;
       continue;
     }
     let b = a;
     let len = 0;
-    while (b + 1 < n && !Number.isNaN(pts[(b + 1) * 3])) {
-      len += Math.hypot(pts[(b + 1) * 3] - pts[b * 3], pts[(b + 1) * 3 + 1] - pts[b * 3 + 1]);
+    while (b + 1 < n && !Number.isNaN(x(b + 1))) {
+      len += Math.hypot(x(b + 1) - x(b), y(b + 1) - y(b));
       b++;
     }
     const fade = runFade(len);
     if (fade > 0) {
+      // One path per (perspective level, visibility level) pair.
       const levels = new Map<number, Path2D>();
       let open = -1;
       for (let k = a; k < b; k += TAPER_RUN) {
         const end = Math.min(b, k + TAPER_RUN);
         let depth = 0;
-        for (let i = k + 1; i <= end; i++) depth += pts[i * 3 + 2];
+        let seen = 0;
+        for (let i = k + 1; i <= end; i++) {
+          depth += pts[i * VERTEX + 2];
+          seen += pts[i * VERTEX + 3];
+        }
         const near = Math.min(NEAR_MAX, Math.max(NEAR_MIN, refDepth / (depth / (end - k))));
         const level = Math.round((Math.log(near / NEAR_MIN) / Math.log(NEAR_MAX / NEAR_MIN)) * (NEAR_LEVELS - 1));
-        let path = levels.get(level);
-        if (!path) levels.set(level, (path = new Path2D()));
-        // A piece of the same depth as the last carries on its stroke, without a joint.
-        if (level !== open) path.moveTo(pts[k * 3], pts[k * 3 + 1]);
-        for (let i = k + 1; i <= end; i++) path.lineTo(pts[i * 3], pts[i * 3 + 1]);
-        open = level;
+        const key = level * SEEN_LEVELS + Math.round((seen / (end - k)) * (SEEN_LEVELS - 1));
+        let path = levels.get(key);
+        if (!path) levels.set(key, (path = new Path2D()));
+        // A piece of the same kind as the last carries on its stroke, without a joint.
+        if (key !== open) path.moveTo(x(k), y(k));
+        for (let i = k + 1; i <= end; i++) path.lineTo(x(i), y(i));
+        open = key;
       }
-      for (const [level, path] of levels) {
-        const near = nearAt(level);
-        pieces.push({alpha: Math.min(1, Math.max(0.4, near ** 0.7)) * fade, width: width * near ** 0.9, path});
+      for (const [key, path] of levels) {
+        const near = nearAt(Math.floor(key / SEEN_LEVELS));
+        const seen = (key % SEEN_LEVELS) / (SEEN_LEVELS - 1);
+        if (seen > 0) pieces.push({alpha: Math.min(1, Math.max(0.4, near ** 0.7)) * fade * seen, width: width * near ** 0.9, path});
       }
     }
     a = b + 1;
@@ -453,7 +489,7 @@ function drawTrack(ctx: CanvasRenderingContext2D, p: Projector, op: TrackOp) {
         layer.lineJoin = 'round';
         layer.strokeStyle = rgba(op.rgb, 1);
         strokeTapered(layer, pts, op.width, p.centerDepth);
-        return boundsOf(pts, 3, (op.width * NEAR_MAX ** 0.9) / 2 + 2);
+        return boundsOf(pts, VERTEX, (op.width * NEAR_MAX ** 0.9) / 2 + 2);
       },
       {alpha: op.alpha},
     );

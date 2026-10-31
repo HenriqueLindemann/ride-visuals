@@ -1,4 +1,5 @@
 import * as maplibregl from 'maplibre-gl';
+import {smootherstep, span} from './ease';
 import {EARTH_CIRCUMFERENCE, FOV_DEG, groundResolution, mercX, mercY} from './geo';
 
 /** One frame's camera and map state, as the Python director wrote it. */
@@ -42,10 +43,12 @@ export interface Projector {
   centerDepth: number;
   /** Where the camera is: Mercator x, y and metres above the map (flat views only). */
   eye?: {mx: number; my: number; z: number};
-  /** 3D terrain only: a point on the rendered relief (+lift), with line-of-sight occlusion. */
+  /** 3D terrain only: a point on the rendered relief (+lift), with line-of-sight occlusion. A 4-slot `out` also gets how visible it is (0..1) in slot 3. */
   onRelief?: (mx: number, my: number, lift: number, out: Float64Array) => Visibility;
   /** 3D terrain only: a point at an absolute exaggerated height, with occlusion. */
   inAir?: (mx: number, my: number, z: number, out: Float64Array, cutaway?: number) => Visibility;
+  /** 3D terrain only: how visible a point at an absolute exaggerated height is from the eye (0..1), read off the relief. */
+  sight?: (mx: number, my: number, z: number) => number;
   /** 3D terrain only: rendered terrain height (exaggerated metres) under a point. */
   ground?: (mx: number, my: number) => number;
 }
@@ -120,6 +123,13 @@ function terrainDepth(map: maplibregl.Map): DepthMap | null {
 /** RGBA bytes back to the depth they pack (MapLibre's unpack). */
 const UNPACK = [1 / (255 * 256 * 256 * 256), 1 / (255 * 256 * 256), 1 / (255 * 256), 1 / 255];
 
+/** Sightline sampling: from this fraction of the way to the point, each sample this much farther than the last. */
+const SIGHT_START = 0.02;
+const SIGHT_STEP = 1.025;
+
+/** Pixels of angle the land may rise above a sightline before it starts to hide the point, and before it hides it. */
+const SIGHT_FADE_PX: [number, number] = [0.5, 2.5];
+
 /** Ground height error (m, before exaggeration) between the drawn mesh and the sampled DEM. */
 const HEIGHT_SLACK_M = 8;
 
@@ -188,36 +198,80 @@ function makeRelief(
   const slack = HEIGHT_SLACK_M * Math.max(1, exaggeration);
   const eyeX = eye.mx * worldSize;
   const eyeY = eye.my * worldSize;
+  let inverse: Float64Array | null | undefined;
+  /** Metres (ground distance) the relief drawn at a pixel lies nearer the eye than a point on its ray; negative when beyond it. */
+  const coverM = (px: number, py: number, land: number, x: number, y: number, z: number, lengthM: number) => {
+    const inv = (inverse ??= invert4(m));
+    if (!inv) return 0;
+    const nx = (px / width) * 2 - 1;
+    const ny = 1 - (py / height) * 2;
+    const w = inv[3] * nx + inv[7] * ny + inv[11] * land + inv[15];
+    const sx = (inv[0] * nx + inv[4] * ny + inv[8] * land + inv[12]) / w;
+    const sy = (inv[1] * nx + inv[5] * ny + inv[9] * land + inv[13]) / w;
+    const sz = (inv[2] * nx + inv[6] * ny + inv[10] * land + inv[14]) / w;
+    const scale = metersPerWorldPx(y / worldSize);
+    const pointM = Math.hypot((x - eyeX) * scale, (y - eyeY) * scale, z - eye.z);
+    const landM = Math.hypot((sx - eyeX) * scale, (sy - eyeY) * scale, sz - eye.z);
+    return ((pointM - landM) / pointM) * lengthM;
+  };
   const test = (mx: number, my: number, z: number, out: Float64Array, cutaway: number, g: number): Visibility => {
     if (!project(mx, my, z, out)) return 0;
+    out[3] = 1;
     if (out[0] < -margin || out[0] > width + margin || out[1] < -margin || out[1] > height + margin) return 1;
     if (depth === undefined) depth = terrainDepth(map);
     if (depth && out[0] >= 0 && out[0] < depth.width && out[1] >= 0 && out[1] < depth.height) {
-      // The point brought nearer the eye (90 m, the grazing slack or `cutaway`):
-      // only land in front of that can hide it.
+      const i = ((depth.height - 1 - Math.floor(out[1])) * depth.width + Math.floor(out[0])) * 4;
+      const land = depth.data[i] * UNPACK[0] + depth.data[i + 1] * UNPACK[1] + depth.data[i + 2] * UNPACK[2] + depth.data[i + 3] * UNPACK[3];
       const x = mx * worldSize;
       const y = my * worldSize;
       const lengthM = Math.hypot(x - eyeX, y - eyeY) * metersPerWorldPx(my);
       const rise = Math.max(1, eye.z - z);
       const grazing = ((slack + 1.5 * pixelAngle * Math.hypot(lengthM, rise)) * lengthM) / rise;
-      const s = 1 - Math.min(0.9, Math.max(90, grazing, cutaway) / Math.max(1, lengthM));
-      const qx = eyeX + (x - eyeX) * s;
-      const qy = eyeY + (y - eyeY) * s;
-      const qz = eye.z + (z - eye.z) * s;
-      const near = (m[2] * qx + m[6] * qy + m[10] * qz + m[14]) / (m[3] * qx + m[7] * qy + m[11] * qz + m[15]);
-      const i = ((depth.height - 1 - Math.floor(out[1])) * depth.width + Math.floor(out[0])) * 4;
-      const land = depth.data[i] * UNPACK[0] + depth.data[i + 1] * UNPACK[1] + depth.data[i + 2] * UNPACK[2] + depth.data[i + 3] * UNPACK[3];
-      if (near > 0 && land < near) return 2;
+      // Land nearer the eye than the point by more than this hides it.
+      const limit = Math.max(90, grazing, cutaway);
+      const cover = coverM(out[0], out[1], land, x, y, z, lengthM);
+      // At grazing angles a pixel of depth moves `cover` along a slope by
+      // hundreds of metres, so `out[3]`, how visible the point is, eases out
+      // around the limit instead of flipping.
+      out[3] = 1 - smootherstep(span(cover, limit * 0.5, limit * 1.5));
+      if (cover > limit) return 2;
     }
-    if (!cutaway && z < (Number.isNaN(g) ? ground(mx, my) : g) - 4) return 2;
+    if (!cutaway && z < (Number.isNaN(g) ? ground(mx, my) : g) - 4) {
+      out[3] = 0;
+      return 2;
+    }
     return 1;
   };
   const inAir = (mx: number, my: number, z: number, out: Float64Array, cutaway = 0) => test(mx, my, z, out, cutaway, NaN);
-  const onRelief = (mx: number, my: number, lift: number, out: Float64Array) => {
-    const g = ground(mx, my);
-    return test(mx, my, g + lift, out, 0, g);
+  /**
+   * How visible a point is from the eye (0..1), read off the relief itself
+   * rather than off a pixel of its depth: the sightline is walked in steps
+   * that grow with distance (a constant angle apart), and the highest the
+   * land rises above it, as an angle from the eye in pixels, sets the answer.
+   * It moves smoothly with the camera, where a depth pixel flips the verdict
+   * of a line lying on a slope that faces away.
+   */
+  const sight = (mx: number, my: number, z: number) => {
+    const run = Math.hypot(mx - eye.mx, my - eye.my) * worldSize * metersPerWorldPx(my);
+    const rise = z - eye.z;
+    const reach = Math.hypot(run, rise);
+    if (run < 1) return 1;
+    let blocked = 0;
+    for (let t = SIGHT_START; t < 1; t *= SIGHT_STEP) {
+      const lift = ground(eye.mx + (mx - eye.mx) * t, eye.my + (my - eye.my) * t) - (eye.z + rise * t);
+      blocked = Math.max(blocked, lift / (t * reach));
+    }
+    return 1 - smootherstep(span(blocked / pixelAngle, SIGHT_FADE_PX[0], SIGHT_FADE_PX[1]));
   };
-  return {onRelief, inAir, ground};
+  const onRelief = (mx: number, my: number, lift: number, out: Float64Array) => {
+    const z = ground(mx, my) + lift;
+    if (!project(mx, my, z, out)) return 0;
+    out[3] = 1;
+    if (out[0] < -margin || out[0] > width + margin || out[1] < -margin || out[1] > height + margin) return 1;
+    out[3] = sight(mx, my, z);
+    return out[3] >= 0.5 ? 1 : 2;
+  };
+  return {onRelief, inAir, ground, sight};
 }
 
 /**

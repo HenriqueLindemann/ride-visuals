@@ -35,6 +35,7 @@ environment variables. The defaults are:
 | `FLYOVER_CLIMB` | `22.67-30.83` | Seconds of the flyover shown in 3D: the main climb up to its top |
 | `FLYOVER_ENDING` | `64.33-76.70` | Seconds of the ending, from the last metres ridden |
 | `STRATA_YEAR` | `2026` | Season stacked in the strata GIF |
+| `CONCURRENCY` | unset | Frames rendered at once (`--concurrency`); lower it on a busy machine |
 
 ## Regenerating
 

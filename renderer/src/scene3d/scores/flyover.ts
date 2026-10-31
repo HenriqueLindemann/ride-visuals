@@ -153,8 +153,10 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
     const n = prof.length;
     const kLon = 111_320 * Math.max(0.05, Math.cos((u.center[1] * Math.PI) / 180));
     const kLat = 110_540;
-    // The land hides the route only until it starts lifting off (the land is dissolving by then).
-    const occlude = unfold < 0.02 && projector.inAir;
+    // The land hides the route as far as it is still there: its sightline
+    // says how much, and the dissolving land (its opacity) how much of that stands.
+    const land = projector.camera.mapOpacity;
+    const hidden = (mx: number, my: number, z: number) => land > 0.02 && projector.sight !== undefined && (1 - projector.sight(mx, my, z)) * land >= 0.5;
     const planeAt = (f: number, z: number, out: Float64Array) => {
       const off = (f - 0.5) * u.lineM;
       return projector.merc(mercX(u.center[0] + (off * u.right[0]) / kLon), mercY(u.center[1] + (off * u.right[1]) / kLat), z, out);
@@ -185,7 +187,7 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
       const mx = mercX(u.center[0] + ex / kLon);
       const my = mercY(u.center[1] + ey / kLat);
       const z = z0 + (u.baseZ + prof[i] * u.altRange * u.vertical - z0) * inPlane;
-      const visible = occlude ? projector.inAir!(mx, my, z, scratch) === 1 : projector.merc(mx, my, z, scratch);
+      const visible = projector.merc(mx, my, z, scratch) && !hidden(mx, my, z);
       if (!visible) {
         if (run.length >= 4) runs.push(run);
         run = [];
