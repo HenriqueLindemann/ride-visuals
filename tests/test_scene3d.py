@@ -356,7 +356,6 @@ def test_flyover_director_invariants_and_terrain_clearance(tmp_path: Path) -> No
     spec = build_flyover_spec(
         track,
         metadata=FlyoverMetadata(
-            activity_id=1,
             start_date=datetime(2026, 8, 29, tzinfo=timezone.utc),
             distance_m=60_000.0,
             elevation_gain_m=950.0,
@@ -823,7 +822,7 @@ def test_flyover_live_text_sits_at_the_top_over_the_land_ahead(tmp_path: Path) -
         x0, y0, x1, y1 = layout.trace
         assert layout.counters_y == layout.top_y and counters_bottom < y0 < y1
         assert x0 + x1 == pytest.approx(width)
-        _, top, _, bottom = layout.hero_box(width, height)
+        _, top, _, bottom = layout.hero_box(height)
         assert y1 / height < top < bottom < 0.8
 
 

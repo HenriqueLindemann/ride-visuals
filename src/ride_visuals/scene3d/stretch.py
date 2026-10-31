@@ -34,6 +34,8 @@ from ride_visuals.scene3d.track import RideTrack, gaussian_smooth, haversine_m, 
 SPEC_VERTEX_BUDGET = 320_000
 MIN_RIDE_VERTICES = 160
 MAX_RIDE_VERTICES = 4_000
+#: Shorter tracks are noise, not rides.
+MIN_RIDE_M = 100.0
 #: A "home loop" starts and ends this close to home (m); those open the film.
 HOME_LOOP_START_M = 25_000.0
 HOME_LOOP_END_M = 16_000.0
@@ -51,6 +53,24 @@ class SceneRide:
     distance_m: float
     elevation_gain_m: float = 0.0
     moving_time_s: float = 0.0
+
+    @property
+    def usable(self) -> bool:
+        """Whether the ride has a track long enough to draw."""
+        return len(self.track.lon) >= 2 and self.track.length_m >= MIN_RIDE_M
+
+    @property
+    def ridden_m(self) -> float:
+        """The ride's distance (m): the recorded one, else its track's length."""
+        return self.distance_m if self.distance_m > 0 else self.track.length_m
+
+
+def usable_rides(rides: Sequence[SceneRide]) -> list[SceneRide]:
+    """The rides worth drawing; an error when none are."""
+    usable = [r for r in rides if r.usable]
+    if not usable:
+        raise ValueError("No valid rides with GPS tracks found for the selected scope")
+    return usable
 
 
 def _home_loops_first(
@@ -145,10 +165,7 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
     offline: bool = False,
 ) -> SceneSpec:
     """Build the frame-by-frame spec for ``video stretch``."""
-    valid_rides = [r for r in rides if len(r.track.lon) >= 2 and r.track.length_m >= 100.0]
-    if not valid_rides:
-        raise ValueError("No valid rides with GPS tracks found for the selected scope")
-
+    valid_rides = usable_rides(rides)
     i18n = Translator(locale)
     starts = [(float(r.track.lon[0]), float(r.track.lat[0])) for r in valid_rides]
     home_lon, home_lat = home or home_cluster(starts)
@@ -156,7 +173,7 @@ def build_stretch_spec(  # noqa: PLR0913, PLR0915
     # The biggest loops unfurl first, slowly, at regional scale.
     ordered, home_loops = _home_loops_first(valid_rides, (home_lon, home_lat))
     total_m = float(sum(r.track.length_m for r in ordered))
-    total_km = float(sum((r.distance_m if r.distance_m > 0 else r.track.length_m) for r in ordered)) / 1000.0
+    total_km = float(sum(r.ridden_m for r in ordered)) / 1000.0
 
     encoded_tracks: list[dict[str, list[int]]] = []
     story_rides = []

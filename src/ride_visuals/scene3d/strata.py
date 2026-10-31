@@ -30,9 +30,10 @@ from ride_visuals.scene3d.places import (
     DEFAULT_PLACES_CACHE_DIR,
     home_region,
     home_title,
+    kicker,
 )
 from ride_visuals.scene3d.spec import Look, SceneSpec
-from ride_visuals.scene3d.stretch import SceneRide
+from ride_visuals.scene3d.stretch import SceneRide, usable_rides
 from ride_visuals.scene3d.track import from_local_xy, gaussian_smooth, local_xy
 
 PeriodMode = Literal["auto", "month", "year"]
@@ -95,10 +96,7 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
     offline: bool = False,
 ) -> StrataBuildResult:
     """Build the frame-by-frame spec for ``video strata``."""
-    valid_rides = [r for r in rides if len(r.track.lon) >= 2 and r.track.length_m >= 100.0]
-    if not valid_rides:
-        raise ValueError("No valid rides with GPS tracks found for the selected scope")
-
+    valid_rides = usable_rides(rides)
     i18n = Translator(locale)
     (home_lon, home_lat), near = home_region([(float(r.track.lon[0]), float(r.track.lat[0])) for r in valid_rides], home=home)
     regional = [r for r, keep in zip(valid_rides, near.tolist(), strict=True) if keep]
@@ -254,10 +252,7 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
     for k, key in enumerate(floor_keys):
         indices = grouped[key]
         year, month = floor_meta[key]
-        floor_km = sum(
-            (regional[i].distance_m if regional[i].distance_m > 0 else regional[i].track.length_m)
-            for i in indices
-        ) / 1000.0
+        floor_km = sum(regional[i].ridden_m for i in indices) / 1000.0
         if resolved_period == "month":
             label = i18n.month_name(month, year if multi_year else None)
         else:
@@ -292,7 +287,7 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
     )
     extra_sources.extend(home_sources)
 
-    total_km = sum((r.distance_m if r.distance_m > 0 else r.track.length_m) for r in regional) / 1000.0
+    total_km = sum(r.ridden_m for r in regional) / 1000.0
     total_gain = sum(max(0.0, r.elevation_gain_m) for r in regional)
     total_hours = sum(max(0.0, r.moving_time_s) for r in regional) / 3600.0
 
@@ -301,11 +296,7 @@ def build_strata_spec(  # noqa: PLR0913, PLR0915
         "floors": story_floors,
         "excludedRides": excluded_count,
         "opening": {
-            "label": i18n.text(
-                "scene3d.strata.kicker",
-                start=i18n.date(first_dt),
-                end=i18n.date(last_dt),
-            ),
+            "label": kicker(i18n, first_dt, last_dt),
             "text": opening_text,
         },
         "stats": [

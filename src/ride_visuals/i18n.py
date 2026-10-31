@@ -194,7 +194,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "scene3d.stretch.earth_pct": "{pct}% of the way around the Earth.",
         "scene3d.stretch.earth_word": "Earth",
         "scene3d.stretch.fallback": "Laid end to end, in one straight line.",
-        "scene3d.strata.kicker": "{start} — {end}",
+        "scene3d.kicker": "{start} — {end}",
     },
     "pt-BR": {
         "activity.default": "Atividade",
@@ -337,7 +337,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "scene3d.stretch.earth_pct": "{pct}% da volta ao redor da Terra.",
         "scene3d.stretch.earth_word": "Terra",
         "scene3d.stretch.fallback": "Uma após a outra, em linha reta.",
-        "scene3d.strata.kicker": "{start} — {end}",
+        "scene3d.kicker": "{start} — {end}",
     },
 }
 

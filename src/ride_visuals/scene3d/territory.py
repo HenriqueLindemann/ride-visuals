@@ -25,9 +25,9 @@ from ride_visuals.scene3d.camera import (
     travel,
 )
 from ride_visuals.scene3d.framing import back_away, drift_back, fit_view, principal_bearing
-from ride_visuals.scene3d.places import DEFAULT_PLACES_CACHE_DIR, home_region, home_title
+from ride_visuals.scene3d.places import DEFAULT_PLACES_CACHE_DIR, home_region, home_title, kicker
 from ride_visuals.scene3d.spec import Look, SceneSpec
-from ride_visuals.scene3d.stretch import SceneRide
+from ride_visuals.scene3d.stretch import SceneRide, usable_rides
 from ride_visuals.scene3d.track import from_local_xy, gaussian_smooth, local_xy
 
 #: Road matching: samples every SAMPLE_M along a ride, on a grid of CELL_M; a
@@ -293,9 +293,7 @@ def build_territory_spec(  # noqa: PLR0913, PLR0915
     offline: bool = False,
 ) -> TerritoryBuildResult:
     """Build the frame-by-frame spec for ``video territory``."""
-    valid = [r for r in rides if len(r.track.lon) >= 2 and r.track.length_m >= 100.0]
-    if not valid:
-        raise ValueError("No valid rides with GPS tracks found for the selected scope")
+    valid = usable_rides(rides)
     i18n = Translator(locale)
 
     (home_lon, home_lat), near = home_region([(float(r.track.lon[0]), float(r.track.lat[0])) for r in valid], home=home)
@@ -448,15 +446,13 @@ def build_territory_spec(  # noqa: PLR0913, PLR0915
     )
     extra_sources.extend(home_sources)
 
-    total_km = sum((r.distance_m if r.distance_m > 0 else r.track.length_m) for r in regional) / 1000.0
+    total_km = sum(r.ridden_m for r in regional) / 1000.0
     story = {
         "home": [round(home_lon, 6), round(home_lat, 6)],
         "rides": story_rides,
         "wearCounts": wear_counts,
         "opening": {
-            "label": i18n.text(
-                "scene3d.strata.kicker", start=i18n.date(regional[0].start_date), end=i18n.date(regional[-1].start_date)
-            ),
+            "label": kicker(i18n, regional[0].start_date, regional[-1].start_date),
             "text": opening_text,
         },
         "counter": {"label": i18n.text("scene3d.territory.distinct"), "unit": "km"},

@@ -32,7 +32,7 @@ from ride_visuals.scene3d.framing import (
     smooth_cover,
 )
 from ride_visuals.scene3d.landmarks import LANDMARKS
-from ride_visuals.scene3d.places import DEFAULT_PLACES_CACHE_DIR, home_region, home_title
+from ride_visuals.scene3d.places import DEFAULT_PLACES_CACHE_DIR, home_region, home_title, kicker
 from ride_visuals.scene3d.spec import Look, SceneSpec
 from ride_visuals.scene3d.strata import PeriodMode, resolve_period
 from ride_visuals.scene3d.stretch import SceneRide
@@ -219,6 +219,7 @@ def build_ascent_spec(  # noqa: PLR0913, PLR0915
     offline: bool = False,
 ) -> SceneSpec:
     """Build the frame-by-frame spec for ``video ascent`` (home by default: where most of the climbing starts)."""
+    # Unlike the other scenes, a short ride still counts: it is the climbing that is drawn.
     ordered = sorted((r for r in rides if len(r.track.lon) >= 2 and r.track.length_m > 0), key=lambda r: r.start_date)
     gains = np.array([max(0.0, r.elevation_gain_m) for r in ordered])
     total = float(gains.sum())
@@ -510,9 +511,7 @@ def build_ascent_spec(  # noqa: PLR0913, PLR0915
         "heights": heights,
         "ruler": {"at": everest.height_m, "count": times} if ruled else None,
         "opening": {
-            "label": i18n.text(
-                "scene3d.strata.kicker", start=i18n.date(ordered[0].start_date), end=i18n.date(ordered[-1].start_date)
-            ),
+            "label": kicker(i18n, ordered[0].start_date, ordered[-1].start_date),
             "text": opening_text,
         },
         "counter": {"label": i18n.text("scene3d.ascent"), "unit": "m"},

@@ -19,11 +19,12 @@ import zipfile
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 
 import numpy as np
 
-from ride_visuals.i18n import sanitize_display_text
+from ride_visuals.i18n import Translator, sanitize_display_text
 from ride_visuals.scene3d.tiles import USER_AGENT
 from ride_visuals.scene3d.track import EARTH_RADIUS_M, haversine_m
 
@@ -246,7 +247,7 @@ def home_title(
     cache_dir: Path = DEFAULT_PLACES_CACHE_DIR,
     offline: bool = False,
 ) -> tuple[str, tuple[str, ...]]:
-    """Opening headline of a collection scene and its credited sources: the user's title, else home's town."""
+    """Opening headline of a scene and its credited sources: the user's title, else the town at ``home``."""
     if title_override is not None and title_override.strip():
         # The user's title replaces the place name: the gazetteer is neither consulted nor credited.
         return sanitize_display_text(title_override.strip()), ()
@@ -254,6 +255,11 @@ def home_title(
     if match is None:
         return fallback, ()
     return match.place.name, (match.place.source,) if match.place.source else ()
+
+
+def kicker(i18n: Translator, first: date | datetime, last: date | datetime) -> str:
+    """Opening label of a collection scene: the dates it spans."""
+    return i18n.text("scene3d.kicker", start=i18n.date(first), end=i18n.date(last))
 
 
 def _parse_lat_lon(text: str, option: str = "--toward") -> tuple[float, float] | None:

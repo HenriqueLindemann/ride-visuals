@@ -60,26 +60,24 @@ def _load_flyover_metadata(catalog_db: Path, activity_id: int) -> FlyoverMetadat
     from ride_visuals.scene3d.flyover import FlyoverMetadata
 
     if not catalog_db.exists():
-        return FlyoverMetadata(activity_id=activity_id)
+        return FlyoverMetadata()
     import duckdb
 
     with duckdb.connect(str(catalog_db), read_only=True) as connection:
         row: tuple[Any, ...] | None = connection.execute(
             """
-            SELECT name, start_date, distance_m, elevation_gain_m, moving_time_s
+            SELECT start_date, distance_m, elevation_gain_m, moving_time_s
             FROM activities WHERE id = ?
             """,
             [activity_id],
         ).fetchone()
     if row is None:
-        return FlyoverMetadata(activity_id=activity_id)
+        return FlyoverMetadata()
     return FlyoverMetadata(
-        activity_id=activity_id,
-        name=row[0],
-        start_date=row[1],
-        distance_m=float(row[2]) if row[2] is not None else None,
-        elevation_gain_m=float(row[3]) if row[3] is not None else None,
-        moving_time_s=float(row[4]) if row[4] is not None else None,
+        start_date=row[0],
+        distance_m=float(row[1]) if row[1] is not None else None,
+        elevation_gain_m=float(row[2]) if row[2] is not None else None,
+        moving_time_s=float(row[3]) if row[3] is not None else None,
     )
 
 
@@ -129,18 +127,16 @@ def _load_collection_rides(context: VideoCommandContext) -> list[SceneRide]:
         if not parquet_path.exists():
             continue
         track = RideTrack.from_parquet(parquet_path)
-        if len(track.lon) < 2 or track.length_m < 100.0:
-            continue
-        rides.append(
-            SceneRide(
-                activity_id=int(act_id),
-                start_date=start_date,
-                track=track,
-                distance_m=float(distance_m or track.length_m),
-                elevation_gain_m=float(elevation_gain_m or 0.0),
-                moving_time_s=float(moving_time_s or 0.0),
-            )
+        ride = SceneRide(
+            activity_id=int(act_id),
+            start_date=start_date,
+            track=track,
+            distance_m=float(distance_m or track.length_m),
+            elevation_gain_m=float(elevation_gain_m or 0.0),
+            moving_time_s=float(moving_time_s or 0.0),
         )
+        if ride.usable:
+            rides.append(ride)
     if not rides:
         raise ValueError("No valid rides found for the selected scope")
     return rides

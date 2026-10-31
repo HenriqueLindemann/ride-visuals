@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ride_visuals.i18n import DEFAULT_LOCALE, Translator, sanitize_display_text
+from ride_visuals.i18n import DEFAULT_LOCALE, Translator
 from ride_visuals.scene3d.camera import (
     CURTAIN_S,
     MAX_BEARING_RATE_DEG_S,
@@ -38,7 +38,7 @@ from ride_visuals.scene3d.framing import (
     visible_bearing_offset,
     zoom_to_fill,
 )
-from ride_visuals.scene3d.places import DEFAULT_PLACES_CACHE_DIR, nearest_place
+from ride_visuals.scene3d.places import DEFAULT_PLACES_CACHE_DIR, home_title
 from ride_visuals.scene3d.spec import Look, SceneSpec
 from ride_visuals.scene3d.terrain import DemSampler
 from ride_visuals.scene3d.track import (
@@ -130,10 +130,8 @@ OPENING_ZOOM_DROP = 1.5
 
 @dataclass(frozen=True)
 class FlyoverMetadata:
-    """Catalog or stream metadata for the activity being flown."""
+    """Catalog metadata for the activity being flown."""
 
-    activity_id: int = 0
-    name: str | None = None
     start_date: date | datetime | str | None = None
     distance_m: float | None = None
     elevation_gain_m: float | None = None
@@ -172,7 +170,7 @@ def _format_date(raw: date | datetime | str | None, i18n: Translator) -> str | N
         return text[:10]
 
 
-def _format_hours(seconds: float, i18n: Translator) -> tuple[str, str]:
+def _format_hours(seconds: float) -> tuple[str, str]:
     """Moving time as "54 min" under an hour, else "6:36 h"."""
     minutes = max(1, int(round(seconds / 60.0)))
     if minutes < 60:
@@ -306,7 +304,7 @@ def _hero_view(
     if ground_xy is None:
         candidates = candidates[:1]
     n = len(candidates)
-    box = _Layout.for_frame(width, height).hero_box(width, height)
+    box = _Layout.for_frame(width, height).hero_box(height)
     bearings = np.array([(climb_dir + side * angle) % 360.0 for side, angle, _ in candidates])
     pitches = np.array([pitch for _, _, pitch in candidates])
     zooms = np.array([
@@ -394,7 +392,7 @@ class _Layout:
             trace=(0.5 * (width - trace_w), trace_y, 0.5 * (width + trace_w), trace_y + LAYOUT_1080["trace_h"] * text),
         )
 
-    def hero_box(self, width: int, height: int) -> tuple[float, float, float, float]:
+    def hero_box(self, height: int) -> tuple[float, float, float, float]:
         """Where the hero climb sits (fractions of the frame): under the climb trace."""
         top = self.trace[3] / height + 0.04
         return (HERO_BOX_X[0], top, HERO_BOX_X[1], HERO_BOX_BOTTOM)
@@ -958,23 +956,13 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         )
 
     # Opening headline: explicit --title > nearest place (<= 30 km) > distance fallback.
-    extra_sources: list[str] = []
-    if title_override is not None and title_override.strip():
-        headline = sanitize_display_text(title_override.strip())
-    else:
-        near = nearest_place(
-            anchor_lon,
-            anchor_lat,
-            max_distance_km=30.0,
-            cache_dir=places_cache_dir,
-            offline=offline,
-        )
-        if near is not None:
-            headline = near.place.name
-            if near.place.source:
-                extra_sources.append(near.place.source)
-        else:
-            headline = f"{i18n.number(total_km, 1)} km"
+    headline, extra_sources = home_title(
+        (anchor_lon, anchor_lat),
+        title_override,
+        f"{i18n.number(total_km, 1)} km",
+        cache_dir=places_cache_dir,
+        offline=offline,
+    )
 
     # Normalized profile (~600 samples) with a minimum 60 m vertical scale so flat rides stay calm.
     prof_grid = np.linspace(0.0, total_m, 600)
@@ -993,7 +981,7 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         if len(track.elapsed)
         else total_m / 7.5
     )
-    hours_val, hours_unit = _format_hours(moving_s, i18n)
+    hours_val, hours_unit = _format_hours(moving_s)
 
     story = {
         "title": {
@@ -1043,5 +1031,5 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
         tracks=[track.encode()],
         story=story,
         credits_on_screen=credits_on_screen,
-        extra_sources=tuple(extra_sources),
+        extra_sources=extra_sources,
     )
