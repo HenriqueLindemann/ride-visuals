@@ -3,6 +3,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import {useEffect, useRef, useState} from 'react';
 import {continueRender, delayRender, staticFile} from 'remotion';
 import type {SceneSpec} from '../schema';
+import {applyDrape, type DrapeState, drapeLoaded, noDrape, type RouteDrape} from './drape';
 import {type Camera, makeProjector, type Projector} from './projector';
 import {buildStyle, contourPaint, contourSource, hillshadePaint, satelliteMixPaint} from './style';
 import {smootherstep, span} from './ease';
@@ -48,6 +49,8 @@ type Props = {
   camera: Camera;
   width: number;
   height: number;
+  /** A route the map draws itself, draped on the relief (see drape.ts). */
+  route?: RouteDrape | null;
   onProjector: (projector: Projector) => void;
 };
 
@@ -59,12 +62,13 @@ type Applied = {globe: boolean | null; terrain: number; opacity: number; contour
  * wait until every tile is loaded and painted, then hand the overlays a
  * projector built from the exact matrix of that paint.
  */
-export const MapStage = ({spec, frame, camera, width, height, onProjector}: Props) => {
+export const MapStage = ({spec, frame, camera, width, height, route = null, onProjector}: Props) => {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const matrixRef = useRef<Float64Array | null>(null);
   const applied = useRef<Applied>({globe: null, terrain: -1, opacity: -1, contours: -1, satellite: -1, shade: -1, buildings: 0, city: false, levels: 0});
   const lodRef = useRef<TileLod | null>(null);
+  const drapeRef = useRef<DrapeState>(noDrape());
   const paintedRef = useRef(false);
   const [ready, setReady] = useState(false);
   const [initHandle] = useState(() => delayRender('map init', {timeoutInMilliseconds: MAP_TIMEOUT_MS}));
@@ -128,10 +132,11 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
     if (!map || !ready) return;
     const handle = delayRender(`map frame ${frame}`, {timeoutInMilliseconds: MAP_TIMEOUT_MS});
     applyState(map, spec, camera, applied.current, lodRef.current!);
+    applyDrape(map, route, drapeRef.current);
     if (camera.mapOpacity <= 0 && !camera.globe && paintedRef.current) {
       // Nothing of the map shows: no paint and no tiles to wait for. The
       // overlays project with this camera's own matrix over the last paint.
-      onProjector(makeProjector(map, camera, frame, cameraMatrix(map, camera), width, height, false));
+      onProjector(makeProjector(map, camera, frame, cameraMatrix(map, camera), width, height));
       continueRender(handle);
       return;
     }
@@ -139,7 +144,7 @@ export const MapStage = ({spec, frame, camera, width, height, onProjector}: Prop
     let done = false;
     let rendered = false;
     let poll: ReturnType<typeof setTimeout> | undefined;
-    const settled = () => map.isStyleLoaded() && map.areTilesLoaded() && matrixRef.current !== null;
+    const settled = () => map.isStyleLoaded() && map.areTilesLoaded() && drapeLoaded(map) && matrixRef.current !== null;
     const finish = () => {
       if (done) return;
       done = true;

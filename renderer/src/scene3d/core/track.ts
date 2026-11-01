@@ -163,3 +163,12 @@ export function extentUpTo(track: Track, dist: number): [number, number, number,
   const lat = track.lat[i] + (track.lat[j] - track.lat[i]) * f;
   return [Math.min(e.lon0[i], lon), Math.min(e.lat0[i], lat), Math.max(e.lon1[i], lon), Math.max(e.lat1[i], lat)];
 }
+
+/** [lon, lat] of every vertex of a track's first `dist` metres, ending exactly at `dist`. */
+export function lngLatsUpTo(track: Track, dist: number): [number, number][] {
+  const end = pointAtDistance(track, Math.max(0, Math.min(track.length, dist)));
+  const out: [number, number][] = [];
+  for (let i = 0; i <= end.i; i++) out.push([track.lon[i], track.lat[i]]);
+  if (end.f > 0 || out.length < 2) out.push([end.lon, end.lat]);
+  return out;
+}

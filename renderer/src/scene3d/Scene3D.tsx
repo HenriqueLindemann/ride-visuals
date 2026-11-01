@@ -8,7 +8,7 @@ import type {Camera, Projector} from './core/projector';
 import {decodeTrack, type Track} from './core/track';
 import {FONT_STACK, INK, Typography} from './core/Typography';
 import {type SceneInput, type SceneSpec, sceneSpecSchema} from './schema';
-import {runScore, type ScoreOutput} from './scores';
+import {runDrape, runScore, type ScoreOutput} from './scores';
 
 const LOAD_TIMEOUT_MS = 120_000;
 
@@ -50,6 +50,15 @@ function loadFont(): Promise<void> {
       document.fonts.add(face);
     });
   return fontReady;
+}
+
+/** A spec's channels at a frame, by name. */
+function channelsAt(spec: SceneSpec, frame: number) {
+  return (name: string) => {
+    const values = spec.channels[name];
+    if (!values) throw new Error(`Missing channel: ${name}`);
+    return values[Math.max(0, Math.min(values.length - 1, frame))];
+  };
 }
 
 function cameraAt(spec: SceneSpec, frame: number): Camera {
@@ -111,19 +120,18 @@ export const Scene3D = ({specUrl, width, height}: SceneInput) => {
   const camera = useMemo(() => (scene ? cameraAt(scene.spec, frame) : null), [scene, frame]);
   const scale = Math.min(width, height) / 1080;
   const textScale = textScaleFor(width, height);
+  const route = useMemo(
+    () => (scene ? runDrape({spec: scene.spec, tracks: scene.tracks, frame, channel: channelsAt(scene.spec, frame), scale}) : null),
+    [scene, frame, scale],
+  );
 
   const output: ScoreOutput | null = useMemo(() => {
     if (!scene || !projector || projector.frame !== frame) return null;
-    const channels = scene.spec.channels;
     return runScore({
       spec: scene.spec,
       tracks: scene.tracks,
       frame,
-      channel: (name) => {
-        const values = channels[name];
-        if (!values) throw new Error(`Missing channel: ${name}`);
-        return values[Math.max(0, Math.min(values.length - 1, frame))];
-      },
+      channel: channelsAt(scene.spec, frame),
       projector,
       width,
       height,
@@ -156,7 +164,7 @@ export const Scene3D = ({specUrl, width, height}: SceneInput) => {
   return (
     <AbsoluteFill style={{background: INK.ink, overflow: 'hidden', fontFamily: FONT_STACK}}>
       {scene && camera ? (
-        <MapStage spec={scene.spec} frame={frame} camera={camera} width={width} height={height} onProjector={setProjector} />
+        <MapStage spec={scene.spec} frame={frame} camera={camera} width={width} height={height} route={route} onProjector={setProjector} />
       ) : null}
       {output?.scrim ? <Scrim {...output.scrim} /> : null}
       <canvas ref={canvasRef} style={{position: 'absolute', left: 0, top: 0, width, height}} />

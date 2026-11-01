@@ -16,8 +16,8 @@ The director knows the whole future, so the camera is solved offline:
   never dives in faster than it can come back out).
 * **Pitch follows the local relief:** flat land is looked at more from above,
   where an oblique view would be empty; hills get a lower, more dramatic angle.
-* **Visibility:** when a ridge would hide the head or the road ahead, the
-  bearing swings to the side with a clear line of sight.
+* **Visibility:** when a ridge would hide the head, the trail just ridden or
+  the road ahead, the bearing swings to the side with a clear line of sight.
 """
 
 from __future__ import annotations
@@ -77,6 +77,8 @@ class ChaseCamera:
     bearing: np.ndarray
     #: Route relief (m) inside each frame's look-ahead window.
     local_relief: np.ndarray
+    #: Distance (m) along the route each frame frames up to.
+    ahead: np.ndarray
 
 
 def _head_at(t: np.ndarray, head: np.ndarray, offset_s: float) -> np.ndarray:
@@ -169,11 +171,11 @@ def occlusion(
     steps: int = 24,
     ceiling: float | None = None,
     near_m: float = 90.0,
+    weights: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Fraction of targets whose line of sight dips under the ground.
+    """Fraction of targets (by ``weights``) whose line of sight dips under the ground.
 
-    The same test the player applies (``inAir`` in projector.ts): samples
-    crowd towards the target, where the ridges that matter usually are, and
+    Samples crowd towards the target, where the ridges that matter usually are, and
     the last ``near_m`` of each ray are skipped so a road lying on a slope
     does not hide itself.
     """
@@ -190,7 +192,7 @@ def occlusion(
     if low.any():
         g[low] = np.nan_to_num(ground(px[low], py[low]), nan=-1e9)
     hidden = (g > pz + 2.0).any(axis=2)
-    return hidden.mean(axis=1)
+    return np.average(hidden, axis=1, weights=weights)
 
 
 def visible_bearing_offset(
@@ -208,8 +210,9 @@ def visible_bearing_offset(
     ground_xy: Callable[[np.ndarray, np.ndarray], np.ndarray],
     centre_z: np.ndarray,
     ceiling_m: float | None = None,
+    weights: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Per-frame bearing offset (deg) that best keeps the targets in sight."""
+    """Per-frame bearing offset (deg) that best keeps the targets (by ``weights``) in sight."""
     n = len(bearing)
     best = np.zeros(n)
     best_cost = np.full(n, np.inf)
@@ -225,6 +228,7 @@ def visible_bearing_offset(
             targets_z * exaggeration,
             lambda x, y: ground_xy(x, y) * exaggeration,
             ceiling=None if ceiling_m is None else ceiling_m * exaggeration,
+            weights=weights,
         )
         cost = occ + 0.004 * abs(off)
         better = cost < best_cost - 1e-6
@@ -286,7 +290,7 @@ def solve_chase(
     b = np.radians(bearing)
     cx = hx + np.sin(b) * lead
     cy = hy + np.cos(b) * lead
-    return ChaseCamera(cx=cx, cy=cy, zoom=zoom, pitch=pitch, bearing=bearing, local_relief=local_relief)
+    return ChaseCamera(cx=cx, cy=cy, zoom=zoom, pitch=pitch, bearing=bearing, local_relief=local_relief, ahead=ahead)
 
 
 def rate_limited_floor(values: np.ndarray, max_step: float) -> np.ndarray:

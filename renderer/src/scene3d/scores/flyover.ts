@@ -1,3 +1,4 @@
+import type {RouteDrape} from '../core/drape';
 import type {DrawOp, Knockout} from '../core/draw';
 import {clamp01, smootherstep, span} from '../core/ease';
 import {mercX, mercY} from '../core/geo';
@@ -5,9 +6,29 @@ import {headline, LABEL_LINE, numberFormat, totalsGrid, TYPE} from '../core/layo
 import {pointAtDistance} from '../core/track';
 import {INK, type TextItem} from '../core/Typography';
 import type {FlyoverClimb, FlyoverStory} from '../stories';
-import type {ScoreContext, ScoreOutput} from './index';
+import type {DrapeContext, ScoreContext, ScoreOutput} from './index';
 
 const scratch = new Float64Array(3);
+
+/** The ridden route's colour, alpha and width (px at a 1080 px short side). */
+const ROUTE = {rgb: INK.accentRGB, alpha: 0.96, width: 2.8};
+
+/**
+ * Shares of the unfold over which its line comes in over the draped route,
+ * and the route then leaves the land: the line is whole before the route
+ * goes, and the route is gone before the line has moved (`flatten` < 1%).
+ */
+const HANDOVER = {in: [0, 0.02], out: [0.01, 0.045]} as const;
+
+/**
+ * The map draws the ride itself, draped on the relief, so the land hides it
+ * where it would hide a road; when the ride unfolds, it hands over to the
+ * line that rises into the profile.
+ */
+export function flyoverDrape({tracks, channel, scale}: DrapeContext<'flyover'>): RouteDrape | null {
+  const stay = 1 - smootherstep(span(channel('unfold'), ...HANDOVER.out));
+  return {track: tracks[0], to: channel('head'), rgb: ROUTE.rgb, alpha: ROUTE.alpha * stay, width: ROUTE.width * scale};
+}
 
 export function flyoverScore({spec, tracks, channel, projector, width, height, scale, textScale}: ScoreContext<'flyover'>): ScoreOutput {
   const {story} = spec;
@@ -40,25 +61,16 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
         kind: 'dot',
         at: [start.lon, start.lat],
         radius: 5 * scale,
-        rgb: INK.accentRGB,
+        rgb: ROUTE.rgb,
         alpha: headDot,
         lift: routeLift,
-        occlude: hasRelief,
+        relief: hasRelief,
       });
     }
-    if (head > 1) {
-      ops.push({
-        kind: 'track',
-        track,
-        from: 0,
-        to: head,
-        rgb: INK.accentRGB,
-        alpha: 0.96,
-        width: 2.8 * scale,
-        head: headDot,
-        lift: routeLift,
-        occlude: hasRelief,
-      });
+    if (head > 1 && headDot > 0.003) {
+      // The map draws the line (flyoverDrape); only its head is marked here.
+      const at = pointAtDistance(track, head);
+      ops.push({kind: 'dot', at: [at.lon, at.lat], radius: 5, rgb: ROUTE.rgb, alpha: headDot, lift: routeLift, relief: hasRelief, marker: true});
     }
   }
 
@@ -153,10 +165,8 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
     const n = prof.length;
     const kLon = 111_320 * Math.max(0.05, Math.cos((u.center[1] * Math.PI) / 180));
     const kLat = 110_540;
-    // The land hides the route as far as it is still there: its sightline
-    // says how much, and the dissolving land (its opacity) how much of that stands.
-    const land = projector.camera.mapOpacity;
-    const hidden = (mx: number, my: number, z: number) => land > 0.02 && projector.sight !== undefined && (1 - projector.sight(mx, my, z)) * land >= 0.5;
+    // This line takes over from the draped route before it rises (HANDOVER).
+    const handover = smootherstep(span(unfold, ...HANDOVER.in));
     const planeAt = (f: number, z: number, out: Float64Array) => {
       const off = (f - 0.5) * u.lineM;
       return projector.merc(mercX(u.center[0] + (off * u.right[0]) / kLon), mercY(u.center[1] + (off * u.right[1]) / kLat), z, out);
@@ -187,8 +197,7 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
       const mx = mercX(u.center[0] + ex / kLon);
       const my = mercY(u.center[1] + ey / kLat);
       const z = z0 + (u.baseZ + prof[i] * u.altRange * u.vertical - z0) * inPlane;
-      const visible = projector.merc(mx, my, z, scratch) && !hidden(mx, my, z);
-      if (!visible) {
+      if (!projector.merc(mx, my, z, scratch)) {
         if (run.length >= 4) runs.push(run);
         run = [];
         continue;
@@ -248,8 +257,8 @@ export function flyoverScore({spec, tracks, channel, projector, width, height, s
       ops.push({
         kind: 'screen-path',
         xy,
-        rgb: INK.accentRGB,
-        alpha: 0.96,
+        rgb: ROUTE.rgb,
+        alpha: ROUTE.alpha * handover,
         width: 2.5 * scale,
         fillTo: whole && chart > 0.004 ? baseY : undefined,
         fillAlpha: 0.18 * chart,

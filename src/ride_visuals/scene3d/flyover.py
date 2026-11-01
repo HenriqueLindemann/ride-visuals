@@ -80,6 +80,11 @@ HERO_ANGLE_COST = 0.002
 HERO_MIRROR_COST = 0.05
 #: Where the road is drawn above the relief (ROUTE_LIFT_M in flyover.ts).
 ROUTE_LIFT_M = 4.0
+#: What the chase keeps in sight, in shares of the road it frames ahead of the
+#: head (negative: the trail behind it), and how much each counts: the head
+#: most, then the trail just ridden, which is drawn, and the road it rides into.
+SIGHT_SHARES = (-2.0, -1.0, -0.4, 0.0, 0.4, 1.0)
+SIGHT_WEIGHTS = (1.0, 1.0, 1.0, 2.0, 1.0, 0.5)
 
 #: Text, and what is sized by it, is set this much larger in portrait (mirrors
 #: PORTRAIT_TEXT in renderer/src/scene3d/core/layout.ts).
@@ -709,15 +714,16 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
     # Nothing on the land around this ride stands higher than this (m, unscaled).
     relief_ceiling = float(prof_alt.max()) + 900.0
 
-    # Swing the bearing towards the side where the relief hides the least road.
+    # Swing the bearing towards the side where the relief hides the least of the ride.
     chase_bearing = chase.bearing.copy()
     if sampler is not None:
         stride = max(1, fps // 4)
         keys = np.arange(0, frames, stride)
-        ahead_pts = np.minimum(total_m, head[keys, None] + np.array([0.0, 250.0, 600.0, 1100.0])[None, :])
-        tx = np.interp(ahead_pts, prof_d, grid_x)
-        ty = np.interp(ahead_pts, prof_d, grid_y)
-        tz = np.interp(ahead_pts, prof_d, prof_alt) + 3.0
+        reach = (chase.ahead - head)[keys, None]
+        sight_pts = np.clip(head[keys, None] + reach * np.array(SIGHT_SHARES)[None, :], 0.0, total_m)
+        tx = np.interp(sight_pts, prof_d, grid_x)
+        ty = np.interp(sight_pts, prof_d, grid_y)
+        tz = np.interp(sight_pts, prof_d, prof_alt) + ROUTE_LIFT_M
         centre_ground = np.nan_to_num(ground_xy(chase.cx[keys], chase.cy[keys]), nan=float(np.median(prof_alt)))
         offset_keys = visible_bearing_offset(
             chase.bearing[keys],
@@ -734,6 +740,7 @@ def build_flyover_spec(  # noqa: PLR0913, PLR0915
             lambda x, y: np.nan_to_num(ground_xy(x, y), nan=-1e4),
             centre_ground * exaggeration,
             ceiling_m=relief_ceiling,
+            weights=np.array(SIGHT_WEIGHTS),
         )
         offset = gaussian_smooth(np.interp(np.arange(frames), keys, offset_keys), 1.1 * fps)
         chase_bearing = (chase.bearing + offset * riding) % 360.0

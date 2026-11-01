@@ -1,4 +1,3 @@
-import {smootherstep, span} from './ease';
 import {EARTH_CIRCUMFERENCE, type LngLat, mercX, mercY, unmercY} from './geo';
 import type {Projector} from './projector';
 import {indexAtDistance, lodFor, type Track} from './track';
@@ -23,11 +22,9 @@ export type TrackOp = {
   lift?: number;
   /** Lifted further the nearer it runs to a peak (see Tent). */
   tent?: Tent;
-  /** Sit on the rendered relief and hide what the relief hides from the camera. */
-  occlude?: boolean;
   /** Cut the line at this lifted polygon (e.g. the plate it lies on). */
   clip?: readonly LngLat[];
-  /** Stroke it this many times, each over a shorter run to the `to` end: brighter towards the head (not with `occlude`). */
+  /** Stroke it this many times, each over a shorter run to the `to` end: brighter towards the head. */
   ramp?: number;
 };
 
@@ -72,8 +69,8 @@ export type ScreenPathOp = {
 /**
  * A vertical hairline at a ground point between two absolute altitudes
  * (unscaled metres): a cross-section of the land under a climb. With 3D
- * terrain it is scaled by the exaggeration, its top snaps to the rendered
- * relief, and hills in front of it hide it like any solid thing.
+ * terrain it is scaled by the exaggeration and its top snaps to the rendered
+ * relief.
  */
 export type StemOp = {
   kind: 'stem';
@@ -87,7 +84,8 @@ export type StemOp = {
   fade?: boolean;
 };
 
-export type DotOp = {kind: 'dot'; at: LngLat; lift?: number; radius: number; rgb: RGB; alpha: number; occlude?: boolean};
+/** A disc at a point, `lift` metres up (on the rendered relief with `relief`); `marker` draws a track's head marker instead. */
+export type DotOp = {kind: 'dot'; at: LngLat; lift?: number; radius: number; rgb: RGB; alpha: number; relief?: boolean; marker?: boolean};
 
 /** An expanding ring marking an arrival (age 0..1). */
 export type PulseOp = {kind: 'pulse'; at: LngLat; age: number; radius: number; rgb: RGB; alpha: number};
@@ -144,10 +142,10 @@ export type HorizonOp = {kind: 'horizon'; alpha: number; limb: number; air?: num
 
 export type DrawOp = TrackOp | PathOp | ScreenPathOp | StemOp | DotOp | PulseOp | PlateOp | SlicesOp | PlaneOp | HorizonOp;
 
-const tmp = new Float64Array(4);
+const tmp = new Float64Array(3);
 
-/** Numbers per traced vertex: x, y, depth, how visible (0..1). */
-const VERTEX = 4;
+/** Numbers per traced vertex: x, y. */
+const VERTEX = 2;
 
 export const mixRGB = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
@@ -156,7 +154,7 @@ export const rgba = (c: RGB, a: number) => `rgba(${c[0]},${c[1]},${c[2]},${Math.
 /** Points closer than this (px) to the last one add nothing but work. */
 const MIN_STEP_PX = 0.35;
 
-/** A traced line: its path, and with `keep` its vertices as flat (x, y, depth) with NaN where the line breaks. */
+/** A traced line: its path, its head, and with splits its vertices as flat (x, y) with NaN where the line breaks. */
 type Traced = {path: Path2D; head: [number, number] | null; any: boolean; pts: number[] | null; cuts: number[]};
 
 /** Traces a slice of a track; `splits` (distances) mark vertices in `cuts`, for runs that start there. */
@@ -176,20 +174,16 @@ function traceTrack(p: Projector, op: TrackOp, splits: number[] = []): Traced {
   const cy = tent ? mercY(tent.center[1]) : 0;
   const unit = tent ? mercMeters(tent.center[1]) : 0;
   const liftAt = (mx: number, my: number) => (tent ? base + tent.height * Math.exp(-(Math.hypot(mx - cx, my - cy) * unit) / tent.width) : base);
-  const relief = op.occlude ? p.onRelief : undefined;
-  // With occlusion, keep (x, y, depth, visibility) per vertex for perspective
-  // tapering and fading behind ridges; NaN marks a break where the relief hides the line.
-  const pts: number[] | null = relief || splits.length ? [] : null;
+  // Keep (x, y) per vertex for runs that start at a split; NaN marks a break
+  // where the line cannot be projected.
+  const pts: number[] | null = splits.length ? [] : null;
   let pen = false;
   let any = false;
   let lastX = 0;
   let lastY = 0;
   const plot = (mx: number, my: number) => {
-    const lift = liftAt(mx, my);
-    tmp[3] = 1;
-    const ok = relief ? relief(mx, my, lift, tmp) !== 0 && tmp[3] > 0 : p.merc(mx, my, lift, tmp);
-    if (!ok) {
-      if (pen && pts) pts.push(NaN, NaN, NaN, NaN);
+    if (!p.merc(mx, my, liftAt(mx, my), tmp)) {
+      if (pen && pts) pts.push(NaN, NaN);
       pen = false;
       return;
     }
@@ -203,7 +197,7 @@ function traceTrack(p: Projector, op: TrackOp, splits: number[] = []): Traced {
     } else {
       return;
     }
-    pts?.push(x, y, tmp[2], tmp[3]);
+    pts?.push(x, y);
     lastX = x;
     lastY = y;
     any = true;
@@ -250,13 +244,10 @@ function traceTrack(p: Projector, op: TrackOp, splits: number[] = []): Traced {
   cutUpTo(to);
   // Always land exactly on the head, even within the dedupe threshold.
   const [hx, hy] = at(i1, to);
-  const lift = liftAt(hx, hy);
-  tmp[3] = 1;
-  const ok = relief ? relief(hx, hy, lift, tmp) === 1 : p.merc(hx, hy, lift, tmp);
-  const head: [number, number] | null = ok ? [tmp[0], tmp[1]] : null;
+  const head: [number, number] | null = p.merc(hx, hy, liftAt(hx, hy), tmp) ? [tmp[0], tmp[1]] : null;
   if (head && pen) {
     path.lineTo(head[0], head[1]);
-    pts?.push(head[0], head[1], tmp[2], tmp[3]);
+    pts?.push(head[0], head[1]);
   }
   return {path, head, any, pts, cuts};
 }
@@ -276,112 +267,6 @@ function pathFrom(pts: number[], start: number): Path2D {
     }
   }
   return path;
-}
-
-/** Run lengths (px) between which a visible stretch fades in: shorter ones are not drawn, longer ones whole. */
-const RUN_FADE_PX: [number, number] = [8, 32];
-
-/** 0..1 for a visible stretch of this length, so slivers peeking over a ridge ease in and out rather than pop. */
-export const runFade = (len: number) => smootherstep(span(len, RUN_FADE_PX[0], RUN_FADE_PX[1]));
-
-/** Hidden stretches shorter than this (px between the visible ends) are not a ridge but depth noise, and are drawn through. */
-const GAP_BRIDGE_PX = 24;
-
-/** The traced vertices with every break narrower than `GAP_BRIDGE_PX` closed. */
-function bridgeGaps(pts: number[]): number[] {
-  const out: number[] = [];
-  for (let i = 0; i * VERTEX < pts.length; i++) {
-    const o = i * VERTEX;
-    if (Number.isNaN(pts[o]) && out.length && i + 1 < pts.length / VERTEX && !Number.isNaN(pts[o + VERTEX])) {
-      const last = out.length - VERTEX;
-      if (Math.hypot(pts[o + VERTEX] - out[last], pts[o + VERTEX + 1] - out[last + 1]) < GAP_BRIDGE_PX) continue;
-    }
-    for (let k = 0; k < VERTEX; k++) out.push(pts[o + k]);
-  }
-  return out;
-}
-
-/** Perspective factor bounds (1 at the depth of the map centre) and the steps between them that width and alpha follow. */
-const NEAR_MIN = 0.35;
-const NEAR_MAX = 1.9;
-const NEAR_LEVELS = 32;
-const nearAt = (level: number) => NEAR_MIN * (NEAR_MAX / NEAR_MIN) ** (level / (NEAR_LEVELS - 1));
-
-/** Steps of visibility (0..1) a line eases out by behind a ridge. */
-const SEEN_LEVELS = 8;
-
-/** Vertices stroked together as one piece of a run. */
-const TAPER_RUN = 4;
-
-/**
- * Strokes a traced line whose width follows perspective: full width at the
- * depth of the map centre, thicker near the eye, thinner and quieter towards
- * the horizon. Pieces of a like depth share one path and stroke, and the
- * dimmer ones go first, each clearing what it covers before it is drawn, so
- * where two meet the stronger one wins instead of doubling up. Short runs
- * (slivers over a ridge) fade by their length, and each piece by how visible
- * the relief leaves it; narrow breaks close.
- */
-function strokeTapered(layer: CanvasRenderingContext2D, traced: number[], width: number, refDepth: number) {
-  const pts = bridgeGaps(traced);
-  const n = pts.length / VERTEX;
-  const x = (i: number) => pts[i * VERTEX];
-  const y = (i: number) => pts[i * VERTEX + 1];
-  const pieces: {alpha: number; width: number; path: Path2D}[] = [];
-  for (let a = 0; a < n; ) {
-    if (Number.isNaN(x(a))) {
-      a++;
-      continue;
-    }
-    let b = a;
-    let len = 0;
-    while (b + 1 < n && !Number.isNaN(x(b + 1))) {
-      len += Math.hypot(x(b + 1) - x(b), y(b + 1) - y(b));
-      b++;
-    }
-    const fade = runFade(len);
-    if (fade > 0) {
-      // One path per (perspective level, visibility level) pair.
-      const levels = new Map<number, Path2D>();
-      let open = -1;
-      for (let k = a; k < b; k += TAPER_RUN) {
-        const end = Math.min(b, k + TAPER_RUN);
-        let depth = 0;
-        let seen = 0;
-        for (let i = k + 1; i <= end; i++) {
-          depth += pts[i * VERTEX + 2];
-          seen += pts[i * VERTEX + 3];
-        }
-        const near = Math.min(NEAR_MAX, Math.max(NEAR_MIN, refDepth / (depth / (end - k))));
-        const level = Math.round((Math.log(near / NEAR_MIN) / Math.log(NEAR_MAX / NEAR_MIN)) * (NEAR_LEVELS - 1));
-        const key = level * SEEN_LEVELS + Math.round((seen / (end - k)) * (SEEN_LEVELS - 1));
-        let path = levels.get(key);
-        if (!path) levels.set(key, (path = new Path2D()));
-        // A piece of the same kind as the last carries on its stroke, without a joint.
-        if (key !== open) path.moveTo(x(k), y(k));
-        for (let i = k + 1; i <= end; i++) path.lineTo(x(i), y(i));
-        open = key;
-      }
-      for (const [key, path] of levels) {
-        const near = nearAt(Math.floor(key / SEEN_LEVELS));
-        const seen = (key % SEEN_LEVELS) / (SEEN_LEVELS - 1);
-        if (seen > 0) pieces.push({alpha: Math.min(1, Math.max(0.4, near ** 0.7)) * fade * seen, width: width * near ** 0.9, path});
-      }
-    }
-    a = b + 1;
-  }
-  pieces.sort((x, y) => x.alpha - y.alpha);
-  for (const {alpha, width: w, path} of pieces) {
-    layer.lineWidth = w;
-    if (alpha < 1) {
-      layer.globalCompositeOperation = 'destination-out';
-      layer.globalAlpha = 1;
-      layer.stroke(path);
-      layer.globalCompositeOperation = 'source-over';
-    }
-    layer.globalAlpha = alpha;
-    layer.stroke(path);
-  }
 }
 
 /** Crisp position marker: an accent disc with a paper-white core, no halo. */
@@ -475,25 +360,11 @@ function drawTrack(ctx: CanvasRenderingContext2D, p: Projector, op: TrackOp) {
     ctx.restore();
     return;
   }
-  const ramp = op.ramp && op.ramp > 1 && !op.occlude ? op.ramp : 0;
+  const ramp = op.ramp && op.ramp > 1 ? op.ramp : 0;
   const from = Math.max(0, op.from);
   const splits = Array.from({length: Math.max(0, ramp - 1)}, (_, i) => from + (Math.min(op.track.length, op.to) - from) * ((i + 1) / ramp));
   const {path, head, any, pts, cuts} = traceTrack(p, op, splits);
-  if (any && op.occlude && pts) {
-    // Translucent runs would double up at their joints: draw them into a
-    // layer and composite it once at the op's alpha.
-    throughLayer(
-      ctx,
-      (layer) => {
-        layer.lineCap = 'round';
-        layer.lineJoin = 'round';
-        layer.strokeStyle = rgba(op.rgb, 1);
-        strokeTapered(layer, pts, op.width, p.centerDepth);
-        return boundsOf(pts, VERTEX, (op.width * NEAR_MAX ** 0.9) / 2 + 2);
-      },
-      {alpha: op.alpha},
-    );
-  } else if (any) {
+  if (any) {
     ctx.strokeStyle = rgba(op.rgb, op.alpha);
     ctx.lineWidth = op.width;
     ctx.stroke(path);
@@ -619,7 +490,7 @@ function drawScreenPath(ctx: CanvasRenderingContext2D, op: ScreenPathOp) {
   if (op.head) drawHead(ctx, op.xy[(n - 1) * 2], op.xy[(n - 1) * 2 + 1], op.rgb, op.head * Math.min(1, op.alpha * 1.4));
 }
 
-/** Vertical hairline; with terrain, the parts hidden by the relief are skipped. */
+/** Vertical hairline, a cut into the land: its top on the rendered relief. */
 function drawStem(ctx: CanvasRenderingContext2D, p: Projector, op: StemOp) {
   const mx = mercX(op.at[0]);
   const my = mercY(op.at[1]);
@@ -628,10 +499,9 @@ function drawStem(ctx: CanvasRenderingContext2D, p: Projector, op: StemOp) {
   const bottom = op.from * scale;
   if (top - bottom < 1) return;
   const out = new Float64Array(3);
-  const project = (z: number) => (p.inAir ? p.inAir(mx, my, z, out, 1e7) !== 0 : p.merc(mx, my, z, out));
-  if (!project(top)) return;
+  if (!p.merc(mx, my, top, out)) return;
   const [xTop, yTop] = [out[0], out[1]];
-  if (!project(bottom)) return;
+  if (!p.merc(mx, my, bottom, out)) return;
   const [xBottom, yBottom] = [out[0], out[1]];
   if (op.fade) {
     const gradient = ctx.createLinearGradient(xTop, yTop, xBottom, yBottom);
@@ -643,22 +513,8 @@ function drawStem(ctx: CanvasRenderingContext2D, p: Projector, op: StemOp) {
   }
   ctx.lineWidth = op.width;
   ctx.beginPath();
-  // The stem is a cut into the ground: ignore the relief right around it, but
-  // let ridges between it and the camera hide it.
-  const cutaway = (top - bottom) / scale + 80;
-  const steps = 12;
-  let pen = false;
-  for (let i = 0; i <= steps; i++) {
-    const z = top + ((bottom - top) * i) / steps;
-    const visible = p.inAir ? p.inAir(mx, my, z, out, cutaway) === 1 : p.merc(mx, my, z, out);
-    if (!visible) {
-      pen = false;
-      continue;
-    }
-    if (!pen) ctx.moveTo(out[0], out[1]);
-    else ctx.lineTo(out[0], out[1]);
-    pen = true;
-  }
+  ctx.moveTo(xTop, yTop);
+  ctx.lineTo(xBottom, yBottom);
   ctx.stroke();
 }
 
@@ -877,10 +733,14 @@ export function drawOps(ctx: CanvasRenderingContext2D, p: Projector, ops: DrawOp
     else if (op.kind === 'plane') drawPlane(ctx, p, op);
     else if (op.kind === 'horizon') drawHorizon(ctx, p, op);
     else if (op.kind === 'dot') {
-      const visible = op.occlude && p.onRelief
-        ? p.onRelief(mercX(op.at[0]), mercY(op.at[1]), op.lift ?? 0, tmp) === 1
-        : p.merc(mercX(op.at[0]), mercY(op.at[1]), op.lift ?? 0, tmp);
-      if (!visible) continue;
+      const mx = mercX(op.at[0]);
+      const my = mercY(op.at[1]);
+      const ground = op.relief && p.ground ? p.ground(mx, my) : 0;
+      if (!p.merc(mx, my, ground + (op.lift ?? 0), tmp)) continue;
+      if (op.marker) {
+        drawHead(ctx, tmp[0], tmp[1], op.rgb, op.alpha);
+        continue;
+      }
       ctx.fillStyle = rgba(op.rgb, op.alpha);
       ctx.beginPath();
       ctx.arc(tmp[0], tmp[1], op.radius, 0, Math.PI * 2);
@@ -890,8 +750,7 @@ export function drawOps(ctx: CanvasRenderingContext2D, p: Projector, ops: DrawOp
       // Ring around the summit on the relief, not at sea level under it.
       const mx = mercX(op.at[0]);
       const my = mercY(op.at[1]);
-      const visible = p.onRelief ? p.onRelief(mx, my, 0, tmp) === 1 : p.merc(mx, my, 0, tmp);
-      if (!visible) continue;
+      if (!p.merc(mx, my, p.ground ? p.ground(mx, my) : 0, tmp)) continue;
       const x = tmp[0];
       const y = tmp[1];
       const grown = 1 - (1 - op.age) ** 3;

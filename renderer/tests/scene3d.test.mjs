@@ -43,11 +43,10 @@ const {clamp01, envelope, glide, smootherstep, span} = await import('../src/scen
 const {destination, greatCircle, groundResolution, mercX, mercY, metersPerPixel, unmercX, unmercY} = await import(
   '../src/scene3d/core/geo.ts'
 );
-const {decodeTrack, extentUpTo, indexAtDistance, lodFor, pointAtDistance} = await import('../src/scene3d/core/track.ts');
+const {decodeTrack, extentUpTo, indexAtDistance, lngLatsUpTo, lodFor, pointAtDistance} = await import('../src/scene3d/core/track.ts');
 const {frameLayout, numberFormat, PORTRAIT_TEXT, spread} = await import('../src/scene3d/core/layout.ts');
-const {runFade} = await import('../src/scene3d/core/draw.ts');
 const {sceneSpecSchema} = await import('../src/scene3d/schema.ts');
-const {scores} = await import('../src/scene3d/scores/index.ts');
+const {runDrape, scores} = await import('../src/scene3d/scores/index.ts');
 const {plateAt, ridesAt} = await import('../src/scene3d/scores/strata.ts');
 
 test('ease curves preserve endpoints and monotonicity', () => {
@@ -61,16 +60,29 @@ test('ease curves preserve endpoints and monotonicity', () => {
   assert.equal(envelope(5, 2, 8, 1), 1);
 });
 
-test('visible runs fade in with their length instead of popping', () => {
-  assert.equal(runFade(0), 0);
-  assert.equal(runFade(8), 0);
-  assert.equal(runFade(32), 1);
-  assert.equal(runFade(500), 1);
-  let last = 0;
-  for (let len = 8; len <= 32; len += 0.5) {
-    assert.ok(runFade(len) >= last, `fade falls at ${len} px`);
-    last = runFade(len);
-  }
+test('a draped route ends exactly at the head, between vertices too', () => {
+  // Ten 100 m steps east along a parallel.
+  const track = decodeTrack({x: [8_000_000, ...Array(10).fill(1_380)], y: [49_000_000, ...Array(10).fill(0)], d: [0, ...Array(10).fill(1_000)]});
+  const mid = lngLatsUpTo(track, 250);
+  assert.equal(mid.length, 4);
+  const end = pointAtDistance(track, 250);
+  assert.deepEqual(mid.at(-1), [end.lon, end.lat]);
+  // On a vertex, no repeated point; past the end, the whole ride.
+  assert.equal(lngLatsUpTo(track, 300).length, 4);
+  assert.equal(lngLatsUpTo(track, 5_000).length, 11);
+  assert.ok(lngLatsUpTo(track, 0).length >= 2);
+});
+
+test('the draped route leaves the land before the unfolding line moves', () => {
+  const track = decodeTrack({x: [8_000_000, 1_380], y: [49_000_000, 0], d: [0, 1_000]});
+  const spec = {kind: 'flyover'};
+  const at = (unfold) => runDrape({spec, tracks: [track], frame: 0, channel: (name) => (name === 'unfold' ? unfold : 100), scale: 1});
+  assert.equal(at(0).alpha, at(0.01).alpha);
+  assert.ok(at(0.03).alpha < at(0.015).alpha);
+  // The line starts moving with flatten = smootherstep(unfold / 0.45): the route is gone while it is under 1%.
+  assert.ok(smootherstep(0.045 / 0.45) < 0.01);
+  assert.ok(at(0.045).alpha < 1e-6);
+  assert.equal(at(0).to, 100);
 });
 
 test('number formats are built once and frame margins round to whole px', () => {
